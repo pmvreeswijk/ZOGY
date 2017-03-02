@@ -16,4 +16,4 @@ It makes grateful use of the following programs that first need to be installed:
  - pyfftw to speed up the many FFTs performed
  - the other modules imported at the top (e.g. astropy, matplotlib, etc.)
  
-Warning: this module has only been tested on a couple of KMTNet images and is designed to be included in the MeerLICHT and BlackGEM pipelines. However, the hope is to make it more general so any two images can be supplied to perform optimal subtraction on.
+Warning: this module is still being developed and has so far only been tested on a couple of KMTNet images. It is designed specifically to be included in the MeerLICHT and BlackGEM pipelines. However, the hope is to make it more general in the near future so any two images can be supplied to perform optimal subtraction on.
