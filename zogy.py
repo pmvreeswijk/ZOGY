@@ -16,7 +16,7 @@ import time
 import pyfftw
 import pyfftw.interfaces.numpy_fft as fft
 pyfftw.interfaces.cache.enable()
-#pyfftw.interfaces.cache.set_keepalive_time(1.)
+pyfftw.interfaces.cache.set_keepalive_time(1.)
 
 from photutils import CircularAperture
 
@@ -92,10 +92,13 @@ def optimal_subtraction(new_fits, ref_fits):
     - SWarp
     - PSFex
     - ds9
+    - sip_to_pv module from David Shupe: 
+      https://github.com/stargaser/sip_tpv/blob/master/sip_to_pv.py
     - pyfftw to speed up the many FFTs performed
     - the other modules imported at the top
  
-    Written by Paul Vreeswijk (pmvreeswijk@gmail.com)
+    Written by Paul Vreeswijk (pmvreeswijk@gmail.com) with vital input
+    from Barak Zackay and Eran Ofek.
 
     """
 
@@ -179,11 +182,11 @@ def optimal_subtraction(new_fits, ref_fits):
     nsubs = centers.shape[0]
     if verbose:
         print 'nsubs', nsubs
-        for i in range(nsubs):
-            print 'i', i
-            print 'cuts_ima[i]', cuts_ima[i]
-            print 'cuts_ima_fft[i]', cuts_ima_fft[i]
-            print 'cuts_fft[i]', cuts_fft[i]
+        #for i in range(nsubs):
+        #    print 'i', i
+        #    print 'cuts_ima[i]', cuts_ima[i]
+        #    print 'cuts_ima_fft[i]', cuts_ima_fft[i]
+        #    print 'cuts_fft[i]', cuts_fft[i]
             
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # ref, psf and background images
@@ -740,13 +743,13 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm):
             #result = show_image(psf_ima_config)
 
         # resample PSF image at image pixel scale
-        print 'psf_samp, psf_samp_update', psf_samp, psf_samp_update
         psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update)
-        print 'np.shape(psf_ima_config)', np.shape(psf_ima_config)
-        print 'np.shape(psf_ima)', np.shape(psf_ima)
-        print 'np.shape(psf_ima_resized)', np.shape(psf_ima_resized)
         psf_ima[nsub] = psf_ima_resized
         if verbose and nsub==1:
+            print 'psf_samp, psf_samp_update', psf_samp, psf_samp_update
+            print 'np.shape(psf_ima_config)', np.shape(psf_ima_config)
+            print 'np.shape(psf_ima)', np.shape(psf_ima)
+            print 'np.shape(psf_ima_resized)', np.shape(psf_ima_resized)
             print 'psf_size ', psf_size
         if display:
             # write this psf to fits
