@@ -26,12 +26,16 @@ import resource
 # some global parameter settings
 
 # optimal subtraction parameters
-subimage_size = 1024     # size of subimages
-subimage_border = 28     # border around subimage to avoid edge effects
+#KMTNet/OmegaWHITE
+#subimage_size = 1024      # size of subimages
+#subimage_border = 28     # border around subimage to avoid edge effects
+#MeerLICHT:
+subimage_size = 960      # size of subimages
+subimage_border = 32     # border around subimage to avoid edge effects
 background_sex = False   # background: use Sextractor image (T) or simple median (F)
 addfakestar = False      # add a fake star at the centre of every subimage (T)
-fratio_local = True      # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
-dxdy_local = True        # determine dx and dy from subimage (T) or full frame (F)
+fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 
 # switch on/off different functions
 dosex = False            # do extra SExtractor run (already done inside Astrometry.net)
@@ -46,12 +50,13 @@ key_ra = 'RA'
 key_dec = 'DEC'
 key_pixscale = 'PIXSCALE'
 key_exptime = 'EXPTIME'
-key_seeing = 'SEEING'
+key_seeing = 'SEEING'    # does not need to be present - is estimated
+                         # using parameters below
 #PTF:
-key_ron = 'READNOI'
-key_satlevel = 'SATURVAL'
-key_ra = 'OBJRA'
-key_dec = 'OBJDEC'
+#key_ron = 'READNOI'
+#key_satlevel = 'SATURVAL'
+#key_ra = 'OBJRA'
+#key_dec = 'OBJDEC'
 
 # for seeing estimate
 fwhm_imafrac = 0.25      # fraction of image area that will be used
@@ -61,10 +66,10 @@ fwhm_class_sort = False  # sort objects according to CLASS_STAR (T)
                          # or by FLUX_AUTO (F)
 fwhm_frac = 0.25         # fraction of objects, sorted in brightness
                          # or class_star, used for fwhm estimate
-psf_radius = 8           # PSF radius in units of FWHM used to build the PSF
+psf_radius = 7           # PSF radius in units of FWHM used to build the PSF
                          # this determines the PSF_SIZE in psfex.config
                          # and size of the VIGNET in sex.params
-psf_sampling = 0.5       # sampling factor used in PSFex - if zero, it
+psf_sampling = 0.0       # sampling factor used in PSFex - if zero, it
                          # is automatically determined for the new and
                          # ref image (~FWHM/4.5); if non-zero, it is
                          # fixed to the same sampling for both images
@@ -155,10 +160,10 @@ def optimal_subtraction(new_fits, ref_fits):
     fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
                                             sex_par, pixscale_new, fraction=fwhm_imafrac)
     print 'fwhm_new, fwhm_std_new', fwhm_new, fwhm_std_new
-
-    # write FWHM to header
-    #fwhm_new_str = str('{:.2f}'.format(fwhm_new))
-    #header_new['FWHM'] = (fwhm_new_str, '[pix] FWHM estimated from central '+str(fwhm_imafrac))
+    # write seeing (in arcseconds) to header
+    seeing_new = fwhm_new * pixscale_new
+    seeing_new_str = str('{:.2f}'.format(seeing_new))
+    header_new[key_seeing] = (seeing_new_str, '[arcsec] seeing estimated from central '+str(fwhm_imafrac))
 
     # determine WCS solution of new_fits
     new_fits_wcs = base_new+'_wcs.fits'
@@ -171,6 +176,10 @@ def optimal_subtraction(new_fits, ref_fits):
     fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
                                             sex_par, pixscale_ref, fraction=fwhm_imafrac)
     print 'fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref
+    # write seeing (in arcseconds) to header
+    seeing_ref = fwhm_ref * pixscale_ref
+    seeing_ref_str = str('{:.2f}'.format(seeing_ref))
+    header_ref[key_seeing] = (seeing_ref_str, '[arcsec] seeing estimated from central '+str(fwhm_imafrac))
 
     # determine WCS solution of ref_fits
     ref_fits_wcs = base_ref+'_wcs.fits'
@@ -181,9 +190,9 @@ def optimal_subtraction(new_fits, ref_fits):
 
     # remap ref to new
     ref_fits_remap = base_ref+'_wcs_remap.fits'
-    if not os.path.isfile(ref_fits_remap) or redo:
-        result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
-                           [ysize_new, xsize_new], gain=gain_new, config=swarp_cfg)
+    #if not os.path.isfile(ref_fits_remap) or redo:
+    result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
+                       [ysize_new, xsize_new], gain=gain_new, config=swarp_cfg)
 
             
     # initialize full output images
@@ -256,6 +265,16 @@ def optimal_subtraction(new_fits, ref_fits):
         print 'fratio_mean, fratio_median, fratio_std', fratio_mean, fratio_median, fratio_std
     
     if makeplots:
+        # plot y vs x
+        plt.axis((0,xsize_new,0,ysize_new))
+        plt.plot(x_fratio, y_fratio, 'go') 
+        plt.xlabel('x (pixels)')
+        plt.ylabel('y (pixels)')
+        plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
+        plt.savefig('dxdy.png')
+        plt.show()
+        plt.close()
+
         # plot dy vs dx
         plt.axis((-1,1,-1,1))
         plt.plot(dx, dy, 'go') 
@@ -381,6 +400,7 @@ def optimal_subtraction(new_fits, ref_fits):
             # add fake star to new image
             # first normalize psf_orig_new
             psf_orig_new[nsub] /= np.amax(psf_orig_new[nsub]) 
+            #psf_orig_new[nsub] *= 3.*stddev_new / (2.*np.pi*(fwhm_new/2.35)**2)
             psf_orig_new[nsub] *= 3.*stddev_new
             # place it at the center of the new image
             xpos = xsize_fft/2
@@ -528,7 +548,7 @@ def optimal_subtraction(new_fits, ref_fits):
     
     # and display
     if addfakestar:
-        cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits', 'sub20170125_213745_3762_v_20151202_T191314_01.fits']
+        cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits']
     else:
         cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits']
     result = call(cmd)
@@ -760,7 +780,6 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
         x = (centers[nsub,1] - polzero1) / polscal1
         y = (centers[nsub,0] - polzero2) / polscal2
 
-        
         if nsubs==1:
             psf_ima_config = data[0]
         else:
@@ -883,7 +902,7 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref):
         dist = np.sqrt(dra**2 + ddec**2)
         # minimum distance and its index
         dist_min, i_ref = np.amin(dist), np.argmin(dist)
-        if dist_min < 1.:
+        if dist_min < 3.:
             nmatch += 1
             x_new_match.append(x_new[i_new])
             y_new_match.append(y_new[i_new])
@@ -1195,10 +1214,11 @@ def run_remap(image_new, image_ref, image_out,
     # create .head file with header info from [image_new]
     header_out = header_new[:]
     # copy some keywords from header_ref
-    for key in [key_exptime, key_satlevel, key_gain, key_ron, key_seeing]:
+    #for key in [key_exptime, key_satlevel, key_gain, key_ron, key_seeing]:
+    for key in [key_exptime, key_satlevel, key_gain, key_ron]:
         header_out[key] = header_ref[key]
     # delete some others
-    for key in ['WCSAXES','NAXIS1', 'NAXIS2']:
+    for key in ['WCSAXES', 'NAXIS1', 'NAXIS2']:
         del header_out[key]
     # write to .head file
     with open(image_out.replace('.fits','.head'),'w') as newrefhdr:
@@ -1533,7 +1553,7 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
 
     if timing:
         print 'wall-time spent in optimal subtraction', time.time()-t
-        print 'peak memory used in run_ZOGY in GB', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e9
+        #print 'peak memory used in run_ZOGY in GB', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e9
     
     return D, S, S_corr, alpha, alpha_stddev
 
