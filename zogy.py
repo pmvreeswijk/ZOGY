@@ -12,6 +12,7 @@ import os
 from subprocess import call
 from scipy import ndimage
 import time
+import importlib
 # these are important to speed up the FFTs
 import pyfftw
 import pyfftw.interfaces.numpy_fft as fft
@@ -76,7 +77,7 @@ pixelscale = 0.4
 
 ################################################################################
 
-def optimal_subtraction(new_fits, ref_fits):
+def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, telescope=None, log=None, subpipe=False):
     
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -99,17 +100,70 @@ def optimal_subtraction(new_fits, ref_fits):
  
     Written by Paul Vreeswijk (pmvreeswijk@gmail.com) with vital input
     from Barak Zackay and Eran Ofek.
-
+    Adapted by Kerry Paterson for intergration into pipeline for MeerLICHT (ptrker004@myuct.ac.za)
     """
 
     start_time1 = os.times()
+
+    if telescope is not None:
+        Constants = importlib.import_module('Utils.Constants_'+telescope)
+        # some global parameter settings
+        global subimage_size, subimage_border, background_sex, addfakestar, fratio_local, dxdy_local, dosex, dosex_psffit, pixelscale, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, psf_radius, psf_sampling, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, timing, display, makeplots, verbose
+        # optimal subtraction parameters
+        subimage_size = Constants.Imager.subimage_size      # size of subimages
+        subimage_border = Constants.Imager.subimage_border     # border around subimage to avoid edge effects
+        background_sex = Constants.background_sex   # background: use Sextractor image or simple median 
+        addfakestar = Constants.addfakestar
+        fratio_local  = Constants.fratio_local     # determine fratio (Fn/Fr) from subimage
+        dxdy_local = Constants.dxdy_local       # determine dx and dy (sigma_x and sigma_y) from subimage
+
+        # switch on/off different functions
+        dosex = Constants.dosex
+        dosex_psffit = Constants.dosex_psffit    # do extra SExtractor run with PSF fitting
+
+        pixelscale = Constants.Imager.pixel_scale
+
+        fwhm_imafrac = Constants.fwhm_imafrac      # fraction of image area that will be used
+                                 # for initial seeing estimate
+        fwhm_detect_thresh = Constants.fwhm_detect_thresh # detection threshold for fwhm SExtractor run
+        fwhm_class_sort = Constants.fwhm_class_sort  # sort objects according to CLASS_STAR (T)
+                                 # or by FLUX_AUTO (F)
+        fwhm_frac = Constants.fwhm_frac        # fraction of objects, sorted in brightness
+                                 # or class_star, used for fwhm estimate
+        psf_radius = Constants.psf_radius           # PSF radius in units of FWHM used to build the PSF
+                                 # this determines the PSF_SIZE in psfex.config
+                                 # and size of the VIGNET in sex.params
+        psf_sampling = Constants.psf_sampling        # sampling factor used in PSFex - if zero, it
+                                 # is automatically determined for the new and
+                                 # ref image (~FWHM/4.5); if non-zero, it is
+                                 # fixed to the same sampling for both images
+                                                          
+        # path and names of configuration files
+        cfg_dir = Constants.cfg_dir
+        sex_cfg = Constants.sex_cfg   # SExtractor configuration file
+        sex_cfg_psffit = Constants.sex_cfg_psffit # same for PSF-fitting version
+        sex_par = Constants.sex_par     # SExtractor output parameters definition file
+        sex_par_psffit = Constants.sex_par_psffit # same for PSF-fitting version
+        psfex_cfg = Constants.psfex_cfg # PSFex configuration file
+        swarp_cfg = Constants.swarp_cfg # SWarp configuration file
+
+        apphot_radii = Constants.apphot_radii # list of radii in units
+                                                     # of FWHM used for
+                                                     # aperture photometry in
+                                                     # SExtractor
+        # general
+        redo = Constants.redo              # execute functions even if output file exist
+        timing = Constants.timing           # (wall-)time the different functions
+        display = Constants.display          # show intermediate images
+        makeplots = Constants.makeplots       # produce astrometry plots
+        verbose = Constants.verbose
 
     # define the base names of input fits files, base_new and
     # base_ref, as global so they can be used in any function in this
     # module
     global base_new, base_ref
-    base_new = new_fits[0:-5]
-    base_ref = ref_fits[0:-5]
+    base_new = new_fits.split('.')[0]
+    base_ref = ref_fits.split('.')[0]
     
     # read in header of new_fits
     t = time.time()
@@ -129,42 +183,44 @@ def optimal_subtraction(new_fits, ref_fits):
         print keywords
         print read_header(header_ref, keywords)
         
-        
-    # run SExtractor for seeing estimate of new_fits:
-    sexcat_new = base_new+'.sexcat'
-    fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
-                                            sex_par, fraction=fwhm_imafrac)
-    print 'fwhm_new, fwhm_std_new', fwhm_new, fwhm_std_new
+    if not subpipe:    
+        # run SExtractor for seeing estimate of new_fits:
+        sexcat_new = base_new+'.sexcat'
+        fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
+                                                sex_par, fraction=fwhm_imafrac)
+        print 'fwhm_new, fwhm_std_new', fwhm_new, fwhm_std_new
 
-    # write FWHM to header
-    #fwhm_new_str = str('{:.2f}'.format(fwhm_new))
-    #header_new['FWHM'] = (fwhm_new_str, '[pix] FWHM estimated from central '+str(fwhm_imafrac))
+        # write FWHM to header
+        #fwhm_new_str = str('{:.2f}'.format(fwhm_new))
+        #header_new['FWHM'] = (fwhm_new_str, '[pix] FWHM estimated from central '+str(fwhm_imafrac))
 
-    # determine WCS solution of new_fits
-    new_fits_wcs = base_new+'_wcs.fits'
-    if not os.path.isfile(new_fits_wcs) or redo:
-        result = run_wcs(base_new+'.fits', new_fits_wcs, ra_new, dec_new,
-                         gain_new, readnoise_new, fwhm_new)
+        # determine WCS solution of new_fits
+        new_fits_wcs = base_new+'_wcs.fits'
+        if not os.path.isfile(new_fits_wcs) or redo:
+            result = run_wcs(base_new+'.fits', new_fits_wcs, ra_new, dec_new,
+                             gain_new, readnoise_new, fwhm_new)
 
-    # run SExtractor for seeing estimate of ref_fits:
-    sexcat_ref = base_ref+'.sexcat'
-    fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
-                                            sex_par, fraction=fwhm_imafrac)
-    print 'fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref
+        # run SExtractor for seeing estimate of ref_fits:
+        sexcat_ref = base_ref+'.sexcat'
+        fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
+                                                sex_par, fraction=fwhm_imafrac)
+        print 'fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref
 
-    # determine WCS solution of ref_fits
-    ref_fits_wcs = base_ref+'_wcs.fits'
-    if not os.path.isfile(ref_fits_wcs) or redo:
-        result = run_wcs(base_ref+'.fits', ref_fits_wcs, ra_ref, dec_ref,
-                         gain_ref, readnoise_ref, fwhm_ref)
+        # determine WCS solution of ref_fits
+        ref_fits_wcs = base_ref+'_wcs.fits'
+        if not os.path.isfile(ref_fits_wcs) or redo:
+            result = run_wcs(base_ref+'.fits', ref_fits_wcs, ra_ref, dec_ref,
+                             gain_ref, readnoise_ref, fwhm_ref)
 
 
-    # remap ref to new
-    ref_fits_remap = base_ref+'_wcs_remap.fits'
-    if not os.path.isfile(ref_fits_remap) or redo:
-        result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
-                           [ysize_new, xsize_new], gain=gain_new, config=swarp_cfg)
-
+        # remap ref to new
+        ref_fits_remap = base_ref+'_wcs_remap.fits'
+        if not os.path.isfile(ref_fits_remap) or redo:
+            result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
+                               [ysize_new, xsize_new], gain=gain_new, config=swarp_cfg)
+    if subpipe:
+        fwhm_new = header_new['SEEING']
+        fwhm_ref = header_ref['SEEING']
             
     # initialize full output images
     data_D_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
@@ -190,10 +246,16 @@ def optimal_subtraction(new_fits, ref_fits):
             
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # ref, psf and background images
-    data_new, psf_new, psf_orig_new, data_new_bkg = prep_optimal_subtraction(base_new+'_wcs.fits',
-                                                                             nsubs, 'new', fwhm_new)
-    data_ref, psf_ref, psf_orig_ref, data_ref_bkg = prep_optimal_subtraction(base_ref+'_wcs.fits',
-                                                                             nsubs, 'ref', fwhm_ref)
+    if not subpipe:
+        data_new, psf_new, psf_orig_new, data_new_bkg = prep_optimal_subtraction(base_new+'_wcs.fits',
+                                                                                 nsubs, 'new', fwhm_new)
+        data_ref, psf_ref, psf_orig_ref, data_ref_bkg = prep_optimal_subtraction(base_ref+'_wcs.fits',
+                                                                                 nsubs, 'ref', fwhm_ref)
+    if subpipe:
+        data_new, psf_new, psf_orig_new, data_new_bkg = prep_optimal_subtraction(new_fits,
+                                                                                 nsubs, 'new', fwhm_new)
+        data_ref, psf_ref, psf_orig_ref, data_ref_bkg = prep_optimal_subtraction(ref_fits,
+                                                                                 nsubs, 'ref', fwhm_ref, remap=ref_fits_remap)
 
     # determine corresponding variance images
     var_new = data_new + readnoise_new**2 
@@ -203,10 +265,16 @@ def optimal_subtraction(new_fits, ref_fits):
         print 'readnoise_new, readnoise_ref', readnoise_new, readnoise_ref
 
     # get x, y and fratios from matching PSFex stars across entire frame
-    x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'_wcs.psfexcat',
-                                                             base_ref+'_wcs.psfexcat',
-                                                             base_new+'_wcs.sexcat',
-                                                             base_ref+'_wcs.sexcat')
+    if not subpipe:
+        x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'_wcs.psfexcat',
+                                                                 base_ref+'_wcs.psfexcat',
+                                                                 base_new+'_wcs.sexcat',
+                                                                 base_ref+'_wcs.sexcat')
+    if subpipe:
+        x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'.psfexcat',
+                                                                 base_ref+'.psfexcat',
+                                                                 base_new+'.sexcat',
+                                                                 base_ref+'.sexcat')
     dx = dra / pixelscale
     dy = ddec / pixelscale
 
@@ -240,7 +308,7 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.xlabel('dx (pixels)')
         plt.ylabel('dy (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
-        plt.savefig('dxdy.png')
+        plt.savefig('dxdy.pdf')
         plt.show()
         plt.close()
         
@@ -250,7 +318,7 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.xlabel('x (pixels)')
         plt.ylabel('dr (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
-        plt.savefig('drx.png')
+        plt.savefig('drx.pdf')
         plt.show()
         plt.close()
 
@@ -260,7 +328,7 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.xlabel('y (pixels)')
         plt.ylabel('dr (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
-        plt.savefig('dry.png')
+        plt.savefig('dry.pdf')
         plt.show()
         plt.close()
 
@@ -273,7 +341,7 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.xlabel('distance from image center (pixels)')
         plt.ylabel('dr (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
-        plt.savefig('drdist.png')
+        plt.savefig('drdist.pdf')
         plt.show()
         plt.close()
                 
@@ -283,7 +351,7 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.xlabel('x (pixels)')
         plt.ylabel('dx (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
-        plt.savefig('dxx.png')
+        plt.savefig('dxx.pdf')
         plt.show()
         plt.close()
 
@@ -293,7 +361,7 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.xlabel('y (pixels)')
         plt.ylabel('dy (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
-        plt.savefig('dyy.png')
+        plt.savefig('dyy.pdf')
         plt.show()
         plt.close()
 
@@ -472,23 +540,24 @@ def optimal_subtraction(new_fits, ref_fits):
             result = call(cmd)
 
         if timing: print 'wall-time spent in nsub loop', time.time()-tloop
+    
+    if timing:        
+        end_time = os.times()
+        dt_usr  = end_time[2] - start_time2[2]
+        dt_sys  = end_time[3] - start_time2[3]
+        dt_wall = end_time[4] - start_time2[4]
+        print
+        print "Elapsed user time in {0}:  {1:.3f} sec".format("optsub", dt_usr)
+        print "Elapsed CPU time in {0}:  {1:.3f} sec".format("optsub", dt_sys)
+        print "Elapsed wall time in {0}:  {1:.3f} sec".format("optsub", dt_wall)
             
-    end_time = os.times()
-    dt_usr  = end_time[2] - start_time2[2]
-    dt_sys  = end_time[3] - start_time2[3]
-    dt_wall = end_time[4] - start_time2[4]
-    print
-    print "Elapsed user time in {0}:  {1:.3f} sec".format("optsub", dt_usr)
-    print "Elapsed CPU time in {0}:  {1:.3f} sec".format("optsub", dt_sys)
-    print "Elapsed wall time in {0}:  {1:.3f} sec".format("optsub", dt_wall)
-        
-    dt_usr  = end_time[2] - start_time1[2]
-    dt_sys  = end_time[3] - start_time1[3]
-    dt_wall = end_time[4] - start_time1[4]
-    print
-    print "Elapsed user time in {0}:  {1:.3f} sec".format("total", dt_usr)
-    print "Elapsed CPU time in {0}:  {1:.3f} sec".format("total", dt_sys)
-    print "Elapsed wall time in {0}:  {1:.3f} sec".format("total", dt_wall)
+        dt_usr  = end_time[2] - start_time1[2]
+        dt_sys  = end_time[3] - start_time1[3]
+        dt_wall = end_time[4] - start_time1[4]
+        print
+        print "Elapsed user time in {0}:  {1:.3f} sec".format("total", dt_usr)
+        print "Elapsed CPU time in {0}:  {1:.3f} sec".format("total", dt_sys)
+        print "Elapsed wall time in {0}:  {1:.3f} sec".format("total", dt_wall)
 
     # write full new, ref, D and S images to fits
     if addfakestar:
@@ -499,11 +568,12 @@ def optimal_subtraction(new_fits, ref_fits):
     pyfits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
     
     # and display
-    if addfakestar:
-        cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits']
-    else:
-        cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits']
-    result = call(cmd)
+    if display:
+        if addfakestar:
+            cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits']
+        else:
+            cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits']
+        result = call(cmd)
 
 ################################################################################
 
@@ -516,7 +586,7 @@ def read_header(header, keywords):
 
 ################################################################################
     
-def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm):
+def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, remap=None):
 
     print '\nexecuting prep_optimal_subtraction ...'
     t = time.time()
@@ -526,6 +596,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm):
     read_fits = input_fits
     if imtype == 'ref':
         read_fits = input_fits.replace('.fits', '_remap.fits')
+    if remap is not None:
+        read_fits = remap
     with pyfits.open(read_fits) as hdulist:
         header = hdulist[0].header
         data = hdulist[0].data
@@ -1131,6 +1203,11 @@ def fits2ldac (header4ext2, data4ext3, fits_ldac_out, doSort=True):
     # create primary HDU
     prihdr = pyfits.Header()
     prihdu = pyfits.PrimaryHDU(header=prihdr)
+    prihdu.header['EXPTIME'] = header4ext2['EXPTIME']
+    prihdu.header['FILTNAME'] = header4ext2['FILTNAME']
+    prihdu.header['SEEING'] = header4ext2['SEEING']
+    prihdu.header['BKGSIG'] = header4ext2['SEXBKDEV']
+
     
     # write hdulist to output LDAC fits table
     hdulist = pyfits.HDUList([prihdu, ext2, ext3])
@@ -1180,7 +1257,8 @@ def run_remap(image_new, image_ref, image_out,
 ################################################################################
 
 def run_sextractor(image, cat_out, file_config, file_params, fitpsf=False,
-                   fraction=1.0, fwhm=5.0):
+                   fraction=1.0, fwhm=5.0, detect_thresh=10.0, fwhm_frac=0.25,
+                   fwhm_class_sort=False):
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [outcat], using the configuration file [file_config]
@@ -1221,6 +1299,7 @@ def run_sextractor(image, cat_out, file_config, file_params, fitpsf=False,
 
         # make image point to image_fraction
         image = image_fraction
+        cat_out = cat_out+'_fraction'
 
 
     # the input fwhm determines the SEEING_FWHM (important for
@@ -1328,7 +1407,7 @@ def get_fwhm (cat_ldac, fraction, class_Sort = False):
         plt.axis((0,20,y2,y1))
         plt.xlabel('FWHM (pixels)')
         plt.ylabel('MAG_AUTO')
-        plt.savefig('fwhm.png')
+        plt.savefig('fwhm.pdf')
         plt.show()
         plt.close()
 
@@ -1591,8 +1670,12 @@ def main():
     parser = argparse.ArgumentParser(description='Run optimal_subtraction on images')
     parser.add_argument('new_fits', help='filename of new image')
     parser.add_argument('ref_fits', help='filename of ref image')
+    parser.add_argument('ref_fits_remap', default=None, help='remapped ref imaage')
+    parser.add_argument('telescope', default=None, help='telescope')
+    parser.add_argument('log', default=None, help='help')
+    parser.add_argument('subpipe', default=False, help='subpipe')
     args = parser.parse_args()
-    optimal_subtraction(args.new_fits, args.ref_fits)
+    optimal_subtraction(args.new_fits, args.ref_fits, args.ref_fits_remap, args.telescope, args.log)
         
 if __name__ == "__main__":
     main()
