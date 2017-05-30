@@ -84,7 +84,7 @@ pixelscale = 0.4
 
 ################################################################################
 
-def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, telescope=None, log=None, subpipe=False):
+def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None, telescope=None, log=None, subpipe=False):
     
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -651,14 +651,25 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, telescope=None,
     if nfakestars>0:
         pyfits.writeto('new.fits', data_new_full, header_new, clobber=True)
         pyfits.writeto('ref.fits', data_ref_full, header_ref, clobber=True)
-    pyfits.writeto('D.fits', data_D_full, clobber=True)
-    pyfits.writeto('S.fits', data_S_full, clobber=True)
-    pyfits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
-    pyfits.writeto('Scorr_abs.fits', np.abs(data_Scorr_full), clobber=True)
-    pyfits.writeto('Fpsf.fits', data_Fpsf_full, clobber=True)
-    pyfits.writeto('Fpsferr.fits', data_Fpsferr_full, clobber=True)
-    pyfits.writeto(base_new+'_bkg.fits', data_new_bkg_full, clobber=True)
-    pyfits.writeto(base_ref+'_bkg.fits', data_ref_bkg_full, clobber=True)
+    if not subpipe:
+        pyfits.writeto('D.fits', data_D_full, clobber=True)
+        pyfits.writeto('S.fits', data_S_full, clobber=True)
+        pyfits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
+        pyfits.writeto('Scorr_abs.fits', np.abs(data_Scorr_full), clobber=True)
+        pyfits.writeto('Fpsf.fits', data_Fpsf_full, clobber=True)
+        pyfits.writeto('Fpsferr.fits', data_Fpsferr_full, clobber=True)
+        pyfits.writeto(base_new+'_bkg.fits', data_new_bkg_full, clobber=True)
+        pyfits.writeto(base_ref+'_bkg.fits', data_ref_bkg_full, clobber=True)
+    if subpipe:
+        pyfits.writeto('D.fits', data_D_full, clobber=True)
+        pyfits.writeto('S.fits', data_S_full, clobber=True)
+        pyfits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
+        header_new.add_comment('Propagated header from new image to sub image.')
+        pyfits.writeto(sub, np.abs(data_Scorr_full), header_new, clobber=True)
+        pyfits.writeto('Fpsf.fits', data_Fpsf_full, clobber=True)
+        pyfits.writeto('Fpsferr.fits', data_Fpsferr_full, clobber=True)
+        pyfits.writeto(base_new+'_bkg.fits', data_new_bkg_full, clobber=True)
+        pyfits.writeto(base_ref+'_bkg.fits', data_ref_bkg_full, clobber=True)
     
     # make comparison plot of flux input and output
     if makeplots and nfakestars>0:
@@ -1986,12 +1997,13 @@ def main():
     parser = argparse.ArgumentParser(description='Run optimal_subtraction on images')
     parser.add_argument('new_fits', help='filename of new image')
     parser.add_argument('ref_fits', help='filename of ref image')
-    parser.add_argument('ref_fits_remap', default=None, help='remapped ref imaage')
+    parser.add_argument('ref_fits_remap', default=None, help='remapped ref image')
+    parser.add_argument('sub', default=None, help='sub image')
     parser.add_argument('telescope', default=None, help='telescope')
     parser.add_argument('log', default=None, help='help')
     parser.add_argument('subpipe', default=False, help='subpipe')
     args = parser.parse_args()
-    optimal_subtraction(args.new_fits, args.ref_fits, args.ref_fits_remap, args.telescope, args.log)
+    optimal_subtraction(args.new_fits, args.ref_fits, args.ref_fits_remap, args.sub, args.telescope, args.log, args.subpipe)
         
 if __name__ == "__main__":
     main()
