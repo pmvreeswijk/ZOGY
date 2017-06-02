@@ -18,7 +18,10 @@ import pyfftw.interfaces.numpy_fft as fft
 pyfftw.interfaces.cache.enable()
 pyfftw.interfaces.cache.set_keepalive_time(1.)
 
-from photutils import CircularAperture
+#from photutils import CircularAperture
+#from photutils import make_source_mask
+from photutils import Background2D, SigmaClip, MedianBackground
+
 from sip_to_pv import *
 
 import resource
@@ -27,7 +30,7 @@ import resource
 #telescope = 'kmtnet'
 #telescope = 'meerlicht'
 #telescope = 'omegacam'
-telescope = 'p48'
+telescope = 'kmtnet'
 
 # optimal subtraction parameters
 #KMTNet/OmegaWHITE
@@ -44,18 +47,30 @@ elif telescope=='meerlicht':
 else:
     print 'Error: telescope',telescope,'not recognized'
     raise SystemExit
-    
-bkg_sex = False          # background: use Sextractor image (T) or simple median (F)
-bkg_mode = False         # background: use mode rather than median
-bkg_nsigma = 3.          # background: data outside mean +- nsigma * stddev are clipped 
-use_single_PSF = False   # use the same central PSF for all subimages
-skip_wcs = True          # 
+
+# background estimation: there are three methods to estimate the
+# backbround and its standard deviation (STD):
+# (1) simple clipped median and STD of each subimage
+# (2) background and RMS map determined by SExtractor
+# (3) improved background and RMS map using masking of all sources
+# N.B.: for the SExtractor method the background parameters in the
+# configuration file are used rather than the ones below.
+bkg_method = 2           # background method to use
+bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
+                         # clipped; used in methods (1) and (3)
+bkg_boxsize = 256        # size of region used to determine
+                         # background; method (3) only
+bkg_filtersize = 5       # size of filter used for smoothing the above
+                         # regions; method (3) only
+
+# ZOGY parameters
+fratio_local = True     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
+
+# optional fake stars
 nfakestars = 1           # number of fake stars to be added to each subimage
                          # if 1: star will be at the center, if > 1: randomly distributed
-fakestar_s2n = 5.        # required signal-to-noise ratio of the fake stars    
-fratio_local = True      # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
-dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
-transient_nsigma = 5     # required significance in Scorr for transient detection
+fakestar_s2n = 100       # required signal-to-noise ratio of the fake stars    
 
 # switch on/off different functions
 dosex = False            # do extra SExtractor run (already done inside Astrometry.net)
@@ -87,7 +102,13 @@ fwhm_class_sort = False  # sort objects according to CLASS_STAR (T)
                          # or by FLUX_AUTO (F)
 fwhm_frac = 0.25         # fraction of objects, sorted in brightness
                          # or class_star, used for fwhm estimate
-psf_radius = 7           # PSF radius in units of FWHM used to build the PSF
+
+# PSF parameters
+use_single_PSF = False    # use the same central PSF for all subimages
+psf_clean_factor = 0     # pixels with values below (PSF peak * this
+                         # factor) are set to zero; if this parameter
+                         # is zero, no cleaning is done
+psf_radius = 5           # PSF radius in units of FWHM used to build the PSF
                          # this determines the PSF_SIZE in psfex.config
                          # and size of the VIGNET in sex.params
 psf_sampling = 0.0       # sampling factor used in PSFex - if zero, it
@@ -97,7 +118,7 @@ psf_sampling = 0.0       # sampling factor used in PSFex - if zero, it
 
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
-                         
+
 # path and names of configuration files
 cfg_dir = 'Config/'
 sex_cfg = cfg_dir+'sex.config'     # SExtractor configuration file
@@ -115,7 +136,7 @@ apphot_radii = [0.5, 1, 1.5, 2, 3, 5, 7, 10] # list of radii in units
 redo = True              # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
-display = False          # show intermediate fits images
+display = True           # show intermediate fits images
 makeplots = True         # show various diagnostic plots and save as pdf
 
 
@@ -150,10 +171,6 @@ def optimal_subtraction(new_fits, ref_fits):
     - find the best way to select transient sources from Scorr without
       running SExtractor on it
 
-    - CLASS_STAR in [filename]_wcs.sexcat is not correct (weird
-      quantized values), while in [filename]_wcs.sexcat_psffit it is:
-      why?
-
     """
 
     start_time1 = os.times()
@@ -184,9 +201,9 @@ def optimal_subtraction(new_fits, ref_fits):
         print keywords
         print read_header(header_ref, keywords)
 
-    if telescope=='kmtnet':
-        pixscale_new = 0.3965
-        pixscale_ref = 0.3965
+    #if telescope=='kmtnet':
+    #    pixscale_new = 0.3965
+    #    pixscale_ref = 0.3965
         
     # run SExtractor for seeing estimate of new_fits:
     sexcat_new = base_new+'.sexcat'
@@ -239,10 +256,13 @@ def optimal_subtraction(new_fits, ref_fits):
         data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
     data_new_bkg_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
     data_ref_bkg_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+    data_new_bkg_std_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+    data_ref_bkg_std_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         
     # determine cutouts
-    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(subimage_size,
-                                                                       ysize_new, xsize_new)
+    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = \
+        centers_cutouts(subimage_size, ysize_new, xsize_new)
+
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
     nsubs = centers.shape[0]
@@ -256,19 +276,17 @@ def optimal_subtraction(new_fits, ref_fits):
             
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # ref, psf and background images
-    data_new, psf_new, psf_orig_new, data_new_bkg = prep_optimal_subtraction(base_new+'_wcs.fits',
-                                                                             nsubs, 'new', fwhm_new)
-    data_ref, psf_ref, psf_orig_ref, data_ref_bkg = prep_optimal_subtraction(base_ref+'_wcs.fits',
-                                                                             nsubs, 'ref', fwhm_ref)
+    data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std = \xss
+        prep_optimal_subtraction(base_new+'_wcs.fits', nsubs, 'new', fwhm_new)
+    data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std = \
+        prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref)
 
-    # determine corresponding variance images
-    var_new = data_new + readnoise_new**2 
-    var_ref = data_ref + readnoise_ref**2
-    
     if verbose:
         print 'readnoise_new, readnoise_ref', readnoise_new, readnoise_ref
 
-    # get x, y and fratios from matching PSFex stars across entire frame
+
+    # get x, y pixel coordinates and fratios from matching PSFex stars
+    # across entire frame
     x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'_wcs.psfexcat',
                                                              base_ref+'_wcs.psfexcat',
                                                              base_new+'_wcs.sexcat',
@@ -287,7 +305,7 @@ def optimal_subtraction(new_fits, ref_fits):
     dy_full = np.sqrt(np.median(dy)**2 + np.std(dy)**2)
     #dr_full = np.std(dr)
     #dx_full = np.std(dx)
-    #dy_full = np.std(dy)
+    #dy_full = np.sdata_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_stdtd(dy)
     if verbose:
         print 'np.median(dr), np.std(dr)', np.median(dr), np.std(dr)
         print 'np.median(dx), np.std(dx)', np.median(dx), np.std(dx)
@@ -392,94 +410,113 @@ def optimal_subtraction(new_fits, ref_fits):
         if verbose:
             print '\nNsub:', nsub+1
             print '----------'
-            
-        # determine clipped mean, median and std
-        if timing: t1 = time.time()
 
-        if not bkg_mode:
+        if bkg_method==1:
+            # determine clipped mean, median and std;
+            # in this case bkg_new and bkg_ref will be scalars
+            if timing: t1 = time.time()
             mean_new, std_new, bkg_new = clipped_stats(data_new[nsub], nsigma=bkg_nsigma,
-                                                       show_hist=True, verbose=True)
+                                                       show_hist=False, verbose=False)
             mean_ref, std_ref, bkg_ref = clipped_stats(data_ref[nsub], nsigma=bkg_nsigma,
-                                                       show_hist=True, verbose=True)
-        else:
-            mean_new, std_new, bkg_new = clipped_stats(data_new[nsub], nsigma=bkg_nsigma,
-                                                       get_median=False,
-                                                       get_mode=True)
-            mean_ref, std_ref, bkg_ref = clipped_stats(data_ref[nsub], nsigma=bkg_nsigma,
-                                                       get_median=False,
-                                                       get_mode=True)
-        print 'clipped stats timing', time.time()-t1
-            
-        if verbose:
-            print 'mean_new, std_new, bkg_new', mean_new, std_new, bkg_new
-            print 'mean_ref, std_ref, bkg_ref', mean_ref, std_ref, bkg_ref
-            
-        show = False
-        if makeplots and show:
-            range_new = (bkg_new-5.*std_new, bkg_new+5.*std_new)
-            bins = np.linspace(range_new[0], range_new[1], 100)
-            plt.hist(np.ravel(data_new[nsub]), bins, color='green') 
-            plt.xlabel('pixel value (e-)')
-            plt.ylabel('number')
-            plt.title('subsection of '+new_fits)
-            plt.show()
-            plt.close()
+                                                       show_hist=False, verbose=False)
 
-            range_ref = (bkg_ref-5.*std_ref, bkg_ref+5.*std_ref)
-            bins = np.linspace(range_ref[0], range_ref[1], 100)
-            plt.hist(np.ravel(data_ref[nsub]), bins, color='green') 
-            plt.xlabel('pixel value (e-)')
-            plt.ylabel('number')
-            plt.title('subsection of '+ref_fits)
-            plt.show()
-            plt.close()
+            # fill current subimage of data_new_bkg and
+            # data_new_bkg_std with these scalars
+            data_new_bkg[nsub] = bkg_new
+            data_ref_bkg[nsub] = bkg_ref
+            data_new_bkg_std[nsub] = std_new
+            data_ref_bkg_std[nsub] = std_ref
+
+            print 'clipped stats timing', time.time()-t1
+            if verbose:
+                print 'mean_new, std_new, bkg_new', mean_new, std_new, bkg_new
+                print 'mean_ref, std_ref, bkg_ref', mean_ref, std_ref, bkg_ref
+                                
+            show = False
+            if makeplots and show:
+                range_new = (bkg_new-5.*std_new, bkg_new+5.*std_new)
+                bins = np.linspace(range_new[0], range_new[1], 100)
+                plt.hist(np.ravel(data_new[nsub]), bins, color='green') 
+                plt.xlabel('pixel value (e-)')
+                plt.ylabel('number')
+                plt.title('subsection of '+new_fits)
+                plt.show()
+                plt.close()
+
+                range_ref = (bkg_ref-5.*std_ref, bkg_ref+5.*std_ref)
+                bins = np.linspace(range_ref[0], range_ref[1], 100)
+                plt.hist(np.ravel(data_ref[nsub]), bins, color='green') 
+                plt.xlabel('pixel value (e-)')
+                plt.ylabel('number')
+                plt.title('subsection of '+ref_fits)
+                plt.show()
+                plt.close()
+
             
-        # replace low values in subimages
-        data_new[nsub][data_new[nsub] <= 0.] = bkg_new
-        data_ref[nsub][data_ref[nsub] <= 0.] = bkg_ref
+        # refer to current background and STD subimage with a shorter
+        # parameter name
+        bkg_new = data_new_bkg[nsub]
+        bkg_ref = data_ref_bkg[nsub]
+        std_new = data_new_bkg_std[nsub]
+        std_ref = data_ref_bkg_std[nsub]
 
-        # replace low values in variance subimages
-        #var_new[nsub][var_new[nsub] < std_new**2] = std_new**2
-        #var_ref[nsub][var_ref[nsub] < std_ref**2] = std_ref**2
+        # Replace pixels that correspond to zeros in either the new or
+        # ref image with that of the background.  This will ensure
+        # that the borders on the sides of the entire image and the
+        # parts of the image where the new and ref do not overlap can
+        # be handled by run_ZOGY.
+        mask_zero = ((data_new[nsub]==0) | (data_ref[nsub]==0))
+        data_new[nsub][mask_zero] = bkg_new[mask_zero]
+        data_ref[nsub][mask_zero] = bkg_ref[mask_zero]
 
+        # good place to make the corresponding variance images
+        # N.B.: these are single images (i.e. not a cube) the size of
+        # a subimage, so does not need the [nsub] index
+        var_new = data_new[nsub] + readnoise_new**2 
+        var_ref = data_ref[nsub] + readnoise_ref**2
+        # alternative:
+        #var_new = data_new[nsub] - bkg_new + std_new**2
+        #var_ref = data_ref[nsub] - bkg_ref + std_ref**2
+        
         if nfakestars>0:
             # add fake star(s) to new image
-            
-            s2n = fakestar_s2n
-
-            # use function [flux_optimal_s2n] to estimate flux needed
-            # for star with S/N of [fakestar_s2n]
-            psf_orig_new[nsub] /= np.sum(psf_orig_new[nsub])
-            fakestar_flux, fakestar_data = flux_optimal_s2n (psf_orig_new[nsub], bkg_new,
-                                                             readnoise_new, s2n, fwhm_new)
-
-            # for plot of input vs. output flux
-            fakestar_flux_input[nsub] = fakestar_flux
-
-            if verbose:
-                print 'fakestar_flux: {} e-'.format(fakestar_flux)
-                flux, fluxerr = flux_optimal(psf_orig_new[nsub], fakestar_data, bkg_new,
-                                             readnoise_new)
-                print 'recovered flux, fluxerr, S/N', flux, fluxerr, flux/fluxerr
-                
-                # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
-                print 'S/N check', get_s2n_ZO(psf_orig_new[nsub], fakestar_data, bkg_new,
-                                              readnoise_new)
-
-                flux, fluxerr = get_optflux_Naylor(psf_orig_new[nsub], fakestar_data, bkg_new,
-                                                   fakestar_data+readnoise_new**2)
-                print 'Naylor recovered flux, fluxerr, S/N', flux, fluxerr, flux/fluxerr
-                
-                
-            # normalize psf_orig_new to contain fakestar_flux
-            psf_fakestar = psf_orig_new[nsub] * (fakestar_flux/np.sum(psf_orig_new[nsub]))
-            
             if nfakestars==1:
                 # place it at the center of the new subimage
                 xpos = xsize_fft/2
                 ypos = ysize_fft/2
-                data_new[nsub][ypos-psf_size_new/2:ypos+psf_size_new/2,
-                               xpos-psf_size_new/2:xpos+psf_size_new/2] += psf_fakestar
+                index_temp = [slice(ypos-psf_size_new/2, ypos+psf_size_new/2),
+                              slice(xpos-psf_size_new/2, xpos+psf_size_new/2)]
+                # Use function [flux_optimal_s2n] to estimate flux needed
+                # for star with S/N of [fakestar_s2n].
+                fakestar_flux, fakestar_data = flux_optimal_s2n (psf_orig_new[nsub],
+                                                                 data_new[nsub][index_temp],
+                                                                 bkg_new[index_temp], readnoise_new,
+                                                                 fakestar_s2n, fwhm=fwhm_new)
+                # multiply psf_orig_new to contain fakestar_flux
+                psf_fakestar = psf_orig_new[nsub] * fakestar_flux
+                # add fake star to new image
+                data_new[nsub][index_temp] += psf_fakestar
+                # and variance image
+                var_new[index_temp] += psf_fakestar
+                
+                if verbose:
+                    print 'fakestar_flux: {} e-'.format(fakestar_flux)
+                    flux, fluxerr, mask = flux_optimal(psf_orig_new[nsub], psf_orig_new[nsub],
+                                                       fakestar_data, bkg_new[index_temp],
+                                                       std_new[index_temp], readnoise_new)
+                    print 'recovered flux, fluxerr, S/N', flux, fluxerr, flux/fluxerr
+                
+                    # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
+                    print 'S/N check', get_s2n_ZO(psf_orig_new[nsub], fakestar_data,
+                                                  bkg_new[index_temp], readnoise_new)
+
+                    # check S/N with Eqs. from Naylor (1998)
+                    flux, fluxerr = get_optflux_Naylor(psf_orig_new[nsub], fakestar_data,
+                                                       bkg_new[index_temp],
+                                                       fakestar_data+readnoise_new**2)
+                    print 'Naylor recovered flux, fluxerr, S/N', flux, fluxerr, flux/fluxerr
+            
+
             else:
                 # place stars in random positions across the subimage,
                 # keeping subimage_border + psf_size_new/2 pixels off
@@ -490,15 +527,21 @@ def optimal_subtraction(new_fits, ref_fits):
                 for nstar in range(nfakestars):
                     xpos = np.int(xpos_rand[nstar])
                     ypos = np.int(ypos_rand[nstar])
-                    data_new[nsub][ypos-psf_size_new/2:ypos+psf_size_new/2,
-                                   xpos-psf_size_new/2:xpos+psf_size_new/2] += psf_fakestar                
+                    index_temp = [slice(ypos-psf_size_new/2, ypos+psf_size_new/2),
+                                  slice(xpos-psf_size_new/2, xpos+psf_size_new/2)]
+                    fakestar_flux, fakestar_data = flux_optimal_s2n (psf_orig_new[nsub],
+                                                                     data_new[nsub][index_temp],
+                                                                     bkg_new[index_temp], readnoise_new,
+                                                                     fakestar_s2n, fwhm=fwhm_new)
+                    psf_fakestar = psf_orig_new[nsub] * fakestar_flux
+                    data_new[nsub][index_temp] += psf_fakestar                
+                    var_new[index_temp] += psf_fakestar
                 
-        if bkg_sex:
-            # use background subimages
-            bkg_new = data_new_bkg[nsub]
-            bkg_ref = data_ref_bkg[nsub]
+            # for plot of input vs. output flux; in case nfakestars >
+            # 1, only the flux from the last one is recorded
+            fakestar_flux_input[nsub] = fakestar_flux
+                    
 
-            
         # subtract the background
         data_new[nsub] -= bkg_new
         data_ref[nsub] -= bkg_ref
@@ -509,17 +552,21 @@ def optimal_subtraction(new_fits, ref_fits):
 
         # get median fratio from PSFex stars across subimage
         subcut = cuts_ima[nsub]
-        index_sub = ((y_fratio > subcut[0]) & (y_fratio < subcut[1]) & 
-                     (x_fratio > subcut[2]) & (x_fratio < subcut[3]))
-
+        # convert x,y_fratio pixel coordinates to indices
+        y_fratio_index = (y_fratio-0.5).astype(int)
+        x_fratio_index = (x_fratio-0.5).astype(int)
+        # mask of entries in fratio arrays that lie within current subimage
+        mask_sub_fratio = ((y_fratio_index >= subcut[0]) & (y_fratio_index < subcut[1]) & 
+                           (x_fratio_index >= subcut[2]) & (x_fratio_index < subcut[3]))
+        
         # take local or full-frame values for fratio
-        if fratio_local and any(index_sub):
+        if fratio_local and any(mask_sub_fratio):
             # replace the full-frame values defined before the nsub loop
-            fratio_mean, fratio_std, fratio_median = clipped_stats(fratio[index_sub])
+            fratio_mean, fratio_std, fratio_median = clipped_stats(fratio[mask_sub_fratio])
         # and the same for dx and dy
-        if dxdy_local and any(index_sub):
-            dx_sub = np.sqrt(np.median(dx[index_sub])**2 + np.std(dx[index_sub])**2)
-            dy_sub = np.sqrt(np.median(dy[index_sub])**2 + np.std(dy[index_sub])**2)
+        if dxdy_local and any(mask_sub_fratio):
+            dx_sub = np.sqrt(np.median(dx[mask_sub_fratio])**2 + np.std(dx[mask_sub_fratio])**2)
+            dy_sub = np.sqrt(np.median(dy[mask_sub_fratio])**2 + np.std(dy[mask_sub_fratio])**2)
             if dx_sub > 2.*dx_full or not np.isfinite(dx_sub):
                 dx_sub = dx_full
             if dy_sub > 2.*dy_full or not np.isfinite(dy_sub):
@@ -542,15 +589,18 @@ def optimal_subtraction(new_fits, ref_fits):
         # call Barak's function
         data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = run_ZOGY(data_ref[nsub], data_new[nsub], 
                                                                        psf_ref[nsub], psf_new[nsub], 
-                                                                       std_ref, std_new, 
+                                                                       np.median(std_ref),
+                                                                       np.median(std_new), 
                                                                        f_ref, f_new,
-                                                                       var_ref[nsub], var_new[nsub],
+                                                                       var_ref, var_new,
                                                                        dx_sub, dy_sub)
 
         # check that robust std of Scorr is around unity
         if verbose:
             mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr, clip_zeros=False)
             print 'mean_Scorr, median_Scorr, std_Scorr', mean_Scorr, median_Scorr, std_Scorr
+            mean_S, std_S, median_S = clipped_stats(data_S, clip_zeros=False)
+            print 'mean_S, median_S, std_S', mean_S, median_S, std_S
 
         # if fake star(s) was (were) added to the subimages, compare
         # the input flux (the same for the entire subimage) with the
@@ -562,37 +612,27 @@ def optimal_subtraction(new_fits, ref_fits):
             # and S/N from Scorr
             fakestar_s2n_output[nsub] = data_Scorr[xpos, ypos]
             
-        # put sub images into output frames
+        # put sub images without the borders into output frames
         subcut = cuts_ima[nsub]
-        fftcut = cuts_fft[nsub]
-        y1 = subimage_border
-        x1 = subimage_border
-        y2 = subimage_border+subimage_size
-        x2 = subimage_border+subimage_size
-        data_D_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = data_D[y1:y2,x1:x2] / gain_new
-        data_S_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = data_S[y1:y2,x1:x2]
-        data_Scorr_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = data_Scorr[y1:y2,x1:x2]
-        data_Fpsf_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = data_Fpsf[y1:y2,x1:x2]
-        data_Fpsferr_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = data_Fpsferr[y1:y2,x1:x2]
+        index_subcut = [slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])]
+        x1, y1 = subimage_border, subimage_border
+        x2, y2 = x1+subimage_size, y1+subimage_size
+        index_extract = [slice(y1,y2), slice(x1,x2)]
 
-        if bkg_sex:
-            data_new_bkg_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = bkg_new[y1:y2,x1:x2] / gain_new
-            data_ref_bkg_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = bkg_ref[y1:y2,x1:x2] / gain_ref
-        else:
-            data_new_bkg_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = bkg_new / gain_new
-            data_ref_bkg_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = bkg_ref / gain_ref
-            
+        data_D_full[index_subcut] = data_D[index_extract] / gain_new
+        data_S_full[index_subcut] = data_S[index_extract]
+        data_Scorr_full[index_subcut] = data_Scorr[index_extract]
+        data_Fpsf_full[index_subcut] = data_Fpsf[index_extract]
+        data_Fpsferr_full[index_subcut] = data_Fpsferr[index_extract]
+        data_new_bkg_full[index_subcut] = bkg_new[index_extract] / gain_new
+        data_ref_bkg_full[index_subcut] = bkg_ref[index_extract] / gain_ref
+        data_new_bkg_std_full[index_subcut] = std_new[index_extract] / gain_new
+        data_ref_bkg_std_full[index_subcut] = std_ref[index_extract] / gain_ref
         if nfakestars>0:
-            if bkg_sex:
-                data_new_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = (data_new[nsub][y1:y2,x1:x2]
-                                                                          + bkg_new[y1:y2,x1:x2]) / gain_new
-                data_ref_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = (data_ref[nsub][y1:y2,x1:x2]
-                                                                          + bkg_ref[y1:y2,x1:x2]) / gain_ref
-            else:
-                data_new_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = (data_new[nsub][y1:y2,x1:x2]
-                                                                          + bkg_new) / gain_new
-                data_ref_full[subcut[0]:subcut[1],subcut[2]:subcut[3]] = (data_ref[nsub][y1:y2,x1:x2]
-                                                                          + bkg_ref) / gain_ref
+            data_new_full[index_subcut] = (data_new[nsub][index_extract] +
+                                           bkg_new[index_extract]) / gain_new
+            data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
+                                           bkg_ref[index_extract]) / gain_ref
         
         if display and (nsub == 65 or nsub==0):
             # just for displaying purpose:
@@ -604,24 +644,26 @@ def optimal_subtraction(new_fits, ref_fits):
             # write new and ref subimages to fits
             subname = '_sub'+str(nsub)
             newname = base_new+'_wcs'+subname+'.fits'
-            pyfits.writeto(newname, data_new[nsub]+bkg_new, clobber=True)
+            pyfits.writeto(newname, (data_new[nsub]+bkg_new)/gain_new, clobber=True)
             refname = base_ref+'_wcs'+subname+'.fits'
-            pyfits.writeto(refname, data_ref[nsub]+bkg_ref, clobber=True)
+            pyfits.writeto(refname, (data_ref[nsub]+bkg_ref)/gain_ref, clobber=True)
             # variance images
-            pyfits.writeto('Vnew.fits', var_new[nsub], clobber=True)
-            pyfits.writeto('Vref.fits', var_ref[nsub], clobber=True)
+            pyfits.writeto('Vnew.fits', var_new, clobber=True)
+            pyfits.writeto('Vref.fits', var_ref, clobber=True)
             
             # and display
             cmd = ['ds9','-zscale',newname,refname,'D.fits','S.fits','Scorr.fits']
             cmd = ['ds9','-zscale',newname,refname,'D.fits','S.fits','Scorr.fits',
                    'Vnew.fits', 'Vref.fits', 'VSn.fits', 'VSr.fits', 
-                   'VSn_ast.fits', 'VSr_ast.fits', 'Sn.fits', 'Sr.fits', 'kn.fits', 'kr.fits']
+                   'VSn_ast.fits', 'VSr_ast.fits', 'Sn.fits', 'Sr.fits', 'kn.fits', 'kr.fits',
+                   'Pn_hat.fits', 'Pr_hat.fits']
             result = call(cmd)
 
         if timing: print 'wall-time spent in nsub loop', time.time()-tloop
 
     # find transient sources in Scorr
     #Scorr_peaks = ndimage.filters.maximum_filter(data_Scorr_full)
+    #transient_nsigma = 5     # required significance in Scorr for transient detection
     #Scorr_peaks = Scorr_peaks[Scorr_peaks > transient_nsigma]
     #Scorr_peaks_mask = (data_Scorr_full == Scorr_peaks)
     # alternavitvely, use SExtractor:
@@ -629,6 +671,7 @@ def optimal_subtraction(new_fits, ref_fits):
     #sex_trans_cfg = cfg_dir+'sex_trans.config'     # SExtractor configuration file
     #result = run_sextractor('Scorr.fits', 'trans.cat', sex_trans_cfg, sex_par, pixscale_new,
     #                        fwhm=fwhm_new)
+    
     
     end_time = os.times()
     dt_usr  = end_time[2] - start_time2[2]
@@ -658,9 +701,22 @@ def optimal_subtraction(new_fits, ref_fits):
     pyfits.writeto('Fpsferr.fits', data_Fpsferr_full, clobber=True)
     pyfits.writeto(base_new+'_bkg.fits', data_new_bkg_full, clobber=True)
     pyfits.writeto(base_ref+'_bkg.fits', data_ref_bkg_full, clobber=True)
+    pyfits.writeto(base_new+'_bkg_std.fits', data_new_bkg_std_full, clobber=True)
+    pyfits.writeto(base_ref+'_bkg_std.fits', data_ref_bkg_std_full, clobber=True)
     
     # make comparison plot of flux input and output
     if makeplots and nfakestars>0:
+
+        x = np.arange(nsubs)+1
+        y = fakestar_flux_input
+        plt.plot(x, y, 'ko')
+        plt.xlabel('subimage number')
+        plt.ylabel('true flux (e-)')
+        plt.title('fake stars true input flux')
+        plt.savefig('fakestar_flux_input.pdf')
+        plt.show()
+        plt.close()
+
         #plt.axis((0,nsubs,0,2))
         x = np.arange(nsubs)+1
         y = (fakestar_flux_input - fakestar_flux_output) / fakestar_flux_input
@@ -673,10 +729,6 @@ def optimal_subtraction(new_fits, ref_fits):
         plt.show()
         plt.close()
 
-        mean, std, median = clipped_stats(y)
-        print 'mean, std, median', mean, median, std
-        print 'chi2', np.sum((fakestar_flux_input - fakestar_flux_output)**2 / fakestar_fluxerr_output**2)
-        
         # same for S/N as determined by Scorr
         y = fakestar_s2n_output
         plt.plot(x, y, 'ko')
@@ -696,20 +748,195 @@ def optimal_subtraction(new_fits, ref_fits):
                'Fpsf.fits', 'Fpsferr.fits']
     result = call(cmd)
 
+
 ################################################################################
+
+def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
+                          dx2, dy2, dxy, satlevel=50000,
+                          show_images=False, psf_oddsized=True):
     
+    """Function that returns the optimal flux and its error (using the
+       function [flux_optimal] of a source at pixel positions
+       [xcoords], [ycoords] given the inputs: .psf file produced by
+       PSFex [psfex_bintable], data [D], sky [S], sky standard
+       deviation [S_std] and read noise [RON]. [D], [S] and [RON] are
+       assumed to be in electrons.
+    
+       [D] is a 2D array meant to be the full image. [S] can be a 2D
+       array with the same shape as [D] or a scalar. [xcoords] and
+       [ycoords] are arrays, and the output flux and its error will be
+       arrays as well.
+    
+       The function will also return D(_replaced) where any saturated
+       values in the PSF footprint of the [xcoords],[ycoords]
+       coordinates that are being processed is replaced by the
+       expected flux according to the PSF.
+
+    """
+        
+    print '\nexecuting get_optflux_xycoords ...'
+    t = time.time()
+
+    # make sure x and y have same length
+    if np.isscalar(xcoords) or np.isscalar(ycoords):
+        print 'Error: xcoords and ycoords should be arrays'
+    else:
+        assert len(xcoords) == len(ycoords)
+        
+    # initialize output arrays
+    ncoords = len(xcoords)
+    flux_opt = np.zeros(ncoords)
+    fluxerr_opt = np.zeros(ncoords)
+
+    D_replaced = np.copy(D)
+    
+    # get dimensions of D
+    ysize, xsize = np.shape(D)
+
+    # get PSF images at x- and y-coordinates using function
+    # [get_psf_xycoords]
+    Pcube_noshift, Pcube_shift = get_psf_xycoords (psfex_bintable, xcoords, ycoords,
+                                                   psf_oddsized=psf_oddsized)
+    
+    # get psf_size from Pcube
+    psf_size = np.shape(Pcube_noshift)[1]
+    psf_hsize = psf_size/2
+    
+    # loop coordinates
+    for i in range(ncoords):
+
+        # extract data around position to use
+        # indices of pixel in which [x],[y] is located
+        # in case of even-sized psf:
+        if psf_oddsized:
+            xpos = int(xcoords[i]-0.5)
+            ypos = int(ycoords[i]-0.5)
+        else:
+            # in case of odd-sized psf:
+            xpos = int(xcoords[i])
+            ypos = int(ycoords[i])
+                
+        # check if position is within image
+        if ypos<0 or ypos>=ysize or xpos<0 or xpos>=xsize:
+            print 'Position x,y='+str(xpos)+','+str(ypos)+' outside image - skipping'
+            continue
+            
+        # if PSF footprint is partially off the image, just go ahead
+        # with the pixels on the image
+        y1 = max(0, ypos-psf_hsize)
+        x1 = max(0, xpos-psf_hsize)
+        if psf_oddsized:
+            y2 = min(ysize, ypos+psf_hsize+1)
+            x2 = min(xsize, xpos+psf_hsize+1)
+        else:
+            y2 = min(ysize, ypos+psf_hsize)
+            x2 = min(xsize, xpos+psf_hsize)
+        index = [slice(y1,y2),slice(x1,x2)]
+
+        # extract subsection from D, S, and S_std
+        D_sub = D[index]
+        if not np.isscalar(S):
+            S_sub = S[index]
+            S_std_sub = S_std[index]
+        else:
+            S_sub = S
+            S_std_sub = S_std
+
+        y1_P = y1 - (ypos - psf_hsize)
+        x1_P = x1 - (xpos - psf_hsize)
+        y2_P = y2 - (ypos - psf_hsize)
+        x2_P = x2 - (xpos - psf_hsize)
+        index_P = [slice(y1_P,y2_P),slice(x1_P,x2_P)]
+        
+        P_sub_shift = Pcube_shift[i][index_P]
+        P_sub_noshift = Pcube_noshift[i][index_P]
+        
+        if y2_P-y1_P!=psf_size or x2_P-x1_P!=psf_size:
+            # correct flux_opt for missing P_sub
+            factor_missing = np.sum(P_sub_shift)
+            #print 'PSF x1_P, x2_P, y1_P, y2_P', x1_P, x2_P, y1_P, y2_P
+            #print 'factor_missing', factor_missing
+        else:
+            factor_missing = 1.
+            
+        # could provide mask to flux_optimal, so that saturated pixels
+        # can already be flagged, and flux_optimal could return a mask
+        # indicating the pixels that were rejected
+
+        # create mask of saturated pixels
+        mask_sat = (D_sub >= satlevel)
+        # and its inverse
+        mask_nonsat = ~mask_sat
+        
+        # call flux_optimal
+        #print 'xcoords[i], ycoords[i]', xcoords[i], ycoords[i]
+        #print 'dx2[i], dy2[i]', dx2[i], dy2[i]
+        flux_opt[i], fluxerr_opt[i], mask_opt = flux_optimal (P_sub_shift, P_sub_noshift, D_sub,
+                                                              S_sub, S_std_sub, RON, mask_in=mask_nonsat,
+                                                              dx2=dx2[i], dy2=dy2[i], dxy=dxy[i])
+
+        if np.any(mask_sat):
+            # replace saturated values in D_sub
+            D_sub[mask_sat] = P_sub_shift[mask_sat] * flux_opt[i] + S_sub[mask_sat]
+            # and put through [flux_optimal] once more
+            # without a saturated pixel mask
+            flux_opt[i], fluxerr_opt[i], mask_opt = flux_optimal (P_sub_shift, P_sub_noshift, D_sub,
+                                                                  S_sub, S_std_sub, RON,
+                                                                  dx2=dx2[i], dy2=dy2[i], dxy=dxy[i])
+
+            D_replaced[index][mask_opt] = P_sub_shift[mask_opt] * flux_opt[i] + S_sub[mask_opt]
+
+            #result = ds9_arrays(D_sub_orig=D_sub, mask_sat=mask_sat.astype(int),
+            #                    mask_nonsat=mask_nonsat.astype(int), 
+            #                    maskopt=mask_opt.astype(int),
+            #                    D_sub_opt=D_sub*mask_opt.astype(int),
+            #                    S_sub=S_sub, S_std_sub=S_std_sub, P_sub=P_sub_shift,
+            #                    D_replaced=D_replaced[index])
+
+
+    #result = ds9_arrays(D=D, D_replaced=D_replaced)
+        
+    if timing: print 'wall-time spent in get_optflux_xycoords', time.time()-t
+
+    return flux_opt, fluxerr_opt, D_replaced
+        
+################################################################################
+
 def get_optflux (P, D, S, V):
 
-    """Function that calculates optimal flux and corresponding error
-    based on the PSF [P], data [D], sky [S] and variance [V].
-    All are assumed to be in electrons rather than counts. These can
-    be 1- or 2-dimensional lists, while the sky is also allowed to be
-    a scalar. See Horne 1986, PASP, 98, 609 and Naylor 1998, MNRAS,
-    296, 339."""
+    """Function that calculates optimal flux and corresponding error based
+    on the PSF [P], data [D], sky [S] and variance [V].  All are
+    assumed to be in electrons rather than counts. These can be 1- or
+    2-dimensional arrays with the same shape, while the sky can also
+    be a scalar. See Horne 1986, PASP, 98, 609 and Naylor 1998, MNRAS,
+    296, 339.
+
+    """
 
     # and optimal flux and its error
     denominator = np.sum(P**2/V)
     optflux = np.sum((P*(D-S)/V)) / denominator
+    optfluxerr = 1./np.sqrt(denominator)
+    return optflux, optfluxerr
+
+
+################################################################################
+
+def get_optflux_Eran (P, P_noshift, D, S, V):
+
+    """Function that calculates optimal flux and corresponding error based
+    on the PSF [P], the PSF shifted by the fractional pixel shift
+    [P_shift], data [D], sky [S] and variance [V].  All are assumed to
+    be in electrons rather than counts. These can be 1- or
+    2-dimensional arrays with the same shape, while the sky can also
+    be a scalar. See Eqs. 36 and 37 of Zackay & Ofek 2017, ApJ, 836,
+    187.
+
+    """
+
+    # and optimal flux and its error
+    denominator = np.sum((P_noshift*P)/V)
+    optflux = np.sum((P_noshift*(D-S)/V)) / denominator
     optfluxerr = 1./np.sqrt(denominator)
     return optflux, optfluxerr
 
@@ -745,55 +972,86 @@ def get_s2n_ZO (P, D, S, RON):
 
     T0 = np.sum(D-S)
     V = D+RON**2
-    s2n = np.sqrt(np.sum( (D-S)**2 / V ))
+    #s2n = np.sqrt(np.sum( (D-S)**2 / V ))
     s2n = np.sqrt(np.sum( (T0*P)**2 / V ))
 
     return s2n
 
 ################################################################################
 
-def flux_optimal (P, D, S, RON, nsigma=5):
+def flux_optimal (P, P_noshift, D, S, S_std, RON, nsigma=100, max_iters=10, epsilon=1e-6,
+                  mask_in=None, dx2=0, dy2=0, dxy=0):
     
     """Function that calculates optimal flux and corresponding error based
-    on the PSF [P], data [D], sky [S] and read-out noise [RON].  This
-    makes use of function [get_optflux].
+    on the PSF [P], data [D], sky [S], sky standard deviation [S_std]
+    and read-out noise [RON].  This makes use of function
+    [get_optflux] or [get_optflux_Eran]."""
 
-    """
-
-    # if S(ky) is a scalar, make it an array
+    # if S is a scalar, expand it to 2D array
     if np.isscalar(S):
-        sky = np.ndarray(P.shape)
-        sky[:] = S
-        
-    # replace negative values in D with the sky
-    D[D<0] = sky[D<0]
+        S = np.ndarray(P.shape).fill(S)
 
-    # mask with same shape as D; set all elements to True
-    mask = np.ones(D.shape, dtype=bool)
+    # replace negative values in D with the sky
+    D[D<0] = S[D<0]
+
+    # and calculate astrometric variance
+    dDdy = D - np.roll(D,1,axis=0)
+    dDdx = D - np.roll(D,1,axis=1)
+    dDdxy = D - np.roll(D,1,axis=(0,1))
+    V_ast = dx2 * dDdx**2 + dy2 * dDdy**2 + dxy * dDdxy**2
+    V_ast[:] = 0.
     
+    # if mask was not provided, create mask with same shape as D with
+    # all elements set to True
+    if mask_in is None: 
+        mask = np.ones(D.shape, dtype=bool)
+    else:
+        mask = mask_in
+
     # loop
-    for i in range(10):
+    flux_opt_old = float('inf')
+    for i in range(max_iters):
 
         if i==0:
-            # initial variance estimate (Eq. 12 from Horne 1986)
-            V = RON**2 + D
+            # initial variance estimate (see Eq. 12 from Horne 1986)
+            V = RON**2 + S + V_ast
+            # alternative
+            #V = D - S + S_std**2 + V_ast
         else:
-            # improved variance (Eq. 13 from Horne 1986)
-            V = RON**2 + flux_opt * P + sky
+            # improved variance (see Eq. 13 from Horne 1986)
+            V = RON**2 + S + flux_opt * P + V_ast
+            # alternative
+            #V = flux_opt * P + S_std**2 + V_ast
             
         # optimal flux
-        flux_opt, fluxerr_opt = get_optflux(P[mask], D[mask], sky[mask], V[mask])    
+        #flux_opt, fluxerr_opt = get_optflux_Eran(P[mask], P_noshift[mask], D[mask], S[mask], V[mask])
+        flux_opt, fluxerr_opt = get_optflux(P[mask], D[mask], S[mask], V[mask])
+                    
+        #print 'i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt, abs(flux_opt_old-flux_opt)/flux_opt
+
+        if abs(flux_opt_old-flux_opt)/abs(flux_opt) < epsilon:
+            break
+        flux_opt_old = flux_opt
 
         # reject any discrepant values
-        index_rej = (((D - flux_opt * P - sky) / V) > nsigma**2)
+        index_rej = (((D - flux_opt * P - S)**2 / V) > nsigma**2)
         mask[index_rej] = False
-        
-    return flux_opt, fluxerr_opt
+
+    if False:
+        print 'no. of rejected pixels', len(mask[mask==False])
+        print 'np.amax((D - flux_opt * P - S)**2 / V)', np.amax((D - flux_opt * P - S)**2 / V)
+
+        result = ds9_arrays(D=D, P=P, S=S, V=V, fluxoptPsky = flux_opt*P+S,
+                            D_min_fluxoptP_min_S=(D - flux_opt * P - S),
+                            D_min_fluxoptP_min_S_squared_divV=((D - flux_opt * P - S)**2/V),
+                            mask=mask.astype(int), V_ast=V_ast)
+
+    return flux_opt, fluxerr_opt, mask
     
 
 ################################################################################
 
-def flux_optimal_s2n (P, S, RON, s2n, fwhm=5.):
+def flux_optimal_s2n (P, D, S, RON, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
     
     """Similar to function [flux_optimal] above, but this function returns
     the total flux sum(D-S) required for the point source to have a
@@ -802,26 +1060,40 @@ def flux_optimal_s2n (P, S, RON, s2n, fwhm=5.):
     image with a required S/N [fakestar_s2n].
 
     """
-    
-    for i in range(10):
+
+    # replace negative values in D with the sky
+    if np.isscalar(S):
+        D[D<0] = S
+    else:
+        D[D<0] = S[D<0]
+
+    # keep a copy of original image
+    D_orig = np.copy(D)
+        
+    for i in range(max_iters):
         if i==0:
             # initial estimate of variance (scalar)
+            #V = RON**2 + D_orig
             V = RON**2 + S
             # and flux (see Eq. 13 of Naylor 1998)
-            flux = s2n * fwhm * np.sqrt(V) / np.sqrt(2*np.log(2)/np.pi)
+            flux_opt = s2n * fwhm * np.sqrt(np.median(V)) / np.sqrt(2*np.log(2)/np.pi)
         else:
             # estimate new flux based on fluxerr_opt of previous iteration
-            flux = s2n * fluxerr_opt
+            flux_opt = s2n * fluxerr_opt 
             # improved estimate of variance (2D list)
-            V = RON**2 + S + flux * P
-            
-        # estimate of D
-        D = S + flux * P
-        # and optimal flux
+            #V = RON**2 + D_orig + flux_opt * P
+            V = RON**2 + S + flux_opt * P
+
+        # new estimate of D
+        #D = D_orig + flux_opt * P
+        D = S + flux_opt * P
+
+        # get optimal flux
+        #flux_opt, fluxerr_opt = get_optflux(P, D, D_orig, V)
         flux_opt, fluxerr_opt = get_optflux(P, D, S, V)
 
         # break out of loop if S/N sufficiently close
-        if abs(flux_opt/fluxerr_opt - s2n) / s2n < 1e-2:
+        if abs(flux_opt/fluxerr_opt - s2n) / s2n < epsilon:
             break
         
     return flux_opt, D
@@ -845,8 +1117,6 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
     for i in range(max_iters):
         mean = array.mean()
         std = array.std()
-        if verbose:
-            print 'mean, std', mean, std
         if abs(mean_old-mean)/mean < epsilon:
             break
         mean_old = mean
@@ -919,8 +1189,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm):
     
     # read in header and data; in case of the reference image, the
     # remapped image should be read into data, but the PSF
-    # determination should be done using the image before
-    # remapping
+    # determination should be done using the image before remapping
     read_fits = input_fits
     if imtype == 'ref':
         read_fits = input_fits.replace('.fits', '_remap.fits')
@@ -928,49 +1197,307 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm):
         header = hdulist[0].header
         data = hdulist[0].data
     # replace NANs with zero, and +-infinity with large +-numbers
-    data = np.nan_to_num(data)
+    # data = np.nan_to_num(data)
     # get gain, readnoise and pixscale from header
     gain = header[key_gain]
     readnoise = header[key_ron]
     pixscale = header[key_pixscale]
+    satlevel = header[key_satlevel]
+    ysize, xsize = np.shape(data)
     # convert counts to electrons
     data *= gain
+
+    # construction of background map; if [bkg_method]==1 (median) then
+    # this part can be skipped, but need to provide arrays with zeros
+    # othersize the routine will break down
+    if bkg_method==1:
+        # return zero array with same shape as data for the background
+        # and standard deviation maps
+        data_bkg = np.zeros(data.shape)
+        data_bkg_std = np.zeros(data.shape)
+    else:
+        # read SExtractor's background and RMS or STD maps
+        sexbkg_fits = input_fits.replace('_wcs.fits', '_bkg.fits')
+        with pyfits.open(sexbkg_fits) as hdulist:
+            data_sexbkg = hdulist[0].data * gain
+        sexbkg_std_fits = input_fits.replace('_wcs.fits', '_bkg_std.fits')
+        with pyfits.open(sexbkg_std_fits) as hdulist:
+            data_sexbkg_std = hdulist[0].data * gain
+
+        if bkg_method==2:
+            # use SExtractor maps - already corrected for the gain
+            data_bkg, data_bkg_std = data_sexbkg, data_sexbkg_std
+        else:
+            # read in SExtractor's object mask to use in background estimation
+            objmask_fits = input_fits.replace('_wcs.fits', '_objmask.fits')
+            with pyfits.open(objmask_fits) as hdulist:
+                data_objmask = hdulist[0].data * gain
+                
+            # determine simple median in SExtractor background and
+            # RMS/STD maps with objects masked
+            sexbkg_median = np.median(data_sexbkg[data_objmask!=0])
+            if verbose:
+                print 'SExtractor background median', sexbkg_median
+            sexbkg_std = np.median(data_sexbkg_std[data_objmask!=0])
+            if verbose:
+                print 'SExtractor background RMS', sexbkg_std
+        
+            # now construct proper background image using [get_back]
+            data_bkg, data_bkg_std = get_back(data, data_objmask, sexbkg_median, sexbkg_std)
+
+            # write these to fits; N.B. this will overwrite the
+            # background and RMS maps produced and the units in these
+            # images are ADU
+            bkg_fits = input_fits.replace('_wcs.fits', '_bkg.fits')
+            pyfits.writeto(bkg_fits, data_bkg/gain, clobber=True)
+            bkg_std_fits = input_fits.replace('_wcs.fits', '_bkg_std.fits')
+            pyfits.writeto(bkg_std_fits, data_bkg_std/gain, clobber=True)
+            
 
     # determine psf of input image with get_psf function
     psf, psf_orig = get_psf(input_fits, header, nsubs, imtype, fwhm, pixscale)
 
-    # read background image produced by sextractor
-    if bkg_sex:
-        bkg_fits = input_fits.replace('_wcs.fits', '_bkg.fits')
-        with pyfits.open(bkg_fits) as hdulist:
-            data_bkg = hdulist[0].data
-        # convert counts to electrons
-        data_bkg *= gain
-    else:
-        # return zero array with same shape as data
-        # 
-        data_bkg = np.zeros(data.shape)
+    # Get estimate of optimal flux for all sources in the new
+    # image. For the reference image this should already have been
+    # done when it was prepared.
+
+    # For the reference image the [data] is read from the remapped
+    # image, while the coordinates are from the original image, so to
+    # make it work below temporarily, transform the coordinates
+    # from the original reference image to the remapped image
+
+    # first read SExtractor fits table
+    sexcat = input_fits.replace('.fits', '.sexcat')
+    with pyfits.open(sexcat) as hdulist:
+        data_sex = hdulist[2].data
+    # read in positions and their errors
+    xwin = data_sex['XWIN_IMAGE']
+    ywin = data_sex['YWIN_IMAGE']    
+    # skip coordinates outside the image
+    #mask_use = ((xwin>0) & (xwin<(xsize+0.5)) & (ywin>0) & (ywin<(ysize+0.5)))
+    xwin = data_sex['XWIN_IMAGE']#[mask_use]
+    ywin = data_sex['YWIN_IMAGE']#[mask_use]
+    errx2win = data_sex['ERRX2WIN_IMAGE']#[mask_use]
+    erry2win = data_sex['ERRY2WIN_IMAGE']#[mask_use]
+    errxywin = data_sex['ERRXYWIN_IMAGE']#[mask_use]
         
+    if imtype == 'ref':
+        # first infer ra, dec corresponding to x, y pixel positions in
+        # the original ref image, using the .wcs file from
+        # Astrometry.net
+        wcs = WCS(input_fits.replace('_wcs.fits', '.wcs'))
+        ra_temp, dec_temp = wcs.all_pix2world(xwin, ywin, 1)
+        # then convert ra, dec back to x, y in the coordinate
+        # frame of the new or remapped reference image
+        wcs = WCS(base_new+'.wcs')
+        xwin, ywin = wcs.all_world2pix(ra_temp, dec_temp, 1,
+                                       tolerance=1e-3, adaptive=True,
+                                       quiet=True)
+        
+    psfex_bintable = input_fits.replace('.fits', '.psf')
+    flux_opt, fluxerr_opt, data_replaced = get_optflux_xycoords (psfex_bintable, data,
+                                                                 data_bkg, data_bkg_std,
+                                                                 readnoise,
+                                                                 xwin, ywin,
+                                                                 errx2win, erry2win, 
+                                                                 errxywin,
+                                                                 satlevel=satlevel*gain,
+                                                                 show_images=True)
+
+    # uncomment this line to use image with saturated stars replaced
+    # with psf estimate
+    #data = data_replaced
+            
+    # flux_opt is in e-, while flux_auto and flux_psf from
+    # SExtractor catalog are in counts
+    flux_opt /= gain
+    fluxerr_opt /= gain
+        
+    # merge these two columns with sextractor catalog
+    cols = [] 
+    cols.append(pyfits.Column(name='FLUX_OPT', format='D', array=flux_opt))
+    cols.append(pyfits.Column(name='FLUXERR_OPT', format='D', array=fluxerr_opt))
+    orig_cols = data_sex.columns
+    new_cols = pyfits.ColDefs(cols)
+    hdu = pyfits.BinTableHDU.from_columns(orig_cols + new_cols)
+    newcat = input_fits.replace('.fits', '.sexcat_fluxopt')
+    hdu.writeto(newcat, clobber=True)
+
+    if makeplots:
+        # compare with flux_auto
+        index = ((data_sex['FLUX_AUTO']>0) & (data_sex['FLAGS']==0))
+        flux_auto = data_sex['FLUX_AUTO'][index]
+        s2n_auto = data_sex['FLUX_AUTO'][index] / data_sex['FLUXERR_AUTO'][index]
+        
+        flux_diff = (flux_opt[index] - flux_auto) / flux_auto
+        fluxerr_diff = fluxerr_opt[index] / flux_auto
+        class_star = data_sex['CLASS_STAR'][index]
+        limits = (1,2*np.amax(s2n_auto),-0.2,0.2)
+        plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+                      xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_AUTO) / FLUX_AUTO', 
+                      filename='fluxopt_vs_fluxauto_'+imtype+'.pdf',
+                      title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
+
+        # compare with flux_psf if psffit catalog available
+        if os.path.isfile(sexcat+'_psffit'):
+            # read SExtractor psffit fits table
+            with pyfits.open(sexcat+'_psffit') as hdulist:
+                data_sex = hdulist[2].data
+                
+            index = ((data_sex['FLUX_PSF']>0) & (data_sex['FLAGS']==0))
+            flux_psf = data_sex['FLUX_PSF'][index]
+            s2n_psf = data_sex['FLUX_PSF'][index] / data_sex['FLUXERR_PSF'][index]
+            
+            flux_diff = (flux_opt[index] - flux_psf) / flux_psf
+            fluxerr_diff = fluxerr_opt[index] / flux_psf
+            class_star = data_sex['CLASS_STAR'][index]
+            limits = (1,2*np.amax(s2n_psf),-0.2,0.2)
+            plot_scatter (s2n_psf, flux_diff, fluxerr_diff, limits, class_star,
+                          xlabel='S/N (PSF)', ylabel='(FLUX_OPT - FLUX_PSF) / FLUX_PSF', 
+                          filename='fluxopt_vs_fluxpsf_'+imtype+'.pdf',
+                          title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
+
+            # and compare auto with psf
+            flux_auto = data_sex['FLUX_AUTO'][index]
+            fluxerr_auto = data_sex['FLUXERR_AUTO'][index]
+            flux_diff = (flux_auto - flux_psf) / flux_psf
+            fluxerr_diff = fluxerr_auto / flux_psf
+            limits = (1,2*np.amax(s2n_psf),-0.2,0.2)
+            plot_scatter (s2n_psf, flux_diff, fluxerr_diff, limits, class_star,
+                          xlabel='S/N (PSF)', ylabel='(FLUX_AUTO - FLUX_PSF) / FLUX_PSF', 
+                          filename='fluxauto_vs_fluxpsf_'+imtype+'.pdf',
+                          title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
+
     # split full image into subimages
-    ysize, xsize = header['NAXIS2'], header['NAXIS1']
     # determine cutouts
     centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(subimage_size, ysize, xsize)
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
-    
+
     fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_bkg = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
+    fftdata_bkg_std = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     for nsub in range(nsubs):
         subcutfft = cuts_ima_fft[nsub]
         fftcut = cuts_fft[nsub]
         fftdata[nsub][fftcut[0]:fftcut[1],fftcut[2]:fftcut[3]] = data[subcutfft[0]:subcutfft[1],
                                                                       subcutfft[2]:subcutfft[3]]
         fftdata_bkg[nsub][fftcut[0]:fftcut[1],fftcut[2]:fftcut[3]] = data_bkg[subcutfft[0]:subcutfft[1],
-                                                                            subcutfft[2]:subcutfft[3]]
+                                                                              subcutfft[2]:subcutfft[3]]
+        fftdata_bkg_std[nsub][fftcut[0]:fftcut[1],fftcut[2]:fftcut[3]] = data_bkg_std[subcutfft[0]:subcutfft[1],
+                                                                                      subcutfft[2]:subcutfft[3]]
         
     if timing: print 'wall-time spent in prep_optimal_subtraction', time.time()-t
-    return fftdata, psf, psf_orig, fftdata_bkg
+    return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
     
+
+################################################################################
+
+def get_back (data, data_objmask, median_backup, std_backup, hurry_up=True,
+              clip=True):
+    
+    """Function that returns the background of the image [data].  The slow
+    mode, with [hurry_up] set to False, uses the photutils'
+    Background2D, while in fast mode a clipped median is determined
+    for each subimage (with size: [bkg_boxsize]), this is then median
+    filtered and resized to the size of the input image."""
+
+    if timing: t = time.time()
+    print '\nexecuting get_back ...'
+
+    # mask sources
+    #mask = make_source_mask(data, snr=2, npixels=5, dilate_size=11)
+    # the photutils masking process takes way too long for our needs;
+    # use the SExtractor SEGMENTATION image instead. That image
+    # displays patches corresponding to pixels attributed to each
+    # object, with the pixel value corresponding to the object number.
+
+    mask_zero = (data_objmask==0)
+    
+    if not hurry_up:
+        # use the photutils Background2D function
+        sigma_clip = SigmaClip(sigma=bkg_nsigma, iters=10)
+        bkg_estimator = MedianBackground()
+        bkg = Background2D(data, (bkg_boxsize, bkg_boxsize),
+                           filter_size=(bkg_filtersize, bkg_filtersize),
+                           sigma_clip=sigma_clip,
+                           bkg_estimator=bkg_estimator,
+                           mask=mask_zero)
+        background, background_std = bkg.background, bkg.background_std
+        
+    else:
+
+        # mask to use (opposite of mask_zero)
+        mask_use = ~mask_zero
+        
+        # loop through subimages the size of bkg_boxsize, and
+        # determine median from the masked data
+        ysize, xsize = data.shape[0], data.shape[1]
+        centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(bkg_boxsize,
+                                                                           ysize, xsize)        
+
+        # loop subimages
+        if ysize % bkg_boxsize != 0 or xsize % bkg_boxsize !=0:
+            print 'Warning: [bkg_boxsize] does not fit integer times in image'
+        nysubs = ysize / bkg_boxsize
+        nxsubs = xsize / bkg_boxsize
+        # prepare output median and std output arrays
+        mesh_median = np.ndarray((nysubs, nxsubs))
+        mesh_std = np.ndarray((nysubs, nxsubs))
+        nsub = -1
+        mask_minsize = 0.1*bkg_boxsize**2
+        for i in range(nxsubs):
+            for j in range(nysubs):
+                nsub += 1
+                subcut = cuts_ima[nsub]
+                data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+                mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+                if np.sum(mask_sub) > mask_minsize:
+                    if clip:
+                        # get clipped_stats mean, std and median 
+                        mean, std, median = clipped_stats(data_sub[mask_sub])
+                    else:
+                        median = np.median(data_sub[mask_sub])
+                        std = np.std(data_sub[mask_sub])
+                else:
+                    # if not a single element of mask_sub is True, use backup values
+                    median, std = median_backup, std_backup
+                # fill median and std arrays
+                mesh_median[j,i] = median
+                mesh_std[j,i] = std
+
+        # median filter the meshes with filter of size [bkg_filtersize]
+        shape_filter = (bkg_filtersize, bkg_filtersize)
+        mesh_median_filt = ndimage.filters.median_filter(mesh_median, shape_filter)
+        mesh_std_filt = ndimage.filters.median_filter(mesh_std, shape_filter)
+
+        # resize low-resolution meshes
+        background = ndimage.zoom(mesh_median_filt, bkg_boxsize)
+        background_std = ndimage.zoom(mesh_std_filt, bkg_boxsize)
+        
+    if timing: print 'wall-time spent in get_back', time.time() - t
+
+    return background, background_std
+    
+
+################################################################################
+
+def plot_scatter (x, y, yerr, limits, corder, cmap='rainbow_r', symbol='o',
+                  xlabel='', ylabel='', legendlabel='', title='', filename='',
+                  simple=False):
+
+    plt.axis(limits)
+    #xplt.errorbar(x, y, yerr=yerr, linestyle="None", color='k')
+    plt.scatter(x, y, c=corder, cmap=cmap, alpha=0.75, label=legendlabel)
+    plt.xscale('log')
+    plt.legend(numpoints=1, fontsize='medium')
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    if filename != '':
+        plt.savefig(filename)
+    plt.show()
+    plt.close()
 
 ################################################################################
 
@@ -996,7 +1523,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
     # independent SExtractor run would.
     sexcat = image.replace('.fits', '.sexcat')
     if (not os.path.isfile(sexcat) or redo) and dosex:
-        result = run_sextractor(image, sexcat, sex_cfg, sex_par, pixscale, fwhm=fwhm)
+        result = run_sextractor(image, sexcat+'_alt', sex_cfg, sex_par, pixscale, fwhm=fwhm)
         
     # run psfex on SExtractor output catalog
     psfexcat = image.replace('.fits', '.psfexcat')
@@ -1009,7 +1536,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
     # that PSF-fitting can be performed for all objects. The output
     # columns defined in [sex_par_psffit] include several new columns
     # related to the PSF fitting.
-    if dosex_psffit:
+    if (not os.path.isfile(sexcat+'_psffit') or redo) and dosex_psffit:
         result = run_sextractor(image, sexcat+'_psffit', sex_cfg_psffit,
                                 sex_par_psffit, pixscale, fitpsf=True, fwhm=fwhm)
         
@@ -1070,8 +1597,8 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
 
     # [psf_size] is the PSF size in image pixels,
     # i.e. [psf_size_config] multiplied by the PSF sampling (roughly
-    # 4-5 pixels per FWHM) which is automatically determined by PSFex
-    # (PSF_SAMPLING parameter in PSFex config file set to zero)
+    # 4-5 pixels per FWHM) which is set by the [psf_sampling] parameter.
+    # If set to zero, it is automatically determined by PSFex.
     psf_size = np.int(np.ceil(psf_size_config * psf_samp))
     # if this is odd, make it even - for the moment this is because
     # the index range of the bigger image in which this psf is put
@@ -1082,13 +1609,13 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
     psf_samp_update = float(psf_size) / float(psf_size_config)
     if imtype == 'new': psf_size_new = psf_size
     # [psf_ima] is the corresponding cube of PSF subimages
-    psf_ima = np.ndarray((nsubs,psf_size,psf_size), dtype='float32')
+    psf_ima = np.zeros((nsubs,psf_size,psf_size), dtype='float32')
     # [psf_ima_center] is [psf_ima] broadcast into images of xsize_fft
     # x ysize_fft
-    psf_ima_center = np.ndarray((nsubs,ysize_fft,xsize_fft), dtype='float32')
+    psf_ima_center = np.zeros((nsubs,ysize_fft,xsize_fft), dtype='float32')
     # [psf_ima_shift] is [psf_ima_center] shifted - this is
     # the input PSF image needed in the zogy function
-    psf_ima_shift = np.ndarray((nsubs,ysize_fft,xsize_fft), dtype='float32')
+    psf_ima_shift = np.zeros((nsubs,ysize_fft,xsize_fft), dtype='float32')
     
     # loop through nsubs and construct psf at the center of each
     # subimage, using the output from PSFex that was run on the full
@@ -1116,7 +1643,12 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
 
         # resample PSF image at image pixel scale
         psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update)
-        psf_ima[nsub] = psf_ima_resized
+        # clean from low values
+        if psf_clean_factor!=0:
+            psf_ima_resized = clean_psf(psf_ima_resized, psf_clean_factor)
+        # normalize to unity
+        psf_ima_resized_norm = psf_ima_resized / np.sum(psf_ima_resized)
+        psf_ima[nsub] = psf_ima_resized_norm
         if verbose and nsub==1:
             print 'psf_samp, psf_samp_update', psf_samp, psf_samp_update
             print 'np.shape(psf_ima_config)', np.shape(psf_ima_config)
@@ -1129,8 +1661,6 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
                            psf_ima_resized, clobber=True)
             #result = show_image(psf_ima_resized)
 
-        # normalize to unity
-        psf_ima_resized_norm = psf_ima_resized / np.sum(psf_ima_resized)
             
         # now place this resized and normalized PSF image at the
         # center of an image with the same size as the fftimage
@@ -1162,13 +1692,142 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
 
 ################################################################################
 
+def get_psf_xycoords(psfex_bintable, xcoords, ycoords, psf_oddsized=False, order=3):
+
+    """Function that takes in .psf file produced by PSFex and returns a
+    cube containing the original PSF and the shifted PSF at the
+    coordinate arrays [x], [y]
+
+    """
+
+    if timing: t = time.time()
+    print '\nexecuting get_psf_xycoords ...'
+
+    # number of coordinates
+    ncoords = len(xcoords)
+
+    # read in PSF output binary table from psfex
+    with pyfits.open(psfex_bintable) as hdulist:
+        header = hdulist[1].header
+        data = hdulist[1].data[0][0][:]
+
+    # read in some header keyword values
+    polzero1 = header['POLZERO1']
+    polzero2 = header['POLZERO2']
+    polscal1 = header['POLSCAL1']
+    polscal2 = header['POLSCAL2']
+    poldeg = header['POLDEG1']
+    psf_fwhm = header['PSF_FWHM']
+    psf_samp = header['PSF_SAMP']
+    # [psf_size_config] is the size of the PSF as defined in the PSFex
+    # configuration file ([PSF_SIZE] parameter), which is the same as
+    # the size of the [data] array
+    psf_size_config = header['PSFAXIS1']
+    if verbose:
+        print 'polzero1                   ', polzero1
+        print 'polscal1                   ', polscal1
+        print 'polzero2                   ', polzero2
+        print 'polscal2                   ', polscal2
+        print 'order polynomial:          ', poldeg
+        print 'PSF FWHM:                  ', psf_fwhm
+        print 'PSF sampling size (pixels):', psf_samp
+        print 'PSF size defined in config:', psf_size_config
+        
+    # initialize output PSF array
+
+    # [psf_size] is the PSF size in image pixels,
+    # i.e. [psf_size_config] multiplied by the PSF sampling (roughly
+    # 4-5 pixels per FWHM) which is set by the [psf_sampling] parameter.
+    # If set to zero, it is automatically determined by PSFex.
+    psf_size = np.int(np.ceil(psf_size_config * psf_samp))
+    # depending on [psf_oddsized], make the psf size odd or even
+    if psf_oddsized:
+        if psf_size % 2 == 0:
+            psf_size += 1
+    else:
+        if psf_size % 2 != 0:
+            psf_size += 1
+    # now change psf_samp slightly:
+    psf_samp_update = float(psf_size) / float(psf_size_config)
+
+    # [psf_ima] is the corresponding cube of PSF subimages
+    psf_cube_shift = np.ndarray((ncoords,psf_size,psf_size), dtype='float32')
+    psf_cube_noshift = np.ndarray((ncoords,psf_size,psf_size), dtype='float32')
+
+    # loop through coordinates and construct psf
+    for i in range(ncoords):
+
+        x = (int(xcoords[i]) - polzero1) / polscal1
+        y = (int(ycoords[i]) - polzero2) / polscal2
+        
+        if ncoords==1 or use_single_PSF:
+            psf_ima_config = data[0]
+        else:
+            if poldeg==2:
+                psf_ima_config = data[0] + data[1] * x + data[2] * x**2 + \
+                                 data[3] * y + data[4] * x * y + data[5] * y**2
+            elif poldeg==3:
+                psf_ima_config = data[0] + data[1] * x + data[2] * x**2 + data[3] * x**3 + \
+                                 data[4] * y + data[5] * x * y + data[6] * x**2 * y + \
+                                 data[7] * y**2 + data[8] * x * y**2 + data[9] * y**3
+
+        # shift to the subpixel center of the object (object at
+        # fractional pixel position 0.5,0.5 doesn't need the PSF to
+        # shift as the PSF image is constructed to be even
+        if psf_oddsized:
+            xshift = xcoords[i]-np.round(xcoords[i])
+            yshift = ycoords[i]-np.round(ycoords[i])
+        else:
+            xshift = (xcoords[i]-int(xcoords[i])-0.5)
+            yshift = (ycoords[i]-int(ycoords[i])-0.5)
+
+        # if [psf_samp_update] is lower than unity, then perform this
+        # shift before the PSF image is re-sampled to the image
+        # pixels, as the original PSF will have higher resolution in
+        # that case
+        if psf_samp_update < 1:
+            # multiply with PSF sampling to get shift in units of image
+            # pixels
+            xshift *= psf_samp_update
+            yshift *= psf_samp_update
+            # shift PSF
+            psf_ima_shift = ndimage.shift(psf_ima_config, (yshift, xshift), order=order)
+            # resample PSF image at image pixel scale
+            psf_ima_shift_resized = ndimage.zoom(psf_ima_shift, psf_samp_update, order=order)
+            # also resample non-shifted PSF image at image pixel scale
+            psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, order=order)
+        else:
+            # resample PSF image at image pixel scale
+            psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, order=order)
+            # shift PSF
+            psf_ima_shift_resized = ndimage.shift(psf_ima_resized, (yshift, xshift), order=order)
+        
+        # clean from low values
+        if psf_clean_factor!=0:
+            psf_ima_shift_resized = clean_psf(psf_ima_shift_resized, psf_clean_factor)
+        # normalize to unity
+        psf_cube_shift[i] = psf_ima_shift_resized / np.sum(psf_ima_shift_resized)
+
+        # also return normalized PSF without any shift
+        # clean from low values
+        if psf_clean_factor!=0:
+            psf_ima_resized = clean_psf(psf_ima_resized, psf_clean_factor)
+        # normalize to unity
+        psf_cube_noshift[i] =  psf_ima_resized / np.sum(psf_ima_resized)
+        
+    if timing: print 'wall-time spent in get_psf', time.time() - t
+
+    return psf_cube_noshift, psf_cube_shift
+
+################################################################################
+
 def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref):
 
     """Function that takes in output catalogs of stars used in the PSFex
-    runs on the new and the ref image, and returns the arrays x, y (in
-    the new frame) and fratios for the matching stars. In addition, it
-    provides the difference in stars' RAs and DECs in arcseconds
-    between the two catalogs.
+    runs on the new and the ref image, and returns the arrays with
+    pixel coordinates (!) x, y (in the new frame) and fratios for the
+    matching stars. In addition, it provides the difference in stars'
+    RAs and DECs in arcseconds between the two catalogs.
 
     """
     
@@ -1189,7 +1848,7 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref):
     number_ref, x_ref, y_ref, norm_ref = readcat(psfcat_ref)
 
     def xy2radec (number, sexcat):
-        # read SExctractor fits table
+        # read SExtractor fits table
         with pyfits.open(sexcat) as hdulist:
             data = hdulist[2].data
             ra_sex = data['ALPHAWIN_J2000']
@@ -1305,13 +1964,28 @@ def show_image(image):
 
 ################################################################################
 
+def ds9_arrays(**kwargs):
+
+    cmd = ['ds9', '-zscale', '-zoom', '4', '-cmap', 'heat']
+    for name, array in kwargs.items():
+        # write array to fits
+        fitsfile = 'ds9_'+name+'.fits'
+        pyfits.writeto(fitsfile, np.array(array), clobber=True)            
+        # append to command
+        cmd.append(fitsfile)
+        
+    #print 'cmd', cmd
+    result = call(cmd)
+    
+################################################################################
+
 def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale):
 
     if timing: t = time.time()
     print '\nexecuting run_wcs ...'
     
-    scale_low = 0.999 * pixscale
-    scale_high = 1.001 * pixscale
+    scale_low = 0.99 * pixscale
+    scale_high = 1.01 * pixscale
     
     # round fwhm to 2 decimals
     fwhm = float('{:.2f}'.format(fwhm))
@@ -1352,7 +2026,8 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale):
            #'--no-verify', 
            #'--code-tolerance', str(0.01), 
            #'--quad-size-min', str(0.1),
-           #'--quad-size-max', str(0.1),
+           # for KMTNet images restrict the max quad size:
+           '--quad-size-max', str(0.1),
            # number of field objects to look at:
            #'--depth', str(10),
            #'--scamp', scampcat,
@@ -1369,11 +2044,17 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale):
         print 'aperture diameters used for PHOT_APERTURES', apphot_diams_str
     
     cmd_sex = 'sex -SEEING_FWHM '+str(seeing)+' -PARAMETERS_NAME '+sex_par_temp+' -PHOT_APERTURES '+apphot_diams_str
-    
-    if bkg_sex:
+    # add commands to produce BACKGROUND, BACKGROUND_RMS and
+    # background-subtracted image with all pixels where objects were
+    # detected set to zero (-OBJECTS). These are used to build an
+    # improved background map. If median background is used
+    # ([bkg_method]==1) then this can be skipped.
+    if bkg_method!=1:
         bkg = image_in.replace('.fits','_bkg.fits')
-        obj = image_in.replace('.fits','_obj.fits')
-        cmd_sex += ' -CHECKIMAGE_TYPE BACKGROUND,OBJECTS -CHECKIMAGE_NAME '+bkg+','+obj
+        bkg_std = image_in.replace('.fits','_bkg_std.fits')
+        objmask = image_in.replace('.fits','_objmask.fits')
+        cmd_sex += ' -CHECKIMAGE_TYPE BACKGROUND,BACKGROUND_RMS,-OBJECTS -CHECKIMAGE_NAME '\
+                   +bkg+','+bkg_std+','+objmask
         
     cmd += ['--sextractor-path', cmd_sex]
     if verbose:
@@ -1748,6 +2429,15 @@ def run_psfex(cat_in, file_config, cat_out):
     result = call(cmd)    
 
     if timing: print 'wall-time spent in run_psfex', time.time()-t
+
+################################################################################
+
+def clean_psf(psf, clean_factor):
+
+    mask_clean = (psf < (np.amax(psf) * clean_factor))
+    psf[mask_clean] = 1e-20
+
+    return psf
     
 ################################################################################
 
@@ -1762,8 +2452,15 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
     R_hat = fft.fft2(R)
     N_hat = fft.fft2(N)
     Pn_hat = fft.fft2(Pn)
+    if psf_clean_factor!=0:
+        # clean Pn_hat
+        Pn_hat = clean_psf(Pn_hat, psf_clean_factor)
     Pn_hat2_abs = np.abs(Pn_hat**2)
+
     Pr_hat = fft.fft2(Pr)
+    if psf_clean_factor!=0:
+        # clean Pr_hat
+        Pr_hat = clean_psf(Pr_hat, psf_clean_factor)
     Pr_hat2_abs = np.abs(Pr_hat**2)
 
     sn2 = sn**2
@@ -1775,9 +2472,9 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
     fD = fr*fn / np.sqrt(sn2*fr2+sr2*fn2)
     
     denominator = sn2*fr2*Pr_hat2_abs + sr2*fn2*Pn_hat2_abs
-    if len(np.where(denominator==0)[0]) != 0:
+    if np.any(denominator==0):
         print 'Warning: denominator contains zero(s)'
-
+        
     #denominator_beta = sn2*Pr_hat2_abs + beta2*sr2*Pn_hat2_abs
 
     D_hat = (fr*Pr_hat*N_hat - fn*Pn_hat*R_hat) / np.sqrt(denominator)
@@ -1854,6 +2551,8 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
         #print 'dy is finite?', np.isfinite(dy)
     
     if display:
+        pyfits.writeto('Pn_hat.fits', np.real(Pn_hat), clobber=True)
+        pyfits.writeto('Pr_hat.fits', np.real(Pr_hat), clobber=True)
         pyfits.writeto('kr.fits', np.real(kr), clobber=True)
         pyfits.writeto('kn.fits', np.real(kn), clobber=True)
         pyfits.writeto('Sr.fits', Sr, clobber=True)
