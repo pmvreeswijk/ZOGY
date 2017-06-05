@@ -335,13 +335,13 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None, teles
     if not subpipe:
         data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std = \
             prep_optimal_subtraction(base_new+'_wcs.fits', nsubs, 'new', fwhm_new)
-        data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_new_bkg_std = \
+        data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std = \
             prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref)
 
     if subpipe:
         data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std = \
             prep_optimal_subtraction(new_fits, nsubs, 'new', fwhm_new)
-        data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_new_bkg_std = \
+        data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std = \
             prep_optimal_subtraction(ref_fits, nsubs, 'ref', fwhm_ref, remap=ref_fits_remap)
     
     if verbose:
@@ -1248,7 +1248,7 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
         
 ################################################################################
 
-def get_optflux_Naylor (P, D, S, V):
+def get_optflux_Naylor_old (P, D, S, V):
 
     """Function that calculates signal-to-noise ratio using Eqs. 8, 10 and
     11 from Naylor 1998. All inputs are assumed to be in electrons
@@ -1267,7 +1267,7 @@ def get_optflux_Naylor (P, D, S, V):
 
 ################################################################################
 
-def get_s2n_ZO (P, D, S, RON):
+def get_s2n_ZO_old (P, D, S, RON):
 
     """Function that calculates signal-to-noise ratio using Eq. 51 from
     Zackay & Ofek 2017, ApJ, 836, 187.  All inputs are assumed to be
@@ -1285,7 +1285,7 @@ def get_s2n_ZO (P, D, S, RON):
 
 ################################################################################
 
-def flux_optimal (P, D, S, RON, nsigma=5):
+def flux_optimal_old (P, D, S, RON, nsigma=5):
     
     """Function that calculates optimal flux and corresponding error based
     on the PSF [P], data [D], sky [S] and read-out noise [RON].  This
@@ -1326,7 +1326,7 @@ def flux_optimal (P, D, S, RON, nsigma=5):
 
 ################################################################################
 
-def flux_optimal_s2n (P, S, RON, s2n, fwhm=5.):
+def flux_optimal_s2n_old (P, S, RON, s2n, fwhm=5.):
     
     """Similar to function [flux_optimal] above, but this function returns
     the total flux sum(D-S) required for the point source to have a
@@ -1362,9 +1362,9 @@ def flux_optimal_s2n (P, S, RON, s2n, fwhm=5.):
 
 ################################################################################
 
-def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=False,
-                  clip_zeros=True, get_median=True, get_mode=False, mode_binsize=0.1,
-                  verbose=False, show_hist=False):
+def clipped_stats_old (array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=False,
+                       clip_zeros=True, get_median=True, get_mode=False, mode_binsize=0.1,
+                       verbose=False, show_hist=False):
     
     # remove zeros
     if clip_zeros:
