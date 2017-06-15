@@ -63,14 +63,14 @@ bkg_filtersize = 5       # size of filter used for smoothing the above
                          # regions for method 2, 3 and 4
 
 # ZOGY parameters
-fratio_local = True      # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 5     # required significance in Scorr for transient detection
 
 # optional fake stars
 nfakestars = 1           # number of fake stars to be added to each subimage
                          # if 1: star will be at the center, if > 1: randomly distributed
-fakestar_s2n = 5         # required signal-to-noise ratio of the fake stars    
+fakestar_s2n = 50        # required signal-to-noise ratio of the fake stars    
 
 # switch on/off different functions
 dosex = False            # do extra SExtractor run (already done inside Astrometry.net)
@@ -134,10 +134,10 @@ apphot_radii = [0.67, 1, 1.5, 2, 3, 5, 7, 10] # list of radii in units
                                               # SExtractor general
 
 redo = False             # execute functions even if output file exist
-verbose = True           # print out extra info
+verbose = False          # print out extra info
 timing = True            # (wall-)time the different functions
-display = True           # show intermediate fits images
-make_plots = False       # make diagnostic plots and save them as pdf
+display = False          # show intermediate fits images
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
 
 
@@ -515,8 +515,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 # place it at the center of the new subimage
                 xpos = xsize_fft/2
                 ypos = ysize_fft/2
-                index_temp = [slice(ypos-psf_size_new/2, ypos+psf_size_new/2),
-                              slice(xpos-psf_size_new/2, xpos+psf_size_new/2)]
+                psf_hsize = psf_size_new/2
+                index_temp = [slice(ypos-psf_hsize, ypos+psf_hsize+1),
+                              slice(xpos-psf_hsize, xpos+psf_hsize+1)]
                 # Use function [flux_optimal_s2n] to estimate flux needed
                 # for star with S/N of [fakestar_s2n].
                 fakestar_flux, fakestar_data = flux_optimal_s2n (psf_orig_new[nsub],
@@ -558,8 +559,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 for nstar in range(nfakestars):
                     xpos = np.int(xpos_rand[nstar])
                     ypos = np.int(ypos_rand[nstar])
-                    index_temp = [slice(ypos-psf_size_new/2, ypos+psf_size_new/2),
-                                  slice(xpos-psf_size_new/2, xpos+psf_size_new/2)]
+                    psf_hsize = psf_size_new/2
+                    index_temp = [slice(ypos-psf_hsize, ypos+psf_hsize+1),
+                                  slice(xpos-psf_hsize, xpos+psf_hsize+1)]
                     fakestar_flux, fakestar_data = flux_optimal_s2n (psf_orig_new[nsub],
                                                                      data_new[nsub][index_temp],
                                                                      bkg_new[index_temp], readnoise_new,
@@ -600,10 +602,11 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                     
         # adopt full-frame values, also if local fratio_median is more
         # than 2 sigma (full frame) away from the full-frame value
-        if not fratio_local or (abs(fratio_median-fratio_median_full)/fratio_std_full > 2):
+        if not fratio_local or (np.abs(fratio_median-fratio_median_full)/fratio_std_full > 2.):
             fratio_mean, fratio_std, fratio_median = fratio_mean_full, fratio_std_full, fratio_median_full
 
         if verbose:
+            print 'np.abs(fratio_median-fratio_median_full)/fratio_std_full', np.abs(fratio_median-fratio_median_full)/fratio_std_full
             print 'adopted fratio_mean, fratio_std, fratio_median', fratio_mean, fratio_std, fratio_median            
             
         # and the same for dx and dy
@@ -628,7 +631,21 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             print 'f_new, f_ref', f_new, f_ref
             print 'dx_sub, dy_sub', dx_sub, dy_sub
 
-
+        # test: put sharp source in new
+        do_test = False
+        if do_test:
+            data_ref[nsub][:] = 0.
+            data_new[nsub][:] = 0.
+            data_new[nsub][xpos-1, ypos-1] = 1.
+            data_new[nsub][xpos-1, ypos] = 1.
+            data_new[nsub][xpos-1, ypos+1] = 1.
+            data_new[nsub][xpos, ypos-1] = 1.
+            data_new[nsub][xpos, ypos] = 3.
+            data_new[nsub][xpos, ypos+1] = 1.
+            data_new[nsub][xpos+1, ypos-1] = 1.
+            data_new[nsub][xpos+1, ypos] = 1.
+            data_new[nsub][xpos+1, ypos+1] = 1.
+        
         # call Barak's function
         data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = run_ZOGY(data_ref[nsub], data_new[nsub], 
                                                                        psf_ref[nsub], psf_new[nsub], 
@@ -2022,10 +2039,8 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
     # 4-5 pixels per FWHM) which is set by the [psf_sampling] parameter.
     # If set to zero, it is automatically determined by PSFex.
     psf_size = np.int(np.ceil(psf_size_config * psf_samp))
-    # if this is odd, make it even - for the moment this is because
-    # the index range of the bigger image in which this psf is put
-    # ([psf_ima_center]) assumes this is even
-    if psf_size % 2 != 0:
+    # if this is even, make it odd
+    if psf_size % 2 == 0:
         psf_size += 1
     # now change psf_samp slightly:
     psf_samp_update = float(psf_size) / float(psf_size_config)
@@ -2081,9 +2096,12 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale):
         xcenter_fft, ycenter_fft = xsize_fft/2, ysize_fft/2
         if verbose and nsub==0:
             print 'xcenter_fft, ycenter_fft ', xcenter_fft, ycenter_fft
-        psf_ima_center[nsub, ycenter_fft-psf_size/2:ycenter_fft+psf_size/2, 
-                       xcenter_fft-psf_size/2:xcenter_fft+psf_size/2] = psf_ima_resized_norm
-            
+
+        psf_hsize = psf_size/2
+        index = [slice(ycenter_fft-psf_hsize, ycenter_fft+psf_hsize+1), 
+                 slice(xcenter_fft-psf_hsize, xcenter_fft+psf_hsize+1)]
+        psf_ima_center[nsub][index] = psf_ima_resized_norm
+
         # perform fft shift
         psf_ima_shift[nsub] = fft.fftshift(psf_ima_center[nsub])
 
@@ -3006,13 +3024,13 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
     dy2 = dy**2
     # and calculate astrometric variance
     Sn = np.real(fft.ifft2(kn_hat*N_hat))
-    dSndy = Sn - np.roll(Sn,1,axis=1)
-    dSndx = Sn - np.roll(Sn,1,axis=0)
+    dSndy = Sn - np.roll(Sn,1,axis=0)
+    dSndx = Sn - np.roll(Sn,1,axis=1)
     VSn_ast = dx2 * dSndx**2 + dy2 * dSndy**2
     
     Sr = np.real(fft.ifft2(kr_hat*R_hat))
-    dSrdy = Sr - np.roll(Sr,1,axis=1)
-    dSrdx = Sr - np.roll(Sr,1,axis=0)
+    dSrdy = Sr - np.roll(Sr,1,axis=0)
+    dSrdx = Sr - np.roll(Sr,1,axis=1)
     VSr_ast = dx2 * dSrdx**2 + dy2 * dSrdy**2
 
     if verbose:
