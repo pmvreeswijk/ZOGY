@@ -1,9 +1,9 @@
 # ZOGY
 a Python implementation of proper image subtraction (Zackay, Ofek &amp; Gal-Yam 2016, ApJ, 830, 27)
 
-Written by Paul Vreeswijk with vital input from Barak Zackay and Eran Ofek. Adapted by Kerry Paterson for integration into pipeline for MeerLICHT.
+Written by Paul Vreeswijk with vital input from Barak Zackay and Eran Ofek.
 
-This module accepts a new and a reference fits image, finds their WCS solution using Astrometry.net, runs SExtractor (inside Astrometry.net), PSFex to extract the PSF from the images, and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), the corrected significance image (Scorr), and PSF photometry image (Fpsf - alpha in the paper) and associated error image (Fpsferr).
+This module accepts a new and a reference fits image, finds their WCS solution using Astrometry.net, runs SExtractor (inside Astrometry.net), PSFex to extract the PSF from the images, and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), and the corrected significance image (Scorr).
 
 It makes grateful use of the following programs that first need to be installed:
 
