@@ -172,7 +172,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     if telescope is not None:
         Constants = importlib.import_module('Utils.Constants_'+telescope)
         # some global parameter settings
-        global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, nfakestars, fakestar_s2n, fratio_local, dxdy_local, transient_nsigma, dosex, dosex_psffit, pixelscale, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, psf_radius, psf_sampling, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, timing, display, makeplots, verbose
+        global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, nfakestars, fakestar_s2n, fratio_local, dxdy_local, transient_nsigma, dosex, dosex_psffit, pixelscale, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, psf_radius, psf_sampling, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, timing, display, make_plots, show_plots, verbose
         # optimal subtraction parameters
         subimage_size = Constants.Imager.subimage_size      # size of subimages
         subimage_border = Constants.Imager.subimage_border     # border around subimage to avoid edge effects
@@ -225,7 +225,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         redo = Constants.redo              # execute functions even if output file exist
         timing = Constants.timing           # (wall-)time the different functions
         display = Constants.display          # show intermediate images
-        makeplots = Constants.makeplots       # produce astrometry plots
+        make_plots = Constants.makeplots       # produce astrometry plots
+        show_plots = Constants.show_plots
         verbose = Constants.verbose
 
     # define the base names of input fits files, base_new and
