@@ -196,7 +196,7 @@ def global_pars(telescope=None):
         astronet_tweak_order = 3
 
         # path and names of configuration files
-        cfg_dir = './Config'
+        cfg_dir = './Config/'
         sex_cfg = cfg_dir+'sex.config'     # SExtractor configuration file
         sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
         sex_par = cfg_dir+'sex.params'     # SExtractor output parameters definition file
@@ -214,7 +214,7 @@ def global_pars(telescope=None):
         timing = True            # (wall-)time the different functions
         display = True           # show intermediate fits images
         make_plots = True        # make diagnostic plots and save them as pdf
-        show_plots = True        # show diagnostic plots
+        show_plots = False       # show diagnostic plots
 
 
 ################################################################################
@@ -319,7 +319,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         new_fits_wcs = base_new+'_wcs.fits'
         if not os.path.isfile(new_fits_wcs) or redo:
             result = run_wcs(base_new+'.fits', new_fits_wcs, ra_new, dec_new,
-                             gain_new, readnoise_new, fwhm_new, pixscale_new, log)
+                             gain_new, readnoise_new, fwhm_new, pixscale_new, log, 'new')
 
         # run SExtractor for seeing estimate of ref_fits:
         sexcat_ref = base_ref+'.sexcat'
@@ -337,7 +337,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         ref_fits_wcs = base_ref+'_wcs.fits'
         if not os.path.isfile(ref_fits_wcs) or redo:
             result = run_wcs(base_ref+'.fits', ref_fits_wcs, ra_ref, dec_ref,
-                             gain_ref, readnoise_ref, fwhm_ref, pixscale_ref, log)
+                             gain_ref, readnoise_ref, fwhm_ref, pixscale_ref, log, 'ref')
 
 
         # remap ref to new
@@ -766,7 +766,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     dt_usr  = end_time[2] - start_time2[2]
     dt_sys  = end_time[3] - start_time2[3]
     dt_wall = end_time[4] - start_time2[4]
-    log.info()
+
     log.info("Elapsed user time in {0}:  {1:.3f} sec".format("optsub", dt_usr))
     log.info("Elapsed CPU time in {0}:  {1:.3f} sec".format("optsub", dt_sys))
     log.info("Elapsed wall time in {0}:  {1:.3f} sec".format("optsub", dt_wall))
@@ -774,7 +774,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     dt_usr  = end_time[2] - start_time1[2]
     dt_sys  = end_time[3] - start_time1[3]
     dt_wall = end_time[4] - start_time1[4]
-    log.info()
+
     log.info("Elapsed user time in {0}:  {1:.3f} sec".format("total", dt_usr))
     log.info("Elapsed CPU time in {0}:  {1:.3f} sec".format("total", dt_sys))
     log.info("Elapsed wall time in {0}:  {1:.3f} sec".format("total", dt_wall))
@@ -1527,7 +1527,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         mask_fits_remap = base_ref+'_mask_remap.fits'
         if not os.path.isfile(mask_fits_remap) or redo:
             result = run_remap(base_new+'_wcs.fits', 'mask_ref_temp.fits', mask_fits_remap,
-                               [ysize, xsize], gain=gain, config=swarp_cfg,
+                               [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
                                resampling_type='NEAREST')
         # read this remapped mask back into data_mask    
         with fits.open(mask_fits_remap) as hdulist:
@@ -1542,7 +1542,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         data = data_wcs
 
     # determine cutouts
-    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(subimage_size, ysize, xsize)
+    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(subimage_size, ysize, xsize, log)
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
 
@@ -1699,12 +1699,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # needs to be done after determination of optimal fluxes as
     # otherwise the potential replacement of the saturated pixels will
     # not be taken into account
-
-    # determine cutouts (already done above just before bkg_method 1
-    # background is made)
-    #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(subimage_size, ysize, xsize)
-    #ysize_fft = subimage_size + 2*subimage_border
-    #xsize_fft = subimage_size + 2*subimage_border
 
     fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_bkg = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
@@ -2007,7 +2001,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             #           background=background, background_std=background_std)
             #np.pad seems quite slow; alternative:
             #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(bkg_boxsize,
-            #                                                                   ysize, xsize,
+            #                                                                   ysize, xsize, log,
             #                                                                   get_remainder=True)
             # these now include the remaining patches
                         
@@ -2068,7 +2062,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     if not os.path.isfile(psfexcat) or redo:
         log.info('sexcat', sexcat)
         log.info('psfexcat', psfexcat)
-        result = run_psfex(sexcat, psfex_cfg, psfexcat, log)
+        result = run_psfex(sexcat, psfex_cfg, psfexcat, log, fwhm, imtype)
 
     # again run SExtractor, but now using output PSF from PSFex, so
     # that PSF-fitting can be performed for all objects. The output
@@ -2511,7 +2505,7 @@ def ds9_arrays(**kwargs):
     
 ################################################################################
 
-def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log):
+def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, imtype):
 
     if timing: t = time.time()
     log.info('\nexecuting run_wcs ...')
@@ -2596,7 +2590,12 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log):
     
     result = call(cmd)
 
-    if os.path.exists("%s.solved"%basename) and status==0:
+    if imtype=='new':
+        basename = base_new
+    else:
+        basename = base_ref
+                
+    if os.path.exists("%s.solved"%basename): # and status==0:
         os.remove("%s.solved"%basename)
         os.remove("%s.match"%basename)
         os.remove("%s.rdls"%basename)
@@ -2984,7 +2983,7 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, log):
+def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
