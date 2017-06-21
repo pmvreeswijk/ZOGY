@@ -204,10 +204,9 @@ def global_pars(telescope=None):
         psfex_cfg = cfg_dir+'psfex.config' # PSFex configuration file
         swarp_cfg = cfg_dir+'swarp.config' # SWarp configuration file
 
-        apphot_radii = [0.67, 1, 1.5, 2, 3, 5, 7, 10] # list of radii in units
-                                                      # of FWHM used for
-                                                      # aperture photometry in
-                                                      # SExtractor general
+        apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
+                                      # used for aperture photometry
+                                      # in SExtractor general
 
         redo = True              # execute functions even if output file exist
         verbose = True           # print out extra info
