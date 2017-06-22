@@ -17,7 +17,6 @@ CLASS_STAR               # S/G classifier output
 FLUX_APER(3)             # Flux vector within fixed circular aperture(s)             [count]
 FLUXERR_APER(3)          # RMS error vector for aperture flux(es)                    [count]
 BACKGROUND               # Background at centroid position                           [count]
-#THRESHOLD               # Detection threshold above background                      [count]
 FLUX_MAX                 # Peak flux above background                                [count]
 FLUX_AUTO                # Flux within a Kron-like elliptical aperture               [count]
 FLUXERR_AUTO             # RMS error for AUTO flux                                   [count]
@@ -26,10 +25,8 @@ FLUX_ISO                 # Isophotal flux                                       
 FLUXERR_ISO              # RMS error for isophotal flux                              [count]
 ISOAREA_IMAGE            # Isophotal area above Analysis threshold                   [pixel**2]
 MU_MAX                   # Peak surface brightness above background                  [mag * arcsec**(-2)]
-#MU_THRESHOLD            # Detection threshold above background                      [mag * arcsec**(-2)]
 FLUX_RADIUS(2)           # Fraction-of-light radii                                   [pixel]
 FLUX_PETRO               # Flux within a Petrosian-like elliptical aperture          [count]
 FLUXERR_PETRO            # RMS error for PETROsian flux                              [count]
 PETRO_RADIUS             # Petrosian apertures in units of A or B                   
 SNR_WIN                  # Signal-to-noise ratio in a Gaussian window
-VIGNET(99,99)            # Pixel data around detection                               [count]

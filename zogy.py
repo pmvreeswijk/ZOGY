@@ -139,7 +139,7 @@ def global_pars(telescope=None):
                                  # regions for method 2, 3 and 4
 
         # ZOGY parameters
-        fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+        fratio_local = True      # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
         dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
         transient_nsigma = 5     # required significance in Scorr for transient detection
 
@@ -302,35 +302,25 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         # Astrometry.net and remapping the ref image to the new image,
         # have already been done so this block can be skipped.
         
-        # run SExtractor for seeing estimate of new_fits:
+        # run SExtractor for seeing estimate of new_fits and ref_fits
+        # run_wcs needs both the fwhm_new and fwhm_ref, so these
+        # seeing 
         sexcat_new = base_new+'.sexcat'
         fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
                                                 sex_par, pixscale_new, log, fraction=fwhm_imafrac)
         log.info('fwhm_new, fwhm_std_new: ' +str(fwhm_new) +', ' + str(fwhm_std_new))
         log.info('fwhm from header: ' +str(header_new['SEEING']))
-        
-        # write seeing (in arcseconds) to header
-        #seeing_new = fwhm_new * pixscale_new
-        #seeing_new_str = str('{:.2f}'.format(seeing_new))
-        #header_new[key_seeing] = (seeing_new_str, '[arcsec] seeing estimated from central '+str(fwhm_imafrac))
+        sexcat_ref = base_ref+'.sexcat'
+        fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
+                                                sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
+        log.info('fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref)
+        log.info('fwhm from header', header_ref['SEEING'])
 
         # determine WCS solution of new_fits
         new_fits_wcs = base_new+'_wcs.fits'
         if not os.path.isfile(new_fits_wcs) or redo:
             result = run_wcs(base_new+'.fits', new_fits_wcs, ra_new, dec_new,
                              gain_new, readnoise_new, fwhm_new, pixscale_new, log, 'new')
-
-        # run SExtractor for seeing estimate of ref_fits:
-        sexcat_ref = base_ref+'.sexcat'
-        fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
-                                                sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
-        log.info('fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref)
-        log.info('fwhm from header', header_ref['SEEING'])
-        
-        # write seeing (in arcseconds) to header
-        #seeing_ref = fwhm_ref * pixscale_ref
-        #seeing_ref_str = str('{:.2f}'.format(seeing_ref))
-        #header_ref[key_seeing] = (seeing_ref_str, '[arcsec] seeing estimated from central '+str(fwhm_imafrac))
 
         # determine WCS solution of ref_fits
         ref_fits_wcs = base_ref+'_wcs.fits'
@@ -1751,7 +1741,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
         # compare flux_opt with flux_aper 2xFWHM
-        for i in range(0,8):
+        for i in range(len(apphot_radii)):
             aper_str = str(apphot_radii[i])
 
             flux_aper = data_sex['FLUX_APER'][index,i]
@@ -2519,28 +2509,37 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
     
     sexcat = image_out.replace('.fits','.sexcat')
 
-    # in case of new image and [psf_sampling] is set to zero, scale
-    # the size of the VIGNET output in the output catalog with
-    # 2*[psf_radius]*[fwhm]
-    if imtype=='new' and psf_sampling == 0.:
-        # replace VIGNET size in SExtractor parameter file based on [psf_radius]
-        size_vignet = np.int(np.ceil(2.*psf_radius*fwhm))
-        # make sure it's odd (not sure if this is important; suggested in
-        # PSFex manual)
+    # in case [psf_sampling] is set to zero, scale the size of the
+    # VIGNET output in the output catalog with 2*[psf_radius]*[fwhm]
+    # where fwhm is taken to be the largest of global parameters
+    # [fwhm_new] and [fwhm_ref] - this is to ensure that the size of
+    # the PSF stamp images produced can be of the same size, avoiding
+    # an artificial ring around bright stars
+    if psf_sampling == 0.:
+        fwhm_vignet = np.amax([fwhm_new, fwhm_ref])
+        size_vignet = np.int(np.ceil(2.*psf_radius*fwhm_vignet))
+        # make sure it's odd
         if size_vignet % 2 == 0: size_vignet += 1
-        size_vignet_str = str((size_vignet, size_vignet))
-        sex_par_temp = sex_par+'_temp'
-        with open(sex_par, 'rt') as file_in:
-            with open(sex_par_temp, 'wt') as file_out:
-                for line in file_in:
-                    file_out.write(line.replace('VIGNET(99,99)', 'VIGNET'+size_vignet_str))
+        # provide a warning if it's very large
+        if size_vignet > 99:
+            log.info('Warning: VIGNET size is larger than 99 pixels: '+str(size_vignet))
+    else:
+        # otherwise set it to a reasonably large value
+        size_vignet = 99
+
+    # append the VIGNET size to the SExtractor parameter file
+    # (sex_par) and write it to a temporary file (sex_par_temp) to be
+    # used in the Astrometry.net command below
+    size_vignet_str = str((size_vignet, size_vignet))
+    sex_par_temp = sex_par+'_temp'
+    with open(sex_par, 'rt') as file_in:
+        with open(sex_par_temp, 'wt') as file_out:
+            for line in file_in:
+                file_out.write(line)
+            file_out.write('VIGNET'+size_vignet_str)
         if verbose:
             log.info('VIGNET size: ' +str(size_vignet_str))
-    # if psf_sampling is non-zero, the VIGNET size as defined in the
-    # SExtractor config file is used, at the moment this is (99,99)
-    else:
-        sex_par_temp = sex_par
-            
+
     #scampcat = image_in.replace('.fits','.scamp')
     cmd = ['solve-field', '--no-plots', '--no-fits2fits',
            '--sextractor-config', sex_cfg,
