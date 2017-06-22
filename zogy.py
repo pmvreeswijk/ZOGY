@@ -284,15 +284,11 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     keywords = ['NAXIS2', 'NAXIS1', key_gain, key_ron, key_satlevel,
                 key_ra, key_dec, key_pixscale]
     ysize_new, xsize_new, gain_new, readnoise_new, satlevel_new, ra_new, dec_new, pixscale_new = read_header(header_new, keywords, log)
-    if verbose:
-        log.info(read_header(header_new, keywords, log))
 
     # read in header of ref_fits
     with fits.open(ref_fits) as hdulist:
         header_ref = hdulist[0].header
     ysize_ref, xsize_ref, gain_ref, readnoise_ref, satlevel_ref, ra_ref, dec_ref, pixscale_ref = read_header(header_ref, keywords, log)
-    if verbose:
-        log.info(read_header(header_ref, keywords, log))
 
     if not subpipe:    
 
@@ -306,13 +302,13 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         sexcat_new = base_new+'.sexcat'
         fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
                                                 sex_par, pixscale_new, log, fraction=fwhm_imafrac)
-        log.info('fwhm_new, fwhm_std_new: ' +str(fwhm_new) +', ' + str(fwhm_std_new))
-        log.info('fwhm from header: ' +str(header_new['SEEING']))
+        log.info('fwhm_new, fwhm_std_new: ' + str(fwhm_new) + ', ' + str(fwhm_std_new))
+        log.info('fwhm from header: ' + str(header_new['SEEING']))
         sexcat_ref = base_ref+'.sexcat'
         fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
                                                 sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
-        log.info('fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref)
-        log.info('fwhm from header', header_ref['SEEING'])
+        log.info('fwhm_ref, fwhm_std_ref: ' + str(fwhm_new) + ', ' + str(fwhm_std_new))
+        log.info('fwhm from header: ' + str(header_ref['SEEING']))
 
         # determine WCS solution of new_fits
         new_fits_wcs = base_new+'_wcs.fits'
@@ -415,7 +411,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     #fratio_median, fratio_std = np.median(fratio), np.std(fratio)
     fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2)
     if verbose:
-        log.info('fratio_mean_full, fratio_std_full, fratio_median_full: ' + str(fratio_mean_full) ', ' + str(fratio_std_full) + ', ' + str(fratio_median_full))
+        log.info('fratio_mean_full, fratio_std_full, fratio_median_full: ' + str(fratio_mean_full) + ', ' + str(fratio_std_full) + ', ' + str(fratio_median_full))
     
     if make_plots:
         # plot y vs x
@@ -557,9 +553,10 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                     log.info('recovered flux, fluxerr, S/N: ' + str(flux) + ', ' + str(fluxerr) + ', ' + str(flux/fluxerr))
                 
                     # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
-                    log.info('S/N check: ' + str(get_s2n_ZO(psf_orig_new[nsub]) + ', ' + str(fakestar_data) + ', ' + 
-                                                  bkg_new[index_temp], readnoise_new))
 
+                    s2n = get_s2n_ZO(psf_orig_new[nsub], fakestar_data, bkg_new[index_temp], readnoise_new)
+                    log.info('S/N check (Eq. 51 Zackay & Ofek 2017): ' + str(s2n))
+                    
                     # check S/N with Eqs. from Naylor (1998)
                     flux, fluxerr = get_optflux_Naylor(psf_orig_new[nsub], fakestar_data,
                                                        bkg_new[index_temp],
@@ -1386,7 +1383,7 @@ def read_header(header, keywords, log):
     for i in range(len(keywords)):
         if keywords[i] in header:
             if verbose:
-                log.info('keywords[i], header[keywords[i]]: ' + keywords[i] +', '+ str(header[keywords[i]]))
+                log.info('key, value: ' + keywords[i] +', '+ str(header[keywords[i]]))
             values.append(header[keywords[i]])
         else:
             log.error('Error: keyword ' + keywords[i] + ' not present in header - change keyword name or add manually')
@@ -1593,7 +1590,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # image in case, mask and background. Note
     # that in case background method 1 was selected, the background
     # used here is that determined by SExtractor
-    data = fixpix (data, data_mask, data_bkg, satlevel=satlevel*gain)
+    data = fixpix (data, data_mask, data_bkg, log, satlevel=satlevel*gain)
 
     
     # determine psf of input image with get_psf function - needs to be
@@ -1821,7 +1818,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
 
 ################################################################################
 
-def fixpix (data, mask_in, bkg, satlevel=60000.):
+def fixpix (data, mask_in, bkg, log, satlevel=60000.):
 
     if timing: t = time.time()
     log.info('Executing fixpix ...')
@@ -2531,7 +2528,7 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
         if size_vignet % 2 == 0: size_vignet += 1
         # provide a warning if it's very large
         if size_vignet > 99:
-            log.info('Warning: VIGNET size is larger than 99 pixels: '+str(size_vignet))
+            log.info('Warning: VIGNET size is larger than 99 pixels: ' + str(size_vignet))
     else:
         # otherwise set it to a reasonably large value
         size_vignet = 99
@@ -2547,7 +2544,7 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
                 file_out.write(line)
             file_out.write('VIGNET'+size_vignet_str)
         if verbose:
-            log.info('VIGNET size: ' +str(size_vignet_str))
+            log.info('VIGNET size: ' + str(size_vignet_str))
 
     #scampcat = image_in.replace('.fits','.scamp')
     cmd = ['solve-field', '--no-plots', '--no-fits2fits',
