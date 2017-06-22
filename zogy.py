@@ -8,7 +8,7 @@ import numpy as np
 #import numpy.fft as fft
 import matplotlib.pyplot as plt
 import os
-from subprocess import call
+import subprocess
 from scipy import ndimage
 from scipy import stats
 import time
@@ -743,7 +743,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                    'psf_ima_center_new_sub.fits', 'psf_ima_center_ref_sub.fits', 
                    'psf_ima_shift_new_sub.fits', 'psf_ima_shift_ref_sub.fits']
 
-            result = call(cmd)
+            result = subprocess.call(cmd)
 
         if timing: log.info('wall-time spent in nsub loop ' +str(time.time()-tloop))
 
@@ -837,7 +837,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     else:
         cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits',
                'Fpsf.fits', 'Fpsferr.fits']
-    result = call(cmd)
+    result = subprocess.call(cmd)
 
 
 ################################################################################
@@ -2497,7 +2497,7 @@ def ds9_arrays(**kwargs):
         cmd.append(fitsfile)
 
     #print 'cmd', cmd
-    result = call(cmd)
+    result = subprocess.call(cmd)
     
 ################################################################################
 
@@ -2584,14 +2584,17 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
     # if verbose:
     #     log.info('Astrometry.net command: '+ cmd)
     
-    result = call(cmd)
+    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    (stdoutstr,stderrstr) = process.communicate()
+    status = process.returncode
+    log.info(stdoutstr)
 
     if imtype=='new':
         basename = base_new
     else:
         basename = base_ref
                 
-    if os.path.exists("%s.solved"%basename): # and status==0:
+    if os.path.exists("%s.solved"%basename) and status==0:
         os.remove("%s.solved"%basename)
         os.remove("%s.match"%basename)
         os.remove("%s.rdls"%basename)
@@ -2772,13 +2775,13 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
            '-IMAGE_SIZE', size_str, '-GAIN_DEFAULT', str(gain),
            '-RESAMPLING_TYPE', resampling_type,
            '-PROJECTION_ERR', str(projection_err)]
-    result = call(cmd)
-    if mask is not None:
-        cmd = ['swarp', mask, '-c', config, '-IMAGEOUT_NAME', outname.replace('.fits','_mask.fits'), 
-           '-IMAGE_SIZE', size_str, '-GAIN_DEFAULT', str(gain),
-           '-RESAMPLING_TYPE', resampling_type,
-           '-PROJECTION_ERR', str(projection_err)]
-        result = call(cmd)
+    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    (stdoutstr,stderrstr) = process.communicate()
+    status = process.returncode
+    log.info(stdoutstr)
+    if status != 0:
+        log.error('Swarp failed with exit code '+str(status)+'.')
+        return 'error'
     
     
     if timing: log.info('wall-time spent in run_remap ' + str(time.time()-t))
@@ -2854,7 +2857,10 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     if fitpsf: cmd += ['-PSF_NAME', image.replace('.fits', '.psf')]
 
     # run command
-    result = call(cmd)
+    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    (stdoutstr,stderrstr) = process.communicate()
+    status = process.returncode
+    log.info(stdoutstr)
 
     # get estimate of seeing from output catalog
     fwhm, fwhm_std = get_fwhm(cat_out, fwhm_frac, log, class_Sort=fwhm_class_sort)
@@ -3029,7 +3035,10 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
            '-PSF_SIZE', psf_size_config, '-PSF_SAMPLING', str(psf_sampling_use)]
     #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
-    result = call(cmd)    
+    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    (stdoutstr,stderrstr) = process.communicate()
+    status = process.returncode
+    log.info(stdoutstr)   
 
     if timing: log.info('wall-time spent in run_psfex ' + str(time.time()-t))
 
