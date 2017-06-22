@@ -285,7 +285,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 key_ra, key_dec, key_pixscale]
     ysize_new, xsize_new, gain_new, readnoise_new, satlevel_new, ra_new, dec_new, pixscale_new = read_header(header_new, keywords, log)
     if verbose:
-        log.info(keywords)
         log.info(read_header(header_new, keywords, log))
 
     # read in header of ref_fits
@@ -293,7 +292,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         header_ref = hdulist[0].header
     ysize_ref, xsize_ref, gain_ref, readnoise_ref, satlevel_ref, ra_ref, dec_ref, pixscale_ref = read_header(header_ref, keywords, log)
     if verbose:
-        log.info(keywords)
         log.info(read_header(header_ref, keywords, log))
 
     if not subpipe:    
@@ -324,8 +322,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         sexcat_ref = base_ref+'.sexcat'
         fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
                                                 sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
-        log.info('fwhm_ref, fwhm_std_ref', fwhm_ref, fwhm_std_ref)
-        log.info('fwhm from header', header_ref['SEEING'])
+        log.info('fwhm_ref, fwhm_std_ref ' +str(fwhm_ref) + ', ' + str(fwhm_std_ref))
+        log.info('fwhm from header ' + str(header_ref['SEEING']))
         
         # write seeing (in arcseconds) to header
         #seeing_ref = fwhm_ref * pixscale_ref
@@ -368,12 +366,12 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     xsize_fft = subimage_size + 2*subimage_border
     nsubs = centers.shape[0]
     if verbose:
-        log.info('nsubs', nsubs)
+        log.info('nsubs ' + str(nsubs))
         for i in range(nsubs):
-            log.info('i', i)
-            log.info('cuts_ima[i]', cuts_ima[i])
-            log.info('cuts_ima_fft[i]', cuts_ima_fft[i])
-            log.info('cuts_fft[i]', cuts_fft[i])
+            log.info('i ' + str(i))
+            log.info('cuts_ima[i] ' + str(cuts_ima[i]))
+            log.info('cuts_ima_fft[i] ' + str(cuts_ima_fft[i]))
+            log.info('cuts_fft[i] ' + str(cuts_fft[i]))
             
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # ref, psf and background images
@@ -399,7 +397,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     fratio *= gain_new / gain_ref
     
     dr = np.sqrt(dx**2 + dy**2)
-    if verbose: log.info('standard deviation dr over the full frame:', np.std(dr) )
+    if verbose: log.info('standard deviation dr over the full frame: ' +str(np.std(dr)) )
     dr_full = np.sqrt(np.median(dr)**2 + np.std(dr)**2)
     dx_full = np.sqrt(np.median(dx)**2 + np.std(dx)**2)
     dy_full = np.sqrt(np.median(dy)**2 + np.std(dy)**2)
@@ -407,16 +405,15 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     #dx_full = np.std(dx)
     #dy_full = np.sdata_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_stdtd(dy)
     if verbose:
-        log.info('np.median(dr), np.std(dr)', np.median(dr), np.std(dr))
-        log.info('np.median(dx), np.std(dx)', np.median(dx), np.std(dx))
-        log.info('np.median(dy), np.std(dy)', np.median(dy), np.std(dy))
-        log.info('dr_full, dx_full, dy_full', dr_full, dx_full, dy_full)
+        log.info('np.median(dr), np.std(dr): ' + str(np.median(dr)) + ', ' + str(np.std(dr)))
+        log.info('np.median(dx), np.std(dx): ' + str(np.median(dx)) + ', ' + str(np.std(dx)))
+        log.info('np.median(dy), np.std(dy): ' + str(np.median(dy)) + ', ' + str(np.std(dy)))
+        log.info('dr_full, dx_full, dy_full: ' + str(dr_full) + ', ' + str(dx_full) + ', ' + str(dy_full))
     
     #fratio_median, fratio_std = np.median(fratio), np.std(fratio)
     fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2)
     if verbose:
-        log.info('fratio_mean_full, fratio_std_full, fratio_median_full', \
-            fratio_mean_full, fratio_std_full, fratio_median_full)
+        log.info('fratio_mean_full, fratio_std_full, fratio_median_full: ' + str(fratio_mean_full) ', ' + str(fratio_std_full) + ', ' + str(fratio_median_full))
     
     if make_plots:
         # plot y vs x
@@ -502,14 +499,14 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         
     start_time2 = os.times()
             
-    log.info('\nexecuting run_ZOGY on subimages ...')
+    log.info('Executing run_ZOGY on subimages ...')
 
     for nsub in range(nsubs):
 
         if timing: tloop = time.time()
         
         if verbose:
-            log.info('\nNsub:', nsub+1)
+            log.info('Nsub: ' +str(nsub+1))
             log.info('----------')
             
         # refer to background and STD subimage with a shorter
@@ -555,17 +552,17 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                     flux, fluxerr, mask = flux_optimal(psf_orig_new[nsub], psf_orig_new[nsub],
                                                        fakestar_data, bkg_new[index_temp],
                                                        std_new[index_temp], readnoise_new, log=log)
-                    log.info('recovered flux, fluxerr, S/N', flux, fluxerr, flux/fluxerr)
+                    log.info('recovered flux, fluxerr, S/N: ' + str(flux) + ', ' + str(fluxerr) + ', ' + str(flux/fluxerr))
                 
                     # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
-                    log.info('S/N check', get_s2n_ZO(psf_orig_new[nsub], fakestar_data,
+                    log.info('S/N check: ' + str(get_s2n_ZO(psf_orig_new[nsub]) + ', ' + str(fakestar_data) + ', ' + 
                                                   bkg_new[index_temp], readnoise_new))
 
                     # check S/N with Eqs. from Naylor (1998)
                     flux, fluxerr = get_optflux_Naylor(psf_orig_new[nsub], fakestar_data,
                                                        bkg_new[index_temp],
                                                        fakestar_data+readnoise_new**2)
-                    log.info('Naylor recovered flux, fluxerr, S/N', flux, fluxerr, flux/fluxerr)
+                    log.info('Naylor recovered flux, fluxerr, S/N: ' + str(flux) + ', ' + str(fluxerr) + ', ' + str(flux/fluxerr))
             
 
             else:
@@ -617,7 +614,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 # determine local fratios
                 fratio_mean, fratio_std, fratio_median = clipped_stats(fratio[mask_sub_fratio], nsigma=2)
                 if verbose:
-                    log.info('sub image fratios:', fratio[mask_sub_fratio])
+                    log.info('sub image fratios: ' + str(fratio[mask_sub_fratio]))
                     
         # adopt full-frame values, also if local fratio_median is more
         # than 2 sigma (full frame) away from the full-frame value
@@ -625,8 +622,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             fratio_mean, fratio_std, fratio_median = fratio_mean_full, fratio_std_full, fratio_median_full
 
         if verbose:
-            log.info('np.abs(fratio_median-fratio_median_full)/fratio_std_full', np.abs(fratio_median-fratio_median_full)/fratio_std_full)
-            log.info('adopted fratio_mean, fratio_std, fratio_median', fratio_mean, fratio_std, fratio_median            )
+            log.info('np.abs(fratio_median-fratio_median_full)/fratio_std_full: ' + str(np.abs(fratio_median-fratio_median_full)/fratio_std_full))
+            log.info('adopted fratio_mean, fratio_std, fratio_median: ' + str(fratio_mean) + ', ' + str(fratio_std) + ', ' + str(fratio_median))
             
         # and the same for dx and dy
         if dxdy_local and any(mask_sub_fratio):
@@ -647,8 +644,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         f_new = 1.
         f_ref = f_new / fratio_median
         if verbose:
-            log.info('f_new, f_ref', f_new, f_ref)
-            log.info('dx_sub, dy_sub', dx_sub, dy_sub)
+            log.info('f_new, f_ref: ' + str(f_new) + ', ' + str(f_ref))
+            log.info('dx_sub, dy_sub: ' + str(dx_sub) + ', ' + str(dy_sub))
 
         # test: put sharp source in new
         do_test = False
@@ -677,9 +674,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         # check that robust std of Scorr is around unity
         if verbose:
             mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr, clip_zeros=False)
-            log.info('mean_Scorr, median_Scorr, std_Scorr', mean_Scorr, median_Scorr, std_Scorr)
+            log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' + str(median_Scorr) + ', ' + str(std_Scorr))
             mean_S, std_S, median_S = clipped_stats(data_S, clip_zeros=False)
-            log.info('mean_S, median_S, std_S', mean_S, median_S, std_S)
+            log.info('mean_S, median_S, std_S: ' + str(mean_S) + ', ' + str(median_S) + ', ' + str(std_S))
             
         # if fake star(s) was (were) added to the subimages, compare
         # the input flux (the same for the entire subimage) with the
@@ -868,12 +865,12 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
 
     """
         
-    log.info('\nexecuting get_optflux_xycoords ...')
+    log.info('Executing get_optflux_xycoords ...')
     t = time.time()
 
     # make sure x and y have same length
     if np.isscalar(xcoords) or np.isscalar(ycoords):
-        log.info('Error: xcoords and ycoords should be arrays')
+        log.error('Error: xcoords and ycoords should be arrays')
     else:
         assert len(xcoords) == len(ycoords)
         
@@ -1030,7 +1027,7 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
         # compare xshift/yshift_array with psf xy shifts
         dx = xshift_array - x_psf
         dy = yshift_array - y_psf
-        log.info('np.median(dx), np.median(dy)', np.median(dx), np.median(dy))
+        log.info('np.median(dx), np.median(dy): ' + str(np.median(dx)) + ', ' + str(np.median(dy)))
         limits = (-2, 2, -2, 2)
         plt.axis(limits)
         plt.plot(dx, dy, 'ko')
@@ -1039,7 +1036,7 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
         plt.show()
         plt.close()
 
-    if timing: log.info('wall-time spent in get_optflux_xycoords ' +str(time.time()-t))
+    if timing: log.info('wall-time spent in get_optflux_xycoords ' + str(time.time()-t))
 
     if psffit:
         return flux_opt, fluxerr_opt, D_replaced, flux_psf, fluxerr_psf
@@ -1248,8 +1245,8 @@ def flux_optimal (P, P_noshift, D, S, S_std, RON, nsigma_inner=10,
         mask_use[mask_temp] = False
 
     if False:
-        log.info('no. of rejected pixels', np.sum(mask_use==False))
-        log.info('np.amax((D - flux_opt * P - S)**2 / V)', np.amax(sigma2))
+        log.info('no. of rejected pixels: ' + str(np.sum(mask_use==False)))
+        log.info('np.amax((D - flux_opt * P - S)**2 / V): ' + str(np.amax(sigma2)))
         
         if not add_V_ast:
             V_ast = np.zeros(D.shape)
@@ -1340,8 +1337,8 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
         median = np.median(array)
         if abs(median-mean)/mean>0.1:
             log.info('Warning: mean and median in clipped_stats differ by more than 10%')
-            log.info('   mean: ', mean)
-            log.info(' median: ', median)
+            log.info('mean: ' + str(mean))
+            log.info('median: ' + str(median))
             
     # and mode
     if get_mode:
@@ -1398,7 +1395,7 @@ def read_header(header, keywords, log):
     
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     
-    log.info('\nexecuting prep_optimal_subtraction ...')
+    log.info('Executing prep_optimal_subtraction ...')
     t = time.time()
     
     # read in input_fits
@@ -1559,7 +1556,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         mask_reject = ((data_objmask==0) | (data<=0))
         mask_use = ~mask_reject
         if verbose:
-            log.info('np.sum(mask_reject)', np.sum(mask_reject))
+            log.info('np.sum(mask_reject) ' + str(np.sum(mask_reject)))
         
 
         for nsub in range(nsubs):
@@ -1570,10 +1567,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             mask_use_sub = mask_use[index_subcut]
             mean, std, median = clipped_stats(data[index_subcut], nsigma=bkg_nsigma)
             if verbose:
-                print '        nsub+1, mean, std, median', nsub+1, mean, std, median
+                log.info('nsub+1, mean, std, median: ' + str(nsub+1) + ', ' + str(mean) + ', ' + str(std) + ', ' + str(median))
             mean, std, median = clipped_stats(data[index_subcut][mask_use_sub], nsigma=bkg_nsigma)
             if verbose:
-                print 'masked: nsub+1, mean, std, median', nsub+1, mean, std, median
+                log.info('masked: nsub+1, mean, std, median: ' + str(nsub+1) + ', ' + str(mean) + ', ' + str(std) + ', ' + str(median))
             data_bkg[index_subcut] = median
             data_bkg_std[index_subcut] = std
 
@@ -1692,7 +1689,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # take up a lot of space, but only for the NEW image.
 
     
-    if timing: print 'wall-time spent deriving optimal fluxes', time.time()-t1
+    if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
 
     # split full image into subimages to be used in run_ZOGY - this
     # needs to be done after determination of optimal fluxes as
@@ -1814,8 +1811,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
         
-    if timing: log.info('wall-time spent deriving optimal fluxes ' +str(time.time()-t1))
-    if timing: log.info('wall-time spent in prep_optimal_subtraction ' +str(time.time()-t))
+    if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
+    if timing: log.info('wall-time spent in prep_optimal_subtraction ' + str(time.time()-t))
 
     return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
     
@@ -1825,7 +1822,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
 def fixpix (data, mask_in, bkg, satlevel=60000.):
 
     if timing: t = time.time()
-    print '\nexecuting fixpix ...'
+    log.info('Executing fixpix ...')
 
     # Replace pixels that correspond to zeros in data with the
     # background; this will ensure that the borders on the sides of
@@ -1868,7 +1865,7 @@ def fixpix (data, mask_in, bkg, satlevel=60000.):
     #data_fixed = inpaint.replace_nans(data, max_iter=5, kernel_radius=1,
     #                                  kernel_sigma=2, method='localmean')
 
-    if timing: print 'wall-time spent in fixpix', time.time() - t
+    if timing: log.info('wall-time spent in fixpix ' + str(time.time() - t))
 
     #ds9_arrays(data=data, data_fixed=data_fixed)
 
@@ -1887,7 +1884,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
     median filtered and resized to the size of the input image."""
 
     if timing: t = time.time()
-    log.info('\nexecuting get_back ...')
+    log.info('Executing get_back ...')
 
     # masking using photutils
     #mask sources mask = make_source_mask(data, snr=2, npixels=5, dilate_size=11)
@@ -1929,7 +1926,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             median_full = np.median(data[mask_use])
             std_full = np.std(data[mask_use])
         if verbose:
-            log.info('Background median and std/RMS in object-masked image', median_full, std_full)
+            log.info('Background median and std/RMS in object-masked image: ' + str(median_full) + ', ' + str(std_full))
 
         # loop through subimages the size of bkg_boxsize, and
         # determine median from the masked data
@@ -1967,9 +1964,9 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
                     median, std = median_full, std_full
                     if verbose:
                         log.info('Warning: using median and std of entire masked image for this background patch')
-                        log.info('  nsub', nsub)
-                        log.info('  subcut', subcut)
-                        log.info('  np.sum(mask_sub) / bkg_boxsize**2', np.float(np.sum(mask_sub)) / bkg_boxsize**2)
+                        log.info('nsub' + str(nsub))
+                        log.info('subcut' + str(subcut))
+                        log.info('np.sum(mask_sub) / bkg_boxsize**2: ' + str(np.float(np.sum(mask_sub)) / bkg_boxsize**2))
                         
                 # fill median and std arrays
                 mesh_median[j,i] = median
@@ -1995,7 +1992,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             xpad = xsize - background.shape[1]
             background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
             background_std = np.pad(background_std, ((0,ypad),(0,xpad)), 'edge')                   
-            log.info('time to pad', time.time()-t1)
+            log.info('time to pad ' + str(time.time()-t1))
             #ds9_arrays(data=data, data_objmask=data_objmask,
             #           background=background, background_std=background_std)
             #np.pad seems quite slow; alternative:
@@ -2005,7 +2002,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             # these now include the remaining patches
                         
             
-    if timing: log.info('wall-time spent in get_back ' +str(time.time() - t))
+    if timing: log.info('wall-time spent in get_back ' + str(time.time() - t))
 
     return background, background_std
     
@@ -2044,7 +2041,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     global psf_size_new
     
     if timing: t = time.time()
-    log.info('\nexecuting get_psf ...')
+    log.info('Executing get_psf ...')
 
     # determine image size from header
     xsize, ysize = ima_header['NAXIS1'], ima_header['NAXIS2']
@@ -2059,8 +2056,8 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     # run psfex on SExtractor output catalog
     psfexcat = image.replace('.fits', '.psfexcat')
     if not os.path.isfile(psfexcat) or redo:
-        log.info('sexcat', sexcat)
-        log.info('psfexcat', psfexcat)
+        log.info('sexcat ' + sexcat)
+        log.info('psfexcat ' + psfexcat)
         result = run_psfex(sexcat, psfex_cfg, psfexcat, log, fwhm, imtype)
 
     # again run SExtractor, but now using output PSF from PSFex, so
@@ -2090,14 +2087,14 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     # the size of the [data] array
     psf_size_config = header['PSFAXIS1']
     if verbose:
-        log.info('polzero1                   ', polzero1)
-        log.info('polscal1                   ', polscal1)
-        log.info('polzero2                   ', polzero2)
-        log.info('polscal2                   ', polscal2)
-        log.info('order polynomial:          ', poldeg)
-        log.info('PSF FWHM:                  ', psf_fwhm)
-        log.info('PSF sampling size (pixels):', psf_samp)
-        log.info('PSF size defined in config:', psf_size_config)
+        log.info('polzero1                   ' + str(polzero1))
+        log.info('polscal1                   ' + str(polscal1))
+        log.info('polzero2                   ' + str(polzero2))
+        log.info('polscal2                   ' + str(polscal2))
+        log.info('order polynomial:          ' + str(poldeg))
+        log.info('PSF FWHM:                  ' + str(psf_fwhm))
+        log.info('PSF sampling size (pixels):' + str(psf_samp))
+        log.info('PSF size defined in config:' + str(psf_size_config))
         
     # call centers_cutouts to determine centers
     # and cutout regions of the full image
@@ -2135,8 +2132,8 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     if psf_size % 2 == 0:
         psf_size += 1
     if verbose:
-        print 'fwhm                      :', fwhm
-        print 'final image PSF size      :', psf_size
+        log.info('fwhm                      : ' + str(fwhm))
+        log.info('final image PSF size      : ' + str(psf_size))
     # now change psf_samp slightly:
     psf_samp_update = float(psf_size) / float(psf_size_config)
     if imtype == 'new': psf_size_new = psf_size
@@ -2175,11 +2172,11 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
 
         psf_ima[nsub] = psf_ima_resized_norm
         if verbose and nsub==0:
-            log.info('psf_samp, psf_samp_update', psf_samp, psf_samp_update)
-            log.info('np.shape(psf_ima_config)', np.shape(psf_ima_config))
-            log.info('np.shape(psf_ima)', np.shape(psf_ima))
-            log.info('np.shape(psf_ima_resized)', np.shape(psf_ima_resized))
-            log.info('psf_size ', psf_size)
+            log.info('psf_samp, psf_samp_update: ' + str(psf_samp) + ', ' + str(psf_samp_update))
+            log.info('np.shape(psf_ima_config): ' + str(np.shape(psf_ima_config)))
+            log.info('np.shape(psf_ima): ' + str(np.shape(psf_ima)))
+            log.info('np.shape(psf_ima_resized): ' + str(np.shape(psf_ima_resized)))
+            log.info('psf_size: ' + str(psf_size))
             
         # now place this resized and normalized PSF image at the
         # center of an image with the same size as the fftimage
@@ -2188,7 +2185,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
             
         xcenter_fft, ycenter_fft = xsize_fft/2, ysize_fft/2
         if verbose and nsub==0:
-            log.info('xcenter_fft, ycenter_fft ', xcenter_fft, ycenter_fft)
+            log.info('xcenter_fft, ycenter_fft: ' + str(xcenter_fft) + ', ' + str(ycenter_fft))
 
         psf_hsize = psf_size/2
         index = [slice(ycenter_fft-psf_hsize, ycenter_fft+psf_hsize+1), 
@@ -2207,7 +2204,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
             fits.writeto('psf_ima_shift_'+imtype+'_sub.fits',
                          psf_ima_shift[nsub].astype(np.float32), clobber=True)            
 
-    if timing: log.info('wall-time spent in get_psf ' +str(time.time() - t))
+    if timing: log.info('wall-time spent in get_psf ' + str(time.time() - t))
 
     return psf_ima_shift, psf_ima
 
@@ -2222,7 +2219,7 @@ def get_psf_xycoords(psfex_bintable, xcoords, ycoords, log, psf_oddsized=False, 
     """
 
     if timing: t = time.time()
-    log.info('\nexecuting get_psf_xycoords ...')
+    log.info('Executing get_psf_xycoords ...')
 
     # number of coordinates
     ncoords = len(xcoords)
@@ -2244,14 +2241,14 @@ def get_psf_xycoords(psfex_bintable, xcoords, ycoords, log, psf_oddsized=False, 
     # PSFex configuration file ([PSF_SIZE] parameter)
     psf_size_config = header['PSFAXIS1']
     if verbose:
-        log.info('polzero1                   ', polzero1)
-        log.info('polscal1                   ', polscal1)
-        log.info('polzero2                   ', polzero2)
-        log.info('polscal2                   ', polscal2)
-        log.info('order polynomial:          ', poldeg)
-        log.info('PSF FWHM:                  ', psf_fwhm)
-        log.info('PSF sampling size (pixels):', psf_samp)
-        log.info('PSF size defined in config:', psf_size_config)
+        log.info('polzero1                   ' + str(polzero1))
+        log.info('polscal1                   ' + str(polscal1))
+        log.info('polzero2                   ' + str(polzero2))
+        log.info('polscal2                   ' + str(polscal2))
+        log.info('order polynomial:          ' + str(poldeg))
+        log.info('PSF FWHM:                  ' + str(psf_fwhm))
+        log.info('PSF sampling size (pixels):' + str(psf_samp))
+        log.info('PSF size defined in config:' + str(psf_size_config))
         
     # initialize output PSF array
 
@@ -2336,7 +2333,7 @@ def get_psf_xycoords(psfex_bintable, xcoords, ycoords, log, psf_oddsized=False, 
         # also return normalized PSF without any shift
         psf_cube_noshift[i] = clean_norm_psf(psf_ima_resized, psf_clean_factor)
         
-    if timing: log.info('wall-time spent in get_psf_xycoords ' +str(time.time() - t))
+    if timing: log.info('wall-time spent in get_psf_xycoords ' + str(time.time() - t))
 
     return psf_cube_noshift, psf_cube_shift, xshift_array, yshift_array
 
@@ -2353,7 +2350,7 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     """
     
     t = time.time()
-    log.info('\nexecuting get_fratio_radec ...')
+    log.info('Executing get_fratio_radec ...')
     
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
@@ -2410,9 +2407,9 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
             fratio.append(norm_new[i_new] / norm_ref[i_ref])
                         
     if verbose:
-        log.info('fraction of PSF stars that match', float(nmatch)/len(x_new))
+        log.info('fraction of PSF stars that match: ' + str(float(nmatch)/len(x_new)))
             
-    if timing: log.info('wall-time spent in get_fratio_radec ' +str(time.time()-t))
+    if timing: log.info('wall-time spent in get_fratio_radec ' + str(time.time()-t))
 
     return np.array(x_new_match), np.array(y_new_match), np.array(fratio), \
         np.array(dra_match), np.array(ddec_match)
@@ -2443,7 +2440,7 @@ def centers_cutouts(subsize, ysize, xsize, log, get_remainder=False):
             remainder_y = False
 
     nsubs = nxsubs * nysubs
-    log.info('nxsubs, nysubs, nsubs', nxsubs, nysubs, nsubs)
+    log.info('nxsubs, nysubs, nsubs: ' + str(nxsubs) + ', ' + str(nysubs) + ', ' + str(nsubs))
 
     centers = np.ndarray((nsubs, 2), dtype=int)
     cuts_ima = np.ndarray((nsubs, 4), dtype=int)
@@ -2507,7 +2504,7 @@ def ds9_arrays(**kwargs):
 def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, imtype):
 
     if timing: t = time.time()
-    log.info('\nexecuting run_wcs ...')
+    log.info('Executing run_wcs ...')
     
     scale_low = 0.99 * pixscale
     scale_high = 1.01 * pixscale
@@ -2535,7 +2532,7 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
                 for line in file_in:
                     file_out.write(line.replace('VIGNET(99,99)', 'VIGNET'+size_vignet_str))
         if verbose:
-            log.info('VIGNET size: ' +str(size_vignet_str))
+            log.info('VIGNET size: ' + str(size_vignet_str))
     # if psf_sampling is non-zero, the VIGNET size as defined in the
     # SExtractor config file is used, at the moment this is (99,99)
     else:
@@ -2656,8 +2653,8 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
     # estimate background r.m.s. (needed by PSFex) from BACKGROUND column in sexcat
     header_axycat['SEXBKDEV'] = np.sqrt(np.median(data_sexcat['BACKGROUND'])
                                         * gain + readnoise) / gain
-    log.info('background r.m.s. estimate:', np.sqrt(np.median(data_sexcat['BACKGROUND'])
-                                                 * gain + readnoise)/gain)
+    log.info('background r.m.s. estimate: ' + str(np.sqrt(np.median(data_sexcat['BACKGROUND'])
+                                                 * gain + readnoise)/gain))
         
     # replace old ra and dec with new ones
     data_sexcat['ALPHAWIN_J2000'] = newra
@@ -2669,12 +2666,12 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
         result = fits2ldac(header_wcsimage+header_axycat,
                        data_sexcat, sexcat, doSort=True)
     except:
-        log.error('Convertion to FITS_LDAC format failed due to error: '+str(sys.exc_info()[0])+'.')
+        log.error('Convertion to FITS_LDAC format failed due to error: '+ str(sys.exc_info()[0])+'.')
         return 'error' 
     
     if timing:
-        log.info('extra time for creating LDAC fits table', time.time()-t2)
-        log.info('wall-time spent in run_wcs', time.time()-t)
+        log.info('extra time for creating LDAC fits table' + str(time.time()-t2))
+        log.info('wall-time spent in run_wcs' + str(time.time()-t))
 
 ################################################################################
 
@@ -2747,7 +2744,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     """
 
     if timing: t = time.time()
-    log.info('\nexecuting run_remap ...')
+    log.info('Executing run_remap ...')
 
     # read headers
     t = time.time()
@@ -2784,7 +2781,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         result = call(cmd)
     
     
-    if timing: log.info('wall-time spent in run_remap ' +str(time.time()-t))
+    if timing: log.info('wall-time spent in run_remap ' + str(time.time()-t))
 
 ################################################################################
 
@@ -2803,7 +2800,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     """
 
     if timing: t = time.time()
-    log.info('\nexecuting run_sextractor ...')
+    log.info('Executing run_sextractor ...')
 
     # if fraction less than one, run SExtractor on specified fraction of
     # the image
@@ -2862,7 +2859,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     # get estimate of seeing from output catalog
     fwhm, fwhm_std = get_fwhm(cat_out, fwhm_frac, log, class_Sort=fwhm_class_sort)
 
-    if timing: log.info('wall-time spent in run_sextractor ' +str(time.time()-t))
+    if timing: log.info('wall-time spent in run_sextractor ' + str(time.time()-t))
     return fwhm, fwhm_std
 
 
@@ -2884,7 +2881,7 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
     """
  
     if timing: t = time.time()
-    log.info('\nexecuting get_fwhm ...')
+    log.info('Executing get_fwhm ...')
 
     with fits.open(cat_ldac) as hdulist:
         data = hdulist[2].data
@@ -2924,8 +2921,8 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
         # determine mean, median and standard deviation through sigma clipping
         elongation_mean, elongation_std, elongation_median = clipped_stats(elongation_select)
         if verbose:
-            log.info('elongation_mean, elongation_median, elongation_std',\
-                elongation_mean, elongation_median, elongation_std)
+            log.info('elongation_mean, elongation_median, elongation_std: ' +
+                str(elongation_mean) + ', ' + str(elongation_median) + ', ' + str(elongation_std))
             
         
     if make_plots:
@@ -2972,7 +2969,7 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
             if show_plots: plt.show()
             plt.close()
             
-    if timing: log.info('wall-time spent in get_fwhm ' +str(time.time()-t))
+    if timing: log.info('wall-time spent in get_fwhm ' + str(time.time()-t))
 
     if get_elongation:
         return fwhm_median, fwhm_std, elongation_median, elongation_std
@@ -3014,7 +3011,7 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
         psf_size_config = '45,45'
 
     if verbose:
-        log.info('psf_size_config', psf_size_config)
+        log.info('psf_size_config: ' + str(psf_size_config))
         
     # get FWHM and ELONGATION to limit the PSFex configuration
     # parameters SAMPLE_FWHMRANGE and SAMPLE_MAXELLIP
@@ -3034,7 +3031,7 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
     #       '-SAMPLE_MAXELLIP', maxellip_str]
     result = call(cmd)    
 
-    if timing: log.info('wall-time spent in run_psfex ' +str(time.time()-t))
+    if timing: log.info('wall-time spent in run_psfex ' + str(time.time()-t))
 
 ################################################################################
 
@@ -3166,7 +3163,7 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
     VSr_ast = dx2 * dSrdx**2 + dy2 * dSrdy**2
 
     if verbose:
-        log.info('fD', fD)
+        log.info('fD: ' +str(fD))
         #print 'kr_hat is finite?', np.all(np.isfinite(kr_hat))
         #print 'kn_hat is finite?', np.all(np.isfinite(kn_hat))
         #print 'dSrdx is finite?', np.all(np.isfinite(dSrdx))
@@ -3206,7 +3203,7 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
     # the normalization of the ffts performed)
     F_S /= R.size
     if verbose:
-        log.info('F_S', F_S)
+        log.info('F_S; ' + str(F_S))
     # an alternative (slower) way to calculate the same F_S:
     #F_S_array = fft.ifft2((fn2*Pn_hat2_abs*fr2*Pr_hat2_abs) / denominator)
     #F_S = F_S_array[0,0]
@@ -3216,7 +3213,7 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
     alpha_std[V_S>=0] = np.sqrt(V_S[V_S>=0]) / F_S
 
     if timing:
-        log.info('wall-time spent in optimal subtraction', time.time()-t)
+        log.info('wall-time spent in optimal subtraction' + str(time.time()-t))
         #print 'peak memory used in run_ZOGY in GB', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e9
     
     return D, S, S_corr, alpha, alpha_std
