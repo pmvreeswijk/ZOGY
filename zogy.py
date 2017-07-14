@@ -2091,7 +2091,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         log.info('polzero2                   ' + str(polzero2))
         log.info('polscal2                   ' + str(polscal2))
         log.info('order polynomial:          ' + str(poldeg))
-        log.info('PSF FWHM:                  ' + str(psf_fwhm))
+        log.info('PSFex FWHM:                ' + str(psf_fwhm))
         log.info('PSF sampling size (pixels):' + str(psf_samp))
         log.info('PSF size defined in config:' + str(psf_size_config))
         
@@ -2131,7 +2131,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     if psf_size % 2 == 0:
         psf_size += 1
     if verbose:
-        log.info('fwhm                      : ' + str(fwhm))
+        log.info('FWHM                      : ' + str(fwhm))
         log.info('final image PSF size      : ' + str(psf_size))
     # now change psf_samp slightly:
     psf_samp_update = float(psf_size) / float(psf_size_config)
@@ -2203,6 +2203,18 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
             fits.writeto('psf_ima_shift_'+imtype+'_sub.fits',
                          psf_ima_shift[nsub].astype(np.float32), clobber=True)            
 
+        # test suggested by Barak: sum of (x * f(x)) should be zero
+        # where f(x) is the value at pixel x, and x indices are (0,0)
+        # in top left corner, (0,xsize-1) in the top left corner,
+        # (ysize-1, 0) in the bottom left corner and (xsize-1, ysize-1)
+        # in the bottom right one
+        x = np.arange(0, xsize_fft)
+        y = np.arange(0, ysize_fft)
+        xx, yy = np.meshgrid(x, y)
+        xvalues = np.maximum(xx, yy)
+        sum_barak = np.sum(xvalues * psf_ima_center[nsub])
+        log.info('Barak test: sum of x f(x) '+str(sum_barak))
+
     if timing: log.info('wall-time spent in get_psf ' + str(time.time() - t))
 
     return psf_ima_shift, psf_ima
@@ -2245,7 +2257,7 @@ def get_psf_xycoords(psfex_bintable, xcoords, ycoords, log, psf_oddsized=False, 
         log.info('polzero2                   ' + str(polzero2))
         log.info('polscal2                   ' + str(polscal2))
         log.info('order polynomial:          ' + str(poldeg))
-        log.info('PSF FWHM:                  ' + str(psf_fwhm))
+        log.info('PSFex FWHM:                ' + str(psf_fwhm))
         log.info('PSF sampling size (pixels):' + str(psf_samp))
         log.info('PSF size defined in config:' + str(psf_size_config))
         
@@ -2681,8 +2693,8 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
         return 'error' 
     
     if timing:
-        log.info('extra time for creating LDAC fits table' + str(time.time()-t2))
-        log.info('wall-time spent in run_wcs' + str(time.time()-t))
+        log.info('extra time for creating LDAC fits table ' + str(time.time()-t2))
+        log.info('wall-time spent in run_wcs ' + str(time.time()-t))
 
 ################################################################################
 
@@ -3230,7 +3242,7 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
     alpha_std[V_S>=0] = np.sqrt(V_S[V_S>=0]) / F_S
 
     if timing:
-        log.info('wall-time spent in optimal subtraction' + str(time.time()-t))
+        log.info('wall-time spent in optimal subtraction ' + str(time.time()-t))
         #print 'peak memory used in run_ZOGY in GB', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e9
     
     return D, S, S_corr, alpha, alpha_std
