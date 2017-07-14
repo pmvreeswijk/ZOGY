@@ -30,8 +30,9 @@ from sip_to_pv import *
 
 import resource
 from skimage import restoration
-import inpaint
+#import inpaint
 import logging
+import sys
 
 
 def global_pars(telescope=None):
@@ -830,13 +831,14 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         plt.close()
         
     # and display
-    if nfakestars>0:
-        cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits',
-               'Fpsf.fits', 'Fpsferr.fits']
-    else:
-        cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits',
-               'Fpsf.fits', 'Fpsferr.fits']
-    result = subprocess.call(cmd)
+    if display:
+        if nfakestars>0:
+            cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits',
+                   'Fpsf.fits', 'Fpsferr.fits']
+        else:
+            cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits',
+                   'Fpsf.fits', 'Fpsferr.fits']
+        result = subprocess.call(cmd)
 
 
 ################################################################################
@@ -2559,11 +2561,11 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
             log.info('VIGNET size: ' + str(size_vignet_str))
 
     #scampcat = image_in.replace('.fits','.scamp')
-    cmd = ['solve-field', '--no-plots', '--no-fits2fits',
+    cmd = ['solve-field', '--no-plots', #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--sextractor-config', sex_cfg,
            '--x-column', 'XWIN_IMAGE', '--y-column', 'YWIN_IMAGE',
            '--sort-column', 'FLUX_AUTO',
-           '--no-remove-lines',
+           '--no-remove-lines', '--uniformize', '0',
            '--keep-xylist', sexcat,
            # ignore existing WCS headers in FITS input images
            #'--no-verify', 
@@ -2608,11 +2610,9 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
     log.info(stdoutstr)
+    log.info(stderrstr)
 
-    if imtype=='new':
-        basename = base_new
-    else:
-        basename = base_ref
+    basename = image_in.replace('.fits','')
                 
     if os.path.exists("%s.solved"%basename) and status==0:
         os.remove("%s.solved"%basename)
@@ -2632,7 +2632,7 @@ def run_wcs(image_in, image_out, ra, dec, gain, readnoise, fwhm, pixscale, log, 
     # convert SIP header keywords from Astrometry.net to PV keywords
     # that swarp, scamp (and sextractor) understand using this module
     # from David Shupe:
-    status = sip_to_pv(image_out, image_out, tpv_format=False) #False gives warning line in wcs.all_pix2world
+    status = sip_to_pv(image_out, image_out, log, tpv_format=True) #False gives warning line/breaks cloud in wcs.all_pix2world
     if status == False:
         log.error('sip_to_pv failed.')
         return 'error'
@@ -2746,7 +2746,7 @@ def fits2ldac (header4ext2, data4ext3, fits_ldac_out, doSort=True):
     prihdu = fits.PrimaryHDU(header=prihdr)
     prihdu.header['EXPTIME'] = header4ext2['EXPTIME']
     prihdu.header['FILTNAME'] = header4ext2['FILTNAME']
-    prihdu.header['SEEING'] = header4ext2['SEEING']
+    # prihdu.header['SEEING'] = header4ext2['SEEING'] #need to calculte and add
     prihdu.header['BKGSIG'] = header4ext2['SEXBKDEV']
 
     
@@ -2799,6 +2799,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
     log.info(stdoutstr)
+    log.info(stderrstr)
     if status != 0:
         log.error('Swarp failed with exit code '+str(status)+'.')
         return 'error'
@@ -2881,6 +2882,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
     log.info(stdoutstr)
+    log.info(stderrstr)
 
     # get estimate of seeing from output catalog
     fwhm, fwhm_std = get_fwhm(cat_out, fwhm_frac, log, class_Sort=fwhm_class_sort)
@@ -3058,7 +3060,8 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
-    log.info(stdoutstr)   
+    log.info(stdoutstr) 
+    log.info(stderrstr)  
 
     if timing: log.info('wall-time spent in run_psfex ' + str(time.time()-t))
 
