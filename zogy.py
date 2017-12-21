@@ -209,10 +209,10 @@ def global_pars(telescope=None):
                                       # used for aperture photometry
                                       # in SExtractor general
 
-        redo = True              # execute functions even if output file exist
+        redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = True           # show intermediate fits images
+        display = False          # show intermediate fits images
         make_plots = True        # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
@@ -299,12 +299,14 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         
         # run SExtractor for seeing estimate of new_fits and ref_fits
         # run_wcs needs both the fwhm_new and fwhm_ref, so these
-        # seeing 
+        # seeing estimates need to be performed before run_wcs
         sexcat_new = base_new+'.sexcat'
         fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
                                                 sex_par, pixscale_new, log, fraction=fwhm_imafrac)
         log.info('fwhm_new, fwhm_std_new: ' + str(fwhm_new) + ', ' + str(fwhm_std_new))
         log.info('fwhm from header: ' + str(header_new['SEEING']))
+
+        # run SExtractor for seeing estimate of ref_fits:
         sexcat_ref = base_ref+'.sexcat'
         fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
                                                 sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
@@ -317,13 +319,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             result = run_wcs(base_new+'.fits', new_fits_wcs, ra_new, dec_new,
                              gain_new, readnoise_new, fwhm_new, pixscale_new, log, 'new')
 
-        # run SExtractor for seeing estimate of ref_fits:
-        sexcat_ref = base_ref+'.sexcat'
-        fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
-                                                sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
-        log.info('fwhm_ref, fwhm_std_ref ' +str(fwhm_ref) + ', ' + str(fwhm_std_ref))
-        log.info('fwhm from header ' + str(header_ref['SEEING']))
-        
         # write seeing (in arcseconds) to header
         #seeing_ref = fwhm_ref * pixscale_ref
         #seeing_ref_str = str('{:.2f}'.format(seeing_ref))
@@ -380,7 +375,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std = \
         prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref, log,
                                  remap=ref_fits_remap)
-
 
     # get x, y and fratios from matching PSFex stars across entire frame
     x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'_wcs.psfexcat',
@@ -612,7 +606,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             # require at least 10 values
             if np.sum(mask_sub_fratio) >= 10:
                 # determine local fratios
-                fratio_mean, fratio_std, fratio_median = clipped_stats(fratio[mask_sub_fratio], nsigma=2)
+                fratio_mean, fratio_std, fratio_median = clipped_stats(fratio[mask_sub_fratio], nsigma=2, log=log)
                 if verbose:
                     log.info('sub image fratios: ' + str(fratio[mask_sub_fratio]))
                     
@@ -673,9 +667,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
         # check that robust std of Scorr is around unity
         if verbose:
-            mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr, clip_zeros=False)
+            mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr, clip_zeros=False, log=log)
             log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' + str(median_Scorr) + ', ' + str(std_Scorr))
-            mean_S, std_S, median_S = clipped_stats(data_S, clip_zeros=False)
+            mean_S, std_S, median_S = clipped_stats(data_S, clip_zeros=False, log=log)
             log.info('mean_S, median_S, std_S: ' + str(mean_S) + ', ' + str(median_S) + ', ' + str(std_S))
             
         # if fake star(s) was (were) added to the subimages, compare
@@ -882,8 +876,8 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
     if psffit:
         flux_psf = np.zeros(ncoords)
         fluxerr_psf = np.zeros(ncoords)
-        x_psf = np.zeros(ncoords)
-        y_psf = np.zeros(ncoords)
+        xshift_psf = np.zeros(ncoords)
+        yshift_psf = np.zeros(ncoords)
         chi2_psf = np.zeros(ncoords)
         
     D_replaced = np.copy(D)
@@ -992,10 +986,20 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
         
         # if psffit=True, perform PSF fitting
         if psffit:
-            flux_psf[i], fluxerr_psf[i], x_psf[i], y_psf[i], chi2_psf[i] =\
-                flux_psffit (P_sub_noshift, D_sub, S_sub, RON, flux_opt[i],
-                             xshift_array[i], yshift_array[i], mask_use=mask_nonsat)
-            
+            flux_psf[i], fluxerr_psf[i], xshift_psf[i], yshift_psf[i], chi2_psf[i] =\
+            flux_psffit (P_sub_noshift, D_sub, S_sub, RON, flux_opt[i],
+                         xshift_array[i], yshift_array[i], mask_use=mask_nonsat, log=log)
+
+            # xshift_psf and yshift_psf are the shifts with respect to
+            # the integer xpos and ypos positions defined at the top
+            # of this loop over the sources. This is because the fit
+            # is using the PSF image that is not shifted
+            # (P_sub_noshift) to the exact source position.  Redefine
+            # them here with respect to the fractional coordinates
+            # xcoords and ycoords
+            xshift_psf[i] += xshift_array[i]
+            yshift_psf[i] += yshift_array[i]
+                        
         #print 'i, flux_opt[i], fluxerr_opt[i], flux_psf[i], fluxerr_psf[i]',\
         #    i, flux_opt[i], fluxerr_opt[i], flux_psf[i], fluxerr_psf[i]
 
@@ -1023,31 +1027,20 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
                 
     if False and display:
         ds9_arrays(D=D, D_replaced=D_replaced)
-    
-    if psffit and make_plots:
-        # compare xshift/yshift_array with psf xy shifts
-        dx = xshift_array - x_psf
-        dy = yshift_array - y_psf
-        log.info('np.median(dx), np.median(dy): ' + str(np.median(dx)) + ', ' + str(np.median(dy)))
-        limits = (-2, 2, -2, 2)
-        plt.axis(limits)
-        plt.plot(dx, dy, 'ko')
-        plt.xlabel('dx')
-        plt.ylabel('dy')
-        plt.show()
-        plt.close()
 
     if timing: log.info('wall-time spent in get_optflux_xycoords ' + str(time.time()-t))
-
+    
     if psffit:
-        return flux_opt, fluxerr_opt, D_replaced, flux_psf, fluxerr_psf
+        x_psf = xcoords + xshift_psf
+        y_psf = ycoords + yshift_psf
+        return flux_opt, fluxerr_opt, D_replaced, flux_psf, fluxerr_psf, x_psf, y_psf
     else:
         return flux_opt, fluxerr_opt, D_replaced
             
 
 ################################################################################
 
-def flux_psffit(P, D, S, RON, flux_opt, xshift, yshift, mask_use=None):
+def flux_psffit(P, D, S, RON, flux_opt, xshift, yshift, mask_use=None, log=None):
 
     # if S is a scalar, expand it to 2D array
     if np.isscalar(S):
@@ -1063,13 +1056,31 @@ def flux_psffit(P, D, S, RON, flux_opt, xshift, yshift, mask_use=None):
         yshift = params['yshift'].value
         flux_psf = params['flux_psf'].value
 
-        # produce model by shifting and scaling psf
-        #model = flux_psf * ndimage.shift(P, (yshift, xshift))
-        # using Eran's shift function 
-        model = flux_psf * image_shift_fft(P, xshift, yshift)
+        # shift the PSF image to the exact pixel position
+        P_shift = ndimage.shift(P, (yshift, xshift))
+        # alternatively, use Eran's shift function 
+        #P_shift = image_shift_fft(P, xshift, yshift)
+                
+        #print 'sum of P, P_shift:', np.sum(P), np.sum(P_shift)
+    
+        # make sure that P_shift is equal to 1
+        #P_shift /= np.sum(P_shift)
         
-        err = np.sqrt(RON**2 + D)
-        
+        # scale the shifted PSF
+        model = flux_psf * P_shift
+
+        # error estimate from the data themselves:
+        #err = np.sqrt(RON**2 + D)
+
+        # error estimate from the PSF model (at the moment this breaks
+        # down at some point with a bright star combined with negative
+        # values in the outskirts of P, which leads to nan values
+        # because some RON**2+model+S values are negative):
+
+        var = RON**2 + model + S
+        var[var<0] = RON**2 + D[var<0]
+        err = np.sqrt(var)
+                
         # residual
         resid = (D - S - model) / err
         
@@ -1086,7 +1097,7 @@ def flux_psffit(P, D, S, RON, flux_opt, xshift, yshift, mask_use=None):
     params = Parameters()
     params.add('xshift', value=xshift, min=-2, max=2, vary=True)
     params.add('yshift', value=yshift, min=-2, max=2, vary=True)
-    params.add('flux_psf', value=flux_opt)
+    params.add('flux_psf', value=flux_opt, min=0., vary=True)
 
     # do fit, here with leastsq model
     minner = Minimizer(fcn2min, params, fcn_args=(P, D, S, RON, mask_use))
@@ -1230,9 +1241,13 @@ def flux_optimal (P, P_noshift, D, S, S_std, RON, nsigma_inner=10,
         #flux_opt, fluxerr_opt = get_optflux_Eran(P[mask], P_noshift[mask], D[mask], S[mask], V[mask])
         flux_opt, fluxerr_opt = get_optflux(P[mask_use], D[mask_use], S[mask_use], V[mask_use])
                     
-        #print 'i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt, abs(flux_opt_old-flux_opt)/flux_opt
+        #print 'i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt, abs(flux_opt_old-flux_opt)/flux_opt, abs(flux_opt_old-flux_opt)/fluxerr_opt
 
-        if abs(flux_opt_old-flux_opt)/abs(flux_opt) < epsilon:
+        # original stopping criterium
+        #if abs(flux_opt_old-flux_opt)/abs(flux_opt) < epsilon:
+        #    break
+        # suggestion by Steven:
+        if abs(flux_opt_old-flux_opt)/fluxerr_opt < 0.1:
             break
         flux_opt_old = flux_opt
 
@@ -1313,7 +1328,7 @@ def flux_optimal_s2n (P, D, S, RON, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
 
 def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=False,
                   clip_zeros=True, get_median=True, get_mode=False, mode_binsize=0.1,
-                  verbose=False, show_hist=False):
+                  verbose=False, show_hist=False, log=None):
     
     # remove zeros
     if clip_zeros:
@@ -1413,8 +1428,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # objmask below which is a mask of the objects detected by
     # SExtractor)
     mask_fits = input_fits.replace('_wcs.fits', '_mask.fits')
-    with fits.open(mask_fits) as hdulist:
-        data_mask = hdulist[0].data
+    # first check if the mask image exists
+    if os.path.isfile(mask_fits):
+        with fits.open(mask_fits) as hdulist:
+            data_mask = hdulist[0].data
             
     # replace NANs with zero, and +-infinity with large +-numbers
     # data = np.nan_to_num(data)
@@ -1447,7 +1464,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     bkg_fits = base+'_bkg.fits'
     bkg_std_fits = base+'_bkg_std.fits'
     objmask_fits = base+'_objmask.fits'
-    
+
+    # if bkg_fits and bkg_std_fits already exist and [redo] parameter
+    # is set to False, do not bother to execute [get_back] but just
+    # read in those images - this will use the existing background
+    # image, regardless of the [bkg_method] that was set.
+    # At the moment this will not work as SExtractor produces a
+    # background image and stddev image with the same names.
+    #if os.path.isfile(bkg_fits) and os.path.isfile(bkg_std_fits) and not redo:
+    #    with fits.open(bkg_fits) as hdulist:
+    #        data_bkg = hdulist[0].data * gain
+    #    with fits.open(bkg_std_fits) as hdulist:
+    #        data_bkg_std = hdulist[0].data * gain
+    #else:
+
     # read in SExtractor's object mask to use in background
     # estimation for methods 1,3 and 4.
     with fits.open(objmask_fits) as hdulist:
@@ -1472,6 +1502,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     if bkg_method==4:
         data_bkg, data_bkg_std = get_back(data_wcs, data_objmask, log,
                                           use_photutils=True)
+
 
     if imtype=='ref':
         # in case of the reference image, the background maps
@@ -1516,20 +1547,23 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             with fits.open(objmask_fits_remap) as hdulist:
                 data_objmask = hdulist[0].data
 
-        # in any case, the ref mask image needs to be remapped
-        # write the mask with the updated header to a temporary file
-        fits.writeto('mask_ref_temp.fits', data_mask.astype(np.int),
-                     header=header_wcs, clobber=True)
-        # project ref image background maps to new image
-        mask_fits_remap = base_ref+'_mask_remap.fits'
-        if not os.path.isfile(mask_fits_remap) or redo:
-            result = run_remap(base_new+'_wcs.fits', 'mask_ref_temp.fits', mask_fits_remap,
-                               [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
-                               resampling_type='NEAREST')
-        # read this remapped mask back into data_mask    
-        with fits.open(mask_fits_remap) as hdulist:
-            # remapping turns mask values into floats
-            data_mask = (hdulist[0].data+0.5).astype(int)
+        # also the reference mask image, if it existed in the first
+        # place, needs to be remapped to the new image
+        if os.path.isfile(mask_fits):
+            # write the mask with the updated header to a temporary file
+            fits.writeto('mask_ref_temp.fits', data_mask.astype(np.int),
+                         header=header_wcs, clobber=True)
+
+            # project ref image background maps to new image
+            mask_fits_remap = base_ref+'_mask_remap.fits'
+            if not os.path.isfile(mask_fits_remap) or redo:
+                result = run_remap(base_new+'_wcs.fits', 'mask_ref_temp.fits', mask_fits_remap,
+                                   [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
+                                   resampling_type='NEAREST')
+            # read this remapped mask back into data_mask    
+            with fits.open(mask_fits_remap) as hdulist:
+                # remapping turns mask values into floats
+                data_mask = (hdulist[0].data+0.5).astype(int)
             
     # let data refer to data_remap in case of ref image
     # and the original wcs-corrected image otherwise
@@ -1592,7 +1626,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # image in case, mask and background. Note
     # that in case background method 1 was selected, the background
     # used here is that determined by SExtractor
-    data = fixpix (data, data_mask, data_bkg, log, satlevel=satlevel*gain)
+    if os.path.isfile(mask_fits):
+        data = fixpix (data, data_mask, data_bkg, log, satlevel=satlevel*gain)
 
     
     # determine psf of input image with get_psf function - needs to be
@@ -1648,7 +1683,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
 
     fitpsf = False
     if fitpsf:
-        flux_opt, fluxerr_opt, data_replaced, flux_psf, fluxerr_psf =\
+        flux_opt, fluxerr_opt, data_replaced, flux_psf, fluxerr_psf, x_psf, y_psf =\
             get_optflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
                                   xwin, ywin, errx2win, erry2win, errxywin,
                                   satlevel=satlevel*gain, psffit=fitpsf, log=log)
@@ -1658,7 +1693,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                                   xwin, ywin, errx2win, erry2win, errxywin,
                                   satlevel=satlevel*gain, log=log)
         
-
     # uncomment this line to use image with saturated stars replaced
     # with psf estimate
     data = data_replaced
@@ -1676,6 +1710,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     cols.append(fits.Column(name='FLUX_OPT', format='D', array=flux_opt))
     cols.append(fits.Column(name='FLUXERR_OPT', format='D', array=fluxerr_opt))
     if fitpsf:
+        cols.append(fits.Column(name='X_PSF', format='D', array=x_psf))
+        cols.append(fits.Column(name='Y_PSF', format='D', array=y_psf))
         cols.append(fits.Column(name='FLUX_PSF', format='D', array=flux_psf))
         cols.append(fits.Column(name='FLUXERR_PSF', format='D', array=fluxerr_psf))
     orig_cols = data_sex.columns
@@ -1683,12 +1719,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols)
     newcat = input_fits.replace('.fits', '.sexcat_fluxopt')
     hdu.writeto(newcat, clobber=True)
-    # This fits table which includes the optimal fluxes still needs to
-    # be converted to LDAC format although this is not really needed
-    # anymore since PSFex is already finished. At this stage could
-    # also remove the VIGNET entries in the SExtractor catalog which
-    # take up a lot of space, but only for the NEW image.
 
+    # This fits table which includes the optimal fluxes could be
+    # converted to LDAC format, but this is not really needed anymore
+    # since PSFex is already finished.
+
+    # At this stage let's remove the VIGNET entries in the SExtractor
+    # catalog which take up a lot of space; if not mistaken, this can
+    # be done for both the new and ref catalogs. For the ref catalogs,
+    # the PSFex products should be saved so PSFex need not be run
+    # again (and therefore the VIGNET). This means that if a different
+    # PSF is required for the reference image, the SExtractor catalog with
+    # VIGNET needs to be produced again.    
     
     if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
 
@@ -1719,14 +1761,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         s2n_auto = flux_auto / fluxerr_auto
         flux_opt = flux_opt[index]
         fluxerr_opt = fluxerr_opt[index]
+        x_win = data_sex['XWIN_IMAGE'][index]
+        y_win = data_sex['YWIN_IMAGE'][index]
+        fwhm_image = data_sex['FWHM_IMAGE'][index]
         if fitpsf:
             flux_mypsf = flux_psf[index]
             fluxerr_mypsf = fluxerr_psf[index]
-        
+            x_psf = x_psf[index]
+            y_psf = y_psf[index]
+            
         flux_diff = (flux_opt - flux_auto) / flux_auto
-        fluxerr_diff = fluxerr_opt / flux_auto
         limits = (1,2*np.amax(s2n_auto),-0.2,0.2)
-        plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+        plot_scatter (s2n_auto, flux_diff, limits, class_star,
                       xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_AUTO) / FLUX_AUTO', 
                       filename='fluxopt_vs_fluxauto_'+imtype+'.pdf',
                       title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
@@ -1734,20 +1780,29 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         if fitpsf:
             # compare flux_mypsf with flux_auto
             flux_diff = (flux_mypsf - flux_auto) / flux_auto
-            fluxerr_diff = fluxerr_mypsf / flux_auto
-            plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+            plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_MYPSF - FLUX_AUTO) / FLUX_AUTO', 
                           filename='fluxmypsf_vs_fluxauto_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
         
             # compare flux_opt with flux_mypsf
             flux_diff = (flux_opt - flux_mypsf) / flux_mypsf
-            fluxerr_diff = fluxerr_opt / flux_mypsf
-            plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+            plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_MYPSF) / FLUX_MYPSF', 
                           filename='fluxopt_vs_fluxmypsf_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
+            # compare x_win and y_win with x_psf and y_psf
+            dist_win_psf = np.sqrt((x_win-x_psf)**2+(y_win-y_psf)**2)
+            plot_scatter (s2n_auto, dist_win_psf, (1,2*np.amax(s2n_auto),-2.,2.), class_star, 
+                          xlabel='S/N (AUTO)', ylabel='distance XY_WIN vs. XY_MYPSF', 
+                          filename='xyposition_win_vs_mypsf_class_'+imtype+'.pdf',
+                          title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
+            plot_scatter (s2n_auto, dist_win_psf, (1,2*np.amax(s2n_auto),-2.,2.), fwhm_image, 
+                          xlabel='S/N (AUTO)', ylabel='distance XY_WIN vs. XY_MYPSF', 
+                          filename='xyposition_win_vs_mypsf_fwhm_'+imtype+'.pdf',
+                          title='rainbow color coding follows FWHM_IMAGE')
+            
         # compare flux_opt with flux_aper 2xFWHM
         for i in range(len(apphot_radii)):
             aper_str = str(apphot_radii[i])
@@ -1755,23 +1810,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             flux_aper = data_sex['FLUX_APER'][index,i]
             fluxerr_aper = data_sex['FLUXERR_APER'][index,i]
             flux_diff = (flux_opt - flux_aper) / flux_aper
-            fluxerr_diff = fluxerr_opt / flux_aper
-            plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+            plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
                           filename='fluxopt_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             flux_diff = (flux_auto - flux_aper) / flux_aper
-            fluxerr_diff = fluxerr_auto / flux_aper
-            plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+            plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_AUTO - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
                           filename='fluxauto_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             if fitpsf:
                 flux_diff = (flux_mypsf - flux_aper) / flux_aper
-                fluxerr_diff = fluxerr_mypsf / flux_aper
-                plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+                plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel='S/N (AUTO)', ylabel='(FLUX_MYPSF - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
                               filename='fluxmypsf_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
                               title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
@@ -1788,8 +1840,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             s2n_sexpsf = data_sex['FLUX_PSF'][index] / data_sex['FLUXERR_PSF'][index]
             
             flux_diff = (flux_sexpsf - flux_opt) / flux_opt
-            fluxerr_diff = fluxerr_sexpsf / flux_opt
-            plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+            plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_OPT) / FLUX_OPT', 
                           filename='fluxsexpsf_vs_fluxopt_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
@@ -1797,16 +1848,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             if fitpsf:
                 # and compare 'my' psf with SExtractor psf
                 flux_diff = (flux_sexpsf - flux_mypsf) / flux_mypsf
-                fluxerr_diff = fluxerr_sexpsf / flux_mypsf
-                plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+                plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_MYPSF) / FLUX_MYPSF', 
                               filename='fluxsexpsf_vs_fluxmypsf_'+imtype+'.pdf',
                               title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
             
             # and compare auto with psf
             flux_diff = (flux_sexpsf - flux_auto) / flux_auto
-            fluxerr_diff = fluxerr_sexpsf / flux_auto
-            plot_scatter (s2n_auto, flux_diff, fluxerr_diff, limits, class_star,
+            plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_AUTO) / FLUX_AUTO', 
                           filename='fluxsexpsf_vs_fluxauto_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
@@ -2010,14 +2059,14 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
 
 ################################################################################
 
-def plot_scatter (x, y, yerr, limits, corder, cmap='rainbow_r', symbol='o',
+def plot_scatter (x, y, limits, corder, cmap='rainbow_r', symbol='o',
                   xlabel='', ylabel='', legendlabel='', title='', filename='',
-                  simple=False):
+                  simple=False, xscale='log', yscale='linear'):
 
     plt.axis(limits)
-    #xplt.errorbar(x, y, yerr=yerr, linestyle="None", color='k')
-    plt.scatter(x, y, c=corder, cmap=cmap, alpha=0.75, label=legendlabel)
-    plt.xscale('log')
+    plt.scatter(x, y, c=corder, cmap=cmap, alpha=1, label=legendlabel, edgecolors='black')
+    plt.xscale(xscale)
+    plt.yscale(yscale)
     if legendlabel!='':
         plt.legend(numpoints=1, fontsize='medium')
     plt.xlabel(xlabel)
@@ -2210,12 +2259,12 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         # in top left corner, (0,xsize-1) in the top left corner,
         # (ysize-1, 0) in the bottom left corner and (xsize-1, ysize-1)
         # in the bottom right one
-        x = np.arange(0, xsize_fft)
-        y = np.arange(0, ysize_fft)
-        xx, yy = np.meshgrid(x, y)
-        xvalues = np.maximum(xx, yy)
-        sum_barak = np.sum(xvalues * psf_ima_center[nsub])
-        log.info('Barak test: sum of x f(x) '+str(sum_barak))
+        #x = np.arange(0, xsize_fft)
+        #y = np.arange(0, ysize_fft)
+        #xx, yy = np.meshgrid(x, y)
+        #xvalues = np.maximum(xx, yy)
+        #sum_barak = np.sum(xvalues * psf_ima_center[nsub])
+        #log.info('Barak test: sum of x f(x) '+str(sum_barak))
 
     if timing: log.info('wall-time spent in get_psf ' + str(time.time() - t))
 
@@ -3084,7 +3133,7 @@ def clean_norm_psf(psf_array, clean_factor):
     xx, yy = np.meshgrid(x, x, sparse=True)
     psf_array[(xx**2+yy**2)>hsize**2] = 0
 
-    # set any negative values to zero
+    # CHECK! set any negative values to zero
     #psf_array[psf_array<0] = 0
     
     if clean_factor != 0:
