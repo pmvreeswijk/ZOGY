@@ -109,18 +109,18 @@ def global_pars(telescope=None):
     else:    
         # some global parameter settings
         #telescope = 'kmtnet'
-        #telescope = 'meerlicht'
+        telescope = 'meerlicht'
         #telescope = 'omegacam'
-        telescope = 'kmtnet'
+        #telescope = 'p48'
 
         #KMTNet/OmegaWHITE
-        #if telescope=='kmtnet' or telescope=='omegacam' or telescope=='p48':
-        subimage_size = 1024     # size of subimages
-        subimage_border = 28     # border around subimage to avoid edge effects
-        #elif telescope=='meerlicht':
-        #MeerLICHT:
-        #subimage_size = 960      # size of subimages
-        #subimage_border = 32     # border around subimage to avoid edge effects
+        if telescope=='kmtnet' or telescope=='omegacam' or telescope=='p48':
+            subimage_size = 1024     # size of subimages
+            subimage_border = 28     # border around subimage to avoid edge effects
+        #MeerLICHT
+        elif telescope=='meerlicht':
+            subimage_size = 960      # size of subimages
+            subimage_border = 32     # border around subimage to avoid edge effects
         #trimmed MeerLICHT images:
         #subimage_size = 950      # size of subimages
         #subimage_border = 37     # border around subimage to avoid edge effects
@@ -508,6 +508,18 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         bkg_ref = data_ref_bkg[nsub]
         std_new = data_new_bkg_std[nsub]
         std_ref = data_ref_bkg_std[nsub]
+
+        # replace infinite values and nans with the background
+        mask_infnan = ~np.isfinite(data_new[nsub])
+        data_new[nsub][mask_infnan] = bkg_new[mask_infnan]
+        mask_infnan = ~np.isfinite(data_ref[nsub])
+        data_ref[nsub][mask_infnan] = bkg_ref[mask_infnan]
+        
+        # replace low values with the background
+        mask_low = (data_new[nsub]-bkg_new) > 10.*std_new
+        data_new[nsub][mask_low] = bkg_new[mask_low]
+        mask_low = (data_ref[nsub]-bkg_ref) > 10.*std_ref
+        data_ref[nsub][mask_low] = bkg_ref[mask_low]
 
         # good place to make the corresponding variance images
         # N.B.: these are single images (i.e. not a cube) the size of
@@ -1433,8 +1445,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         with fits.open(mask_fits) as hdulist:
             data_mask = hdulist[0].data
             
-    # replace NANs with zero, and +-infinity with large +-numbers
-    # data = np.nan_to_num(data)
     # get gain, readnoise and pixscale from header_wcs
     gain = header_wcs[key_gain]
     readnoise = header_wcs[key_ron]
@@ -1446,6 +1456,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     if remap is not None:
         data_remap *= gain
 
+    # print warning if any pixel value is not finite
+    if np.any(~np.isfinite(data_wcs)):
+        log.info('Warning: not all pixel values are finite')
+        log.info('         replacing NANs with zeros and +-inf with large +-numbers')        
+        # replace NANs with zero, and +-infinity with large +-numbers
+        #data_wcs = np.nan_to_num(data_wcs)
+
+        
     # ------------------------------
     # construction of background map
     # ------------------------------
