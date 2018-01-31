@@ -515,11 +515,11 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         mask_infnan = ~np.isfinite(data_ref[nsub])
         data_ref[nsub][mask_infnan] = bkg_ref[mask_infnan]
         
-        # replace low values with the background
-        mask_low = (data_new[nsub]-bkg_new) > 10.*std_new
-        data_new[nsub][mask_low] = bkg_new[mask_low]
-        mask_low = (data_ref[nsub]-bkg_ref) > 10.*std_ref
-        data_ref[nsub][mask_low] = bkg_ref[mask_low]
+        # replace values <= 0 with the background
+        mask_nonpos = (data_new[nsub] <= 0.)
+        data_new[nsub][mask_nonpos] = bkg_new[mask_nonpos]
+        mask_nonpos = (data_ref[nsub] <= 0.)
+        data_ref[nsub][mask_nonpos] = bkg_ref[mask_nonpos]
 
         # good place to make the corresponding variance images
         # N.B.: these are single images (i.e. not a cube) the size of
