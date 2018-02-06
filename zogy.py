@@ -304,14 +304,18 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg,
                                                 sex_par, pixscale_new, log, fraction=fwhm_imafrac)
         log.info('fwhm_new, fwhm_std_new: ' + str(fwhm_new) + ', ' + str(fwhm_std_new))
-        log.info('fwhm from header: ' + str(header_new['SEEING']))
+        # if SEEING keyword exists, report its value in the log
+        if 'SEEING' in header_new:
+            log.info('fwhm from header: ' + str(header_new['SEEING']))
 
         # run SExtractor for seeing estimate of ref_fits:
         sexcat_ref = base_ref+'.sexcat'
         fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg,
                                                 sex_par, pixscale_ref, log, fraction=fwhm_imafrac)
         log.info('fwhm_ref, fwhm_std_ref: ' + str(fwhm_new) + ', ' + str(fwhm_std_new))
-        log.info('fwhm from header: ' + str(header_ref['SEEING']))
+        # if SEEING keyword exists, report its value in the log
+        if 'SEEING' in header_ref:
+            log.info('fwhm from header: ' + str(header_ref['SEEING']))
 
         # determine WCS solution of new_fits
         new_fits_wcs = base_new+'_wcs.fits'
