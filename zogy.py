@@ -720,26 +720,26 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         if display and (nsub==0 or nsub == nsubs/2 or nsub==nsubs-1):
 
             # just for displaying purpose:
-            fits.writeto('D.fits', data_D.astype(np.float32), clobber=True)
-            fits.writeto('S.fits', data_S.astype(np.float32), clobber=True)
-            fits.writeto('Scorr.fits', data_Scorr.astype(np.float32), clobber=True)
-            fits.writeto('Scorr_abs.fits', np.abs(data_Scorr).astype(np.float32), clobber=True)
-            #fits.writeto('Scorr_1sigma.fits', data_Scorr_1sigma, clobber=True)
+            fits.writeto('D.fits', data_D.astype(np.float32), overwrite=True)
+            fits.writeto('S.fits', data_S.astype(np.float32), overwrite=True)
+            fits.writeto('Scorr.fits', data_Scorr.astype(np.float32), overwrite=True)
+            fits.writeto('Scorr_abs.fits', np.abs(data_Scorr).astype(np.float32), overwrite=True)
+            #fits.writeto('Scorr_1sigma.fits', data_Scorr_1sigma, overwrite=True)
         
             # write new and ref subimages to fits
             subname = '_sub'+str(nsub)
             newname = base_new+'_wcs'+subname+'.fits'
-            #fits.writeto(newname, ((data_new[nsub]+bkg_new)/gain_new).astype(np.float32), clobber=True)
-            fits.writeto(newname, data_new[nsub].astype(np.float32), clobber=True)
+            #fits.writeto(newname, ((data_new[nsub]+bkg_new)/gain_new).astype(np.float32), overwrite=True)
+            fits.writeto(newname, data_new[nsub].astype(np.float32), overwrite=True)
             refname = base_ref+'_wcs'+subname+'.fits'
-            #fits.writeto(refname, ((data_ref[nsub]+bkg_ref)/gain_ref).astype(np.float32), clobber=True)
-            fits.writeto(refname, data_ref[nsub].astype(np.float32), clobber=True)
+            #fits.writeto(refname, ((data_ref[nsub]+bkg_ref)/gain_ref).astype(np.float32), overwrite=True)
+            fits.writeto(refname, data_ref[nsub].astype(np.float32), overwrite=True)
             # variance images
-            fits.writeto('Vnew.fits', var_new.astype(np.float32), clobber=True)
-            fits.writeto('Vref.fits', var_ref.astype(np.float32), clobber=True)
+            fits.writeto('Vnew.fits', var_new.astype(np.float32), overwrite=True)
+            fits.writeto('Vref.fits', var_ref.astype(np.float32), overwrite=True)
             # background images
-            fits.writeto('bkg_new.fits', bkg_new.astype(np.float32), clobber=True)
-            fits.writeto('bkg_ref.fits', bkg_ref.astype(np.float32), clobber=True)
+            fits.writeto('bkg_new.fits', bkg_new.astype(np.float32), overwrite=True)
+            fits.writeto('bkg_ref.fits', bkg_ref.astype(np.float32), overwrite=True)
             
             
             # and display
@@ -763,7 +763,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     #Scorr_peaks = Scorr_peaks[Scorr_peaks > transient_nsigma]
     #Scorr_peaks_mask = (data_Scorr_full == Scorr_peaks)
     # alternavitvely, use SExtractor:
-    #fits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
+    #fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
     #sex_trans_cfg = cfg_dir+'sex_trans.config'     # SExtractor configuration file
     #result = run_sextractor('Scorr.fits', 'trans.cat', sex_trans_cfg, sex_par, pixscale_new,
     #                        fwhm=fwhm_new)
@@ -787,23 +787,23 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
     # write full new, ref, D and S images to fits
     if nfakestars>0:
-        fits.writeto('new.fits', data_new_full, header_new, clobber=True)
-        fits.writeto('ref.fits', data_ref_full, header_ref, clobber=True)
+        fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
+        fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
     if not subpipe:
-        fits.writeto('D.fits', data_D_full, clobber=True)
-        fits.writeto('S.fits', data_S_full, clobber=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
-        fits.writeto('Scorr_abs.fits', np.abs(data_Scorr_full), clobber=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, clobber=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, clobber=True)
+        fits.writeto('D.fits', data_D_full, overwrite=True)
+        fits.writeto('S.fits', data_S_full, overwrite=True)
+        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
+        fits.writeto('Scorr_abs.fits', np.abs(data_Scorr_full), overwrite=True)
+        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
+        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
     if subpipe:
-        fits.writeto('D.fits', data_D_full, clobber=True)
-        fits.writeto('S.fits', data_S_full, clobber=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, clobber=True)
+        fits.writeto('D.fits', data_D_full, overwrite=True)
+        fits.writeto('S.fits', data_S_full, overwrite=True)
+        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
         header_new.add_comment('Propagated header from new image to sub image.')
-        fits.writeto(sub, np.abs(data_Scorr_full), header_new, clobber=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, clobber=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, clobber=True)
+        fits.writeto(sub, np.abs(data_Scorr_full), header_new, overwrite=True)
+        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
+        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
                 
     # make comparison plot of flux input and output
     if make_plots and nfakestars>0:
@@ -1538,9 +1538,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         # for all background methods except 1
         if bkg_method!=1:
             fits.writeto(bkg_fits, (data_bkg/gain).astype(np.float32),
-                         header=header_wcs, clobber=True)
+                         header=header_wcs, overwrite=True)
             fits.writeto(bkg_std_fits, (data_bkg_std/gain).astype(np.float32),
-                         header=header_wcs, clobber=True)
+                         header=header_wcs, overwrite=True)
             # project ref image background maps to new image
             bkg_fits_remap = base_ref+'_bkg_remap.fits'
             if not os.path.isfile(bkg_fits_remap) or redo:
@@ -1560,7 +1560,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         # only for method 1 the objmask needs to be projected
         else:
             fits.writeto(objmask_fits, data_objmask.astype(np.float32),
-                         header=header_wcs, clobber=True)
+                         header=header_wcs, overwrite=True)
             objmask_fits_remap = base_ref+'_objmask_remap.fits'
             if not os.path.isfile(objmask_fits_remap) or redo:
                 result = run_remap(base_new+'_wcs.fits', objmask_fits, objmask_fits_remap,
@@ -1574,7 +1574,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         if os.path.isfile(mask_fits):
             # write the mask with the updated header to a temporary file
             fits.writeto('mask_ref_temp.fits', data_mask.astype(np.int),
-                         header=header_wcs, clobber=True)
+                         header=header_wcs, overwrite=True)
 
             # project ref image background maps to new image
             mask_fits_remap = base_ref+'_mask_remap.fits'
@@ -1639,9 +1639,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # reference image background maps are not overwritten.
     if (imtype=='new' and bkg_method!=2) or (imtype=='ref' and bkg_method>2):
         bkg_fits = input_fits.replace('_wcs.fits', '_bkg.fits')
-        fits.writeto(bkg_fits, (data_bkg/gain).astype(np.float32), clobber=True)
+        fits.writeto(bkg_fits, (data_bkg/gain).astype(np.float32), overwrite=True)
         bkg_std_fits = input_fits.replace('_wcs.fits', '_bkg_std.fits')
-        fits.writeto(bkg_std_fits, (data_bkg_std/gain).astype(np.float32), clobber=True)
+        fits.writeto(bkg_std_fits, (data_bkg_std/gain).astype(np.float32), overwrite=True)
             
             
     # fix pixels using [fixpix] function which requires data (remapped
@@ -1740,7 +1740,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     new_cols = fits.ColDefs(cols)
     hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols)
     newcat = input_fits.replace('.fits', '.sexcat_fluxopt')
-    hdu.writeto(newcat, clobber=True)
+    hdu.writeto(newcat, overwrite=True)
 
     # This fits table which includes the optimal fluxes could be
     # converted to LDAC format, but this is not really needed anymore
@@ -1883,7 +1883,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
         
-    if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
     if timing: log.info('wall-time spent in prep_optimal_subtraction ' + str(time.time()-t))
 
     return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
@@ -2268,13 +2267,13 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         psf_ima_shift[nsub] = fft.fftshift(psf_ima_center[nsub])
 
         if display:
-            fits.writeto('psf_ima_config_'+imtype+'_sub.fits', psf_ima_config, clobber=True)
+            fits.writeto('psf_ima_config_'+imtype+'_sub.fits', psf_ima_config, overwrite=True)
             fits.writeto('psf_ima_resized_norm_'+imtype+'_sub.fits',
-                         psf_ima_resized_norm.astype(np.float32), clobber=True)
+                         psf_ima_resized_norm.astype(np.float32), overwrite=True)
             fits.writeto('psf_ima_center_'+imtype+'_sub.fits',
-                         psf_ima_center[nsub].astype(np.float32), clobber=True)            
+                         psf_ima_center[nsub].astype(np.float32), overwrite=True)            
             fits.writeto('psf_ima_shift_'+imtype+'_sub.fits',
-                         psf_ima_shift[nsub].astype(np.float32), clobber=True)            
+                         psf_ima_shift[nsub].astype(np.float32), overwrite=True)            
 
         # test suggested by Barak: sum of (x * f(x)) should be zero
         # where f(x) is the value at pixel x, and x indices are (0,0)
@@ -2576,7 +2575,7 @@ def ds9_arrays(**kwargs):
     for name, array in kwargs.items():
         # write array to fits
         fitsfile = 'ds9_'+name+'.fits'
-        fits.writeto(fitsfile, np.array(array).astype(np.float32), clobber=True)            
+        fits.writeto(fitsfile, np.array(array).astype(np.float32), overwrite=True)            
         # append to command
         cmd.append(fitsfile)
 
@@ -2823,7 +2822,7 @@ def fits2ldac (header4ext2, data4ext3, fits_ldac_out, doSort=True):
     
     # write hdulist to output LDAC fits table
     hdulist = fits.HDUList([prihdu, ext2, ext3])
-    hdulist.writeto(fits_ldac_out, clobber=True)
+    hdulist.writeto(fits_ldac_out, overwrite=True)
     hdulist.close()
     
 ################################################################################
@@ -2918,7 +2917,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
         # write small image to fits
         image_fraction = image.replace('.fits','_fraction.fits')
-        fits.writeto(image_fraction, data_fraction.astype(np.float32), header, clobber=True)
+        fits.writeto(image_fraction, data_fraction.astype(np.float32), header, overwrite=True)
 
         # make image point to image_fraction
         image = image_fraction
@@ -3279,16 +3278,16 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
         #print 'dy is finite?', np.isfinite(dy)
     
     if display:
-        fits.writeto('Pn_hat.fits', np.real(Pn_hat).astype(np.float32), clobber=True)
-        fits.writeto('Pr_hat.fits', np.real(Pr_hat).astype(np.float32), clobber=True)
-        fits.writeto('kr.fits', np.real(kr).astype(np.float32), clobber=True)
-        fits.writeto('kn.fits', np.real(kn).astype(np.float32), clobber=True)
-        fits.writeto('Sr.fits', Sr.astype(np.float32), clobber=True)
-        fits.writeto('Sn.fits', Sn.astype(np.float32), clobber=True)
-        fits.writeto('VSr.fits', VSr.astype(np.float32), clobber=True)
-        fits.writeto('VSn.fits', VSn.astype(np.float32), clobber=True)
-        fits.writeto('VSr_ast.fits', VSr_ast.astype(np.float32), clobber=True)
-        fits.writeto('VSn_ast.fits', VSn_ast.astype(np.float32), clobber=True)
+        fits.writeto('Pn_hat.fits', np.real(Pn_hat).astype(np.float32), overwrite=True)
+        fits.writeto('Pr_hat.fits', np.real(Pr_hat).astype(np.float32), overwrite=True)
+        fits.writeto('kr.fits', np.real(kr).astype(np.float32), overwrite=True)
+        fits.writeto('kn.fits', np.real(kn).astype(np.float32), overwrite=True)
+        fits.writeto('Sr.fits', Sr.astype(np.float32), overwrite=True)
+        fits.writeto('Sn.fits', Sn.astype(np.float32), overwrite=True)
+        fits.writeto('VSr.fits', VSr.astype(np.float32), overwrite=True)
+        fits.writeto('VSn.fits', VSn.astype(np.float32), overwrite=True)
+        fits.writeto('VSr_ast.fits', VSr_ast.astype(np.float32), overwrite=True)
+        fits.writeto('VSn_ast.fits', VSn_ast.astype(np.float32), overwrite=True)
 
     # and finally S_corr
     V_S = VSr + VSn
