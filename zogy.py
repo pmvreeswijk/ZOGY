@@ -21,7 +21,8 @@ pyfftw.interfaces.cache.set_keepalive_time(1.)
 
 #from photutils import CircularAperture
 #from photutils import make_source_mask
-from photutils import Background2D, SigmaClip, MedianBackground
+from astropy.stats import SigmaClip
+from photutils import Background2D, MedianBackground
 
 # for PSF fitting - see https://lmfit.github.io/lmfit-py/index.html
 from lmfit import minimize, Minimizer, Parameters, Parameter, report_fit
@@ -38,7 +39,7 @@ import sys
 def global_pars(telescope=None):
 
     # make these global parameters
-    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order
+    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order
 
     if telescope is not None:
         # In the case of a subpipe run (and telescope is defined), all
@@ -86,7 +87,8 @@ def global_pars(telescope=None):
         psf_clean_factor = Constants.psf_clean_factor        
         psf_radius = Constants.psf_radius
         psf_sampling = Constants.psf_sampling
-
+        psf_samp_fwhmfrac = Constants.psf_samp_fwhmfrac
+        
         astronet_tweak_order = Constants.astronet_tweakorder
 
         cfg_dir = Constants.cfg_dir
@@ -188,11 +190,16 @@ def global_pars(telescope=None):
         psf_radius = 5           # PSF radius in units of FWHM used to build the PSF
                                  # this determines the PSF_SIZE in psfex.config
                                  # and size of the VIGNET in sex.params
-        psf_sampling = 0.0       # sampling factor used in PSFex - if zero, it
-                                 # is automatically determined for the new and
-                                 # ref image (~FWHM/4.5); if non-zero, it is
-                                 # fixed to the same sampling for both images
 
+        psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
+                                 # If zero, it is automatically determined for the
+                                 # new and ref image as:
+                                 #    psf_sampling = FWHM * [psf_samp_fwhmfrac]
+                                 # If non-zero, its value is using for the sampling
+                                 # step in both images.
+        psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
+                                  # this is not used if [psf_sampling]=0.
+                                 
         # Astrometry.net's tweak order
         astronet_tweak_order = 3
 
@@ -213,7 +220,7 @@ def global_pars(telescope=None):
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
         display = False          # show intermediate fits images
-        make_plots = True        # make diagnostic plots and save them as pdf
+        make_plots = False       # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
 
@@ -265,7 +272,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     # global parameters
     global base_new, base_ref
     global fwhm_new, fwhm_ref
-        
+    global header_new, header_ref
+    
     # define the base names of input fits files, base_new and
     # base_ref, as global so they can be used in any function in this
     # module
@@ -394,7 +402,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     fratio *= gain_new / gain_ref
     
     dr = np.sqrt(dx**2 + dy**2)
-    if verbose: log.info('standard deviation dr over the full frame: ' +str(np.std(dr)) )
+    if verbose: log.info('standard deviation dr over full frame [arcsec]: ' +str(np.std(dr)) )
     dr_full = np.sqrt(np.median(dr)**2 + np.std(dr)**2)
     dx_full = np.sqrt(np.median(dx)**2 + np.std(dx)**2)
     dy_full = np.sqrt(np.median(dy)**2 + np.std(dy)**2)
@@ -402,10 +410,10 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     #dx_full = np.std(dx)
     #dy_full = np.sdata_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_stdtd(dy)
     if verbose:
-        log.info('np.median(dr), np.std(dr): ' + str(np.median(dr)) + ', ' + str(np.std(dr)))
-        log.info('np.median(dx), np.std(dx): ' + str(np.median(dx)) + ', ' + str(np.std(dx)))
-        log.info('np.median(dy), np.std(dy): ' + str(np.median(dy)) + ', ' + str(np.std(dy)))
-        log.info('dr_full, dx_full, dy_full: ' + str(dr_full) + ', ' + str(dx_full) + ', ' + str(dy_full))
+        log.info('np.median(dr), np.std(dr) [arcsec]: ' + str(np.median(dr)) + ', ' + str(np.std(dr)))
+        log.info('np.median(dx), np.std(dx) [arcsec]: ' + str(np.median(dx)) + ', ' + str(np.std(dx)))
+        log.info('np.median(dy), np.std(dy) [arcsec]: ' + str(np.median(dy)) + ', ' + str(np.std(dy)))
+        log.info('dr_full, dx_full, dy_full [arcsec]: ' + str(dr_full) + ', ' + str(dx_full) + ', ' + str(dy_full))
     
     #fratio_median, fratio_std = np.median(fratio), np.std(fratio)
     fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2)
@@ -415,7 +423,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     if make_plots:
         # plot y vs x
         plt.axis((0,xsize_new,0,ysize_new))
-        plt.plot(x_fratio, y_fratio, 'go') 
+        plt.plot(x_fratio, y_fratio, 'go', markersize=5, markeredgecolor='k')
         plt.xlabel('x (pixels)')
         plt.ylabel('y (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -425,7 +433,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
         # plot dy vs dx
         plt.axis((-1,1,-1,1))
-        plt.plot(dx, dy, 'go') 
+        plt.plot(dx, dy, 'go', markersize=5, markeredgecolor='k') 
         plt.xlabel('dx (pixels)')
         plt.ylabel('dy (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -435,7 +443,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         
         # plot dr vs x_fratio
         plt.axis((0,xsize_new,0,1))
-        plt.plot(x_fratio, dr, 'go')
+        plt.plot(x_fratio, dr, 'go', markersize=5, markeredgecolor='k')
         plt.xlabel('x (pixels)')
         plt.ylabel('dr (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -445,7 +453,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
         # plot dr vs y_fratio
         plt.axis((0,ysize_new,0,1))
-        plt.plot(y_fratio, dr, 'go')
+        plt.plot(y_fratio, dr, 'go', markersize=5, markeredgecolor='k')
         plt.xlabel('y (pixels)')
         plt.ylabel('dr (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -458,7 +466,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         ycenter = ysize_new/2
         dist = np.sqrt((x_fratio-xcenter)**2 + (y_fratio-ycenter)**2)
         plt.axis((0,np.amax(dist),0,1))
-        plt.plot(dist, dr, 'go')
+        plt.plot(dist, dr, 'go', markersize=5, markeredgecolor='k')
         plt.xlabel('distance from image center (pixels)')
         plt.ylabel('dr (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -468,7 +476,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 
         # plot dx vs x_fratio
         plt.axis((0,xsize_new,-1,1))
-        plt.plot(x_fratio, dx, 'go')
+        plt.plot(x_fratio, dx, 'go', markersize=5, markeredgecolor='k')
         plt.xlabel('x (pixels)')
         plt.ylabel('dx (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -478,7 +486,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
         # plot dy vs y_fratio
         plt.axis((0,ysize_new,-1,1))
-        plt.plot(y_fratio, dy, 'go')
+        plt.plot(y_fratio, dy, 'go', markersize=5, markeredgecolor='k')
         plt.xlabel('y (pixels)')
         plt.ylabel('dy (pixels)')
         plt.title(new_fits+'\n vs '+ref_fits, fontsize=12)
@@ -740,12 +748,14 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             # background images
             fits.writeto('bkg_new.fits', bkg_new.astype(np.float32), overwrite=True)
             fits.writeto('bkg_ref.fits', bkg_ref.astype(np.float32), overwrite=True)
-            
-            
+            fits.writeto('std_new.fits', std_new.astype(np.float32), overwrite=True)
+            fits.writeto('std_ref.fits', std_ref.astype(np.float32), overwrite=True)
+
             # and display
             cmd = ['ds9','-zscale',newname,refname,'D.fits','S.fits','Scorr.fits']
             cmd = ['ds9','-zscale',newname,refname,'D.fits','S.fits','Scorr.fits',
                    'Vnew.fits', 'Vref.fits', 'bkg_new.fits', 'bkg_ref.fits',
+                   'std_new.fits', 'std_ref.fits',
                    'VSn.fits', 'VSr.fits', 'VSn_ast.fits', 'VSr_ast.fits',
                    'Sn.fits', 'Sr.fits', 'kn.fits', 'kr.fits', 'Pn_hat.fits', 'Pr_hat.fits',
                    'psf_ima_config_new_sub.fits', 'psf_ima_config_ref_sub.fits',
@@ -757,6 +767,16 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
         if timing: log.info('wall-time spent in nsub loop ' +str(time.time()-tloop))
 
+
+    # compute statistics on full Scorr image and show histogram
+    if verbose:
+        mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr_full,
+                                                            clip_zeros=False,
+                                                            show_hist=display, log=log)
+        log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' +
+                 str(median_Scorr) + ', ' + str(std_Scorr))
+        
+        
     # find transient sources in Scorr
     #Scorr_peaks = ndimage.filters.maximum_filter(data_Scorr_full)
     #transient_nsigma = 5     # required significance in Scorr for transient detection
@@ -1393,6 +1413,7 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
             plt.plot([median, median], [y2,y1], color='magenta')
         if get_mode:
             plt.plot([mode, mode], [y2,y1], color='blue')
+        if make_plots: plt.savefig('clipped_stats_hist.pdf')
         if show_plots: plt.show()
         plt.close()
             
@@ -1727,6 +1748,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         flux_psf /= gain
         fluxerr_psf /= gain
         
+    if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
+
+    if timing: t2 = time.time()
+
     # merge these two columns with sextractor catalog
     cols = [] 
     cols.append(fits.Column(name='FLUX_OPT', format='D', array=flux_opt))
@@ -1736,30 +1761,42 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         cols.append(fits.Column(name='Y_PSF', format='D', array=y_psf))
         cols.append(fits.Column(name='FLUX_PSF', format='D', array=flux_psf))
         cols.append(fits.Column(name='FLUXERR_PSF', format='D', array=fluxerr_psf))
-    orig_cols = data_sex.columns
     new_cols = fits.ColDefs(cols)
-    hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols)
+
+    orig_cols = data_sex.columns
+    # At this stage let's remove the VIGNET entries in the SExtractor
+    # catalog take up a lot of space; if not mistaken, this can be
+    # done for both the new and ref catalogs.
+    #
+    # For the ref catalogs, the PSFex products should be saved so
+    # PSFex need not be run again (and therefore the VIGNET is not
+    # needed). However, this would mean that if a different PSF is
+    # required for the reference image than that was saved before, the
+    # SExtractor catalog with VIGNET needs to be produced again.
+    #
+    # For now, only remove the VIGNET arrays in the new image catalog:
+    if imtype=='new':
+        orig_cols.del_col('VIGNET')
+
+    # the following adds the orig_cols and new_cols along with the
+    # image header to the 1st extension of the hdu
+    hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols, header_wcs)
     newcat = input_fits.replace('.fits', '.sexcat_fluxopt')
     hdu.writeto(newcat, overwrite=True)
-
     # This fits table which includes the optimal fluxes could be
     # converted to LDAC format, but this is not really needed anymore
     # since PSFex is already finished.
 
-    # At this stage let's remove the VIGNET entries in the SExtractor
-    # catalog which take up a lot of space; if not mistaken, this can
-    # be done for both the new and ref catalogs. For the ref catalogs,
-    # the PSFex products should be saved so PSFex need not be run
-    # again (and therefore the VIGNET). This means that if a different
-    # PSF is required for the reference image, the SExtractor catalog with
-    # VIGNET needs to be produced again.    
+    if timing: log.info('wall-time spent binary fits table including fluxopt '
+                        + str(time.time()-t2))
     
-    if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
 
     # split full image into subimages to be used in run_ZOGY - this
     # needs to be done after determination of optimal fluxes as
     # otherwise the potential replacement of the saturated pixels will
     # not be taken into account
+
+    if timing: t2 = time.time()
 
     fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_bkg = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
@@ -1773,7 +1810,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         fftdata_bkg[nsub][index_fft] = data_bkg[index_fftdata]
         fftdata_bkg_std[nsub][index_fft] = data_bkg_std[index_fftdata]
 
-
+    if timing: log.info('wall-time spent filling fftdata cubes ' + str(time.time()-t2))
+        
     if make_plots:
         # compare flux_opt with flux_auto
         index = ((data_sex['FLUX_AUTO']>0) & (data_sex['FLAGS']==0))
@@ -2125,25 +2163,51 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         result = run_sextractor(image, sexcat+'_alt', sex_cfg, sex_par, pixscale, log, fwhm=fwhm)
         
     # run psfex on SExtractor output catalog
-    psfexcat = image.replace('.fits', '.psfexcat')
-    if not os.path.isfile(psfexcat) or redo:
+    #
+    # If the PSFEx output file is already present with the same
+    # [psf_size_config] as currently required, then skip [run_psfex].
+    # Note that [psfexcat], the ASCII file with some measurements
+    # of the PSF stars, is not used anymore below, so is not required
+    # and does not need to be saved for the reference image.
+    skip_psfex = False
+    psfex_bintable = image.replace('.fits', '.psf')    
+    if os.path.isfile(psfex_bintable) and not redo:
+        with fits.open(psfex_bintable) as hdulist:
+            header = hdulist[1].header
+            data = hdulist[1].data[0][0][:]
+        # use function [get_samp_PSF_config_size] to determine [psf_samp]
+        # and [psf_size_config]
+        psf_samp, psf_size_config = get_samp_PSF_config_size (fwhm, imtype)
+        log.info('psf_samp, psf_size_config: '+str(psf_samp)+' '+str(psf_size_config))
+        # check that the above [psf_size_config] is the same as
+        # the size of the images in the data array, or equivalently,
+        # the value of the header parameters 'PSFAXIS1' or 'PSFAXIS2'
+        if psf_size_config == header['PSFAXIS1']:
+            skip_psfex = True
+            if verbose:
+                log.info('Skipping run_psfex for image: '+image)
+                        
+    if not skip_psfex:
+        psfexcat = image.replace('.fits', '.psfexcat')
         log.info('sexcat ' + sexcat)
         log.info('psfexcat ' + psfexcat)
         result = run_psfex(sexcat, psfex_cfg, psfexcat, log, fwhm, imtype)
 
-    # again run SExtractor, but now using output PSF from PSFex, so
-    # that PSF-fitting can be performed for all objects. The output
-    # columns defined in [sex_par_psffit] include several new columns
-    # related to the PSF fitting.
+    # If [dosex_psffit] parameter is set, then again run SExtractor,
+    # but now using output PSF from PSFEx, so that PSF-fitting can be
+    # performed for all objects. The output columns defined in
+    # [sex_par_psffit] include several new columns related to the PSF
+    # fitting.
     if (not os.path.isfile(sexcat+'_psffit') or redo) and dosex_psffit:
         result = run_sextractor(image, sexcat+'_psffit', sex_cfg_psffit,
                                 sex_par_psffit, pixscale, log, fitpsf=True, fwhm=fwhm)
         
-    # read in PSF output binary table from psfex
-    psfex_bintable = image.replace('.fits', '.psf')
-    with fits.open(psfex_bintable) as hdulist:
-        header = hdulist[1].header
-        data = hdulist[1].data[0][0][:]
+    # If not already done so above, read in PSF output binary table
+    # from psfex, containing the polynomial coefficient images
+    if not ('header' in dir()):
+        with fits.open(psfex_bintable) as hdulist:
+            header = hdulist[1].header
+            data = hdulist[1].data[0][0][:]
 
     # read in some header keyword values
     polzero1 = header['POLZERO1']
@@ -2174,7 +2238,6 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     xsize_fft = subimage_size + 2*subimage_border
 
     if imtype == 'ref':
-
         # in case of the ref image, the PSF was determined from the
         # original image, while it will be applied to the remapped ref
         # image. So the centers of the cutouts in the remapped ref
@@ -2194,10 +2257,19 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         
     # initialize output PSF array
 
-    # [psf_size] is the PSF size in image pixels,
-    # i.e. [psf_size_config] multiplied by the PSF sampling (roughly
-    # 4-5 pixels per FWHM) which is set by the [psf_sampling] parameter.
-    # If set to zero, it is automatically determined by PSFex.
+    # [psf_size] is the PSF size in image pixels:
+    #   [psf_size] = [psf_size_config] * [psf_samp]
+    # where [psf_size_config] is the size of the square
+    # image on which PSFEx constructs the PSF.
+    # If global parameter [psf_sampling] is set, then
+    #   [psf_samp] = [psf_samling]
+    # where [psf_samp(ling)] is the PSF sampling step in image pixels.
+    # If [psf_sampling] is set to zero, [psf_samp] is automatically
+    # determined by PSFex:
+    #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
+    # where [psf_samp_fwhmfrac] should be set to about 0.25
+    # so for an oversampled image with FWHM~8: [psf_samp]~2,
+    # while an undersampled image with FWHM~2: [psf_samp]~1/4
     psf_size = np.int(np.ceil(psf_size_config * psf_samp))
     # if this is even, make it odd
     if psf_size % 2 == 0:
@@ -2437,10 +2509,12 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
-        number = table['SOURCE_NUMBER']
-        x = table['X_IMAGE']
-        y = table['Y_IMAGE']
-        norm = table['NORM_PSF']
+        # mask of entries with FLAGS_PSF=0
+        mask_zero = (table['FLAGS_PSF']==0)
+        number = table['SOURCE_NUMBER'][mask_zero]
+        x = table['X_IMAGE'][mask_zero]
+        y = table['Y_IMAGE'][mask_zero]
+        norm = table['NORM_PSF'][mask_zero]
         return number, x, y, norm
         
     # read psfcat_new
@@ -2448,6 +2522,10 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     # read psfcat_ref
     number_ref, x_ref, y_ref, norm_ref = readcat(psfcat_ref)
 
+    if verbose:
+        log.info('new: number of PSF stars with zero FLAGS: '+str(len(x_new)))
+        log.info('ref: number of PSF stars with zero FLAGS: '+str(len(x_ref)))
+    
     def xy2radec (number, sexcat):
         # read SExtractor fits table
         with fits.open(sexcat) as hdulist:
@@ -2839,12 +2917,12 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     if timing: t = time.time()
     log.info('Executing run_remap ...')
 
-    # read headers
-    t = time.time()
-    with fits.open(image_new) as hdulist:
-        header_new = hdulist[0].header
-    with fits.open(image_ref) as hdulist:
-        header_ref = hdulist[0].header
+    # reading these headers is not needed anymore since header_new and
+    # header_ref are now global parameters
+    #with fits.open(image_new) as hdulist:
+    #    header_new = hdulist[0].header
+    #with fits.open(image_ref) as hdulist:
+    #    header_ref = hdulist[0].header
         
     # create .head file with header info from [image_new]
     header_out = header_new[:]
@@ -2985,7 +3063,9 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
         data = hdulist[2].data
 
     # these arrays correspond to objecst with flag==0 and flux_auto>0.
-    index = (data['FLAGS']==0) & (data['FLUX_AUTO']>0.)
+    # add a S/N requirement
+    index = (data['FLAGS']==0) & (data['FLUX_AUTO']>0.) & \
+            (data['FLUXERR_AUTO']>0.) & (data['FLUX_AUTO']/data['FLUXERR_AUTO']>20.)
     fwhm = data['FWHM_IMAGE'][index]
     class_star = data['CLASS_STAR'][index]
     flux_auto = data['FLUX_AUTO'][index]
@@ -3034,9 +3114,9 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
         flux_auto = data['FLUX_AUTO'][index]
         mag_auto = -2.5*np.log10(flux_auto)
 
-        plt.plot(fwhm, mag_auto, 'bo')
+        plt.plot(fwhm, mag_auto, 'bo', markersize=5, markeredgecolor='k')
         x1,x2,y1,y2 = plt.axis()
-        plt.plot(fwhm_select, mag_auto_select, 'go')
+        plt.plot(fwhm_select, mag_auto_select, 'go', markersize=5, markeredgecolor='k')
         plt.plot([fwhm_median, fwhm_median], [y2,y1], color='red')
         fwhm_line = fwhm_median-fwhm_std
         plt.plot([fwhm_line, fwhm_line], [y2,y1], 'r--')
@@ -3052,9 +3132,9 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
         if get_elongation:
             elongation = data['ELONGATION'][index]
 
-            plt.plot(elongation, mag_auto, 'bo')
+            plt.plot(elongation, mag_auto, 'bo', markersize=5, markeredgecolor='k')
             x1,x2,y1,y2 = plt.axis()
-            plt.plot(elongation_select, mag_auto_select, 'go')
+            plt.plot(elongation_select, mag_auto_select, 'go', markersize=5, markeredgecolor='k')
             plt.plot([elongation_median, elongation_median], [y2,y1], color='red')
             elongation_line = elongation_median-elongation_std
             plt.plot([elongation_line, elongation_line], [y2,y1], 'r--')
@@ -3085,32 +3165,14 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
 
     if timing: t = time.time()
 
-    if psf_sampling == 0:
-        # determine [psf_size_config] based on [psf_radius], which is
-        # 2 * [psf_radius] * FWHM / sampling factor. The sampling
-        # factor used in PSFex below is now forced such that FWHM /
-        # sampling factor =4.5, so:
-        psf_sampling_use = fwhm / 4.5
-        size = psf_radius*2*4.5
-        # in case of reference image, scale this size by the ratio of
-        # FWHMs so that the final psf stamp of the reference image is
-        # as large as the psf stamp of the new image
-        if imtype=='ref':
-            size *= fwhm_new/fwhm_ref
-        # convert to integer
-        size = np.int(size+0.5)
-        # make sure it's odd
-        if size % 2 == 0: size += 1
-        psf_size_config = str(size)+','+str(size)
-    else:
-        # use [psf_sampling] in PSFex
-        psf_sampling_use = psf_sampling
-        # use some reasonable default size
-        psf_size_config = '45,45'
+    # use function [get_samp_PSF_config_size] to determine [psf_samp]
+    # and [psf_size_config] required to run PSFEx
+    psf_samp, psf_size_config = get_samp_PSF_config_size (fwhm, imtype)
+    psf_size_config_str = str(psf_size_config)+','+str(psf_size_config)
 
     if verbose:
         log.info('psf_size_config: ' + str(psf_size_config))
-        
+
     # get FWHM and ELONGATION to limit the PSFex configuration
     # parameters SAMPLE_FWHMRANGE and SAMPLE_MAXELLIP
     #fwhm, fwhm_std, elongation, elongation_std = get_fwhm(cat_in, 0.05, class_Sort=False,
@@ -3124,7 +3186,7 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
     
     # run psfex from the unix command line
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
-           '-PSF_SIZE', psf_size_config, '-PSF_SAMPLING', str(psf_sampling_use)]
+           '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp)]
     #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -3135,6 +3197,51 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
 
     if timing: log.info('wall-time spent in run_psfex ' + str(time.time()-t))
 
+################################################################################
+
+def get_samp_PSF_config_size (fwhm, imtype):
+
+    # [psf_size] is the PSF size in image pixels:
+    #   [psf_size] = [psf_size_config] * [psf_samp]
+    # where [psf_size_config] is the size of the square
+    # image on which PSFEx constructs the PSF.
+    # If global parameter [psf_sampling] is set, then
+    #   [psf_samp] = [psf_samling]
+    # where [psf_samp(ling)] is the PSF sampling step in image pixels.
+    # If [psf_sampling] is set to zero, [psf_samp] is automatically
+    # determined by PSFex:
+    #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
+    # where [psf_samp_fwhmfrac] is a global parameter which should be set
+    # to about 0.25 so for an oversampled image with FWHM~8: [psf_samp]~2,
+    # while an undersampled image with FWHM~2: [psf_samp]~1/4
+    if psf_sampling == 0:
+        # determine [psf_size_config] based on [psf_radius], which is
+        #   [psf_size_config] = 2 * [psf_radius] * [psf_samp_fwhmfrac] * FWHM
+        #   [psf_size_config] = 2 * [psf_radius] * [psf_samp]
+        # where
+        #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
+        # for now set by hand (could make this a global parameter):
+        psf_samp = psf_samp_fwhmfrac * fwhm
+        psf_size_config = 2 * psf_radius * fwhm / psf_samp
+        # or:
+        # psf_size_config = 2 * psf_radius / psf_samp_fwhmfrac
+        # in case of reference image, scale this by the ratio of
+        # FWHMs so that the final psf stamp of the reference image is
+        # as large as the psf stamp of the new image
+        if imtype=='ref':
+            psf_size_config *= fwhm_new/fwhm_ref
+        # convert to integer
+        psf_size_config = np.int(psf_size_config+0.5)
+        # make sure it's odd
+        if psf_size_config % 2 == 0: psf_size_config += 1
+    else:
+        # use [psf_sampling] in PSFex
+        psf_samp = psf_sampling
+        # use some reasonable default size
+        psf_size_config = 45
+
+    return psf_samp, psf_size_config
+    
 ################################################################################
 
 def clean_norm_psf(psf_array, clean_factor):
@@ -3180,14 +3287,14 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
     N_hat = fft.fft2(N)
     Pn_hat = fft.fft2(Pn)
     #if psf_clean_factor!=0:
-        # clean Pn_hat
-        #Pn_hat = clean_psf(Pn_hat, psf_clean_factor)
+    #clean Pn_hat
+    #Pn_hat = clean_psf(Pn_hat, psf_clean_factor)
     Pn_hat2_abs = np.abs(Pn_hat**2)
 
     Pr_hat = fft.fft2(Pr)
     #if psf_clean_factor!=0:
-        # clean Pr_hat
-        #Pr_hat = clean_psf(Pr_hat, psf_clean_factor)
+    # clean Pr_hat
+    #Pr_hat = clean_psf(Pr_hat, psf_clean_factor)
     Pr_hat2_abs = np.abs(Pr_hat**2)
 
     sn2 = sn**2
