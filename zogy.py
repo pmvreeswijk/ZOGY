@@ -35,6 +35,9 @@ from skimage import restoration
 import logging
 import sys
 
+from multiprocessing import Pool
+from multiprocessing.dummy import Pool as ThreadPool 
+nthreads = 1
 
 def global_pars(telescope=None):
 
@@ -136,7 +139,7 @@ def global_pars(telescope=None):
         bkg_method = 3           # background method to use
         bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                                  # clipped; used in methods 1, 3 and 4
-        bkg_boxsize = 256        # size of region used to determine
+        bkg_boxsize = 240        # size of region used to determine
                                  # background in methods 2, 3 and 4
         bkg_filtersize = 5       # size of filter used for smoothing the above
                                  # regions for method 2, 3 and 4
@@ -149,7 +152,7 @@ def global_pars(telescope=None):
         # optional fake stars
         nfakestars = 1           # number of fake stars to be added to each subimage
                                  # if 1: star will be at the center, if > 1: randomly distributed
-        fakestar_s2n = 50        # required signal-to-noise ratio of the fake stars    
+        fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars    
 
         # switch on/off different functions
         dosex = False            # do extra SExtractor run (already done inside Astrometry.net)
@@ -167,11 +170,11 @@ def global_pars(telescope=None):
         key_seeing = 'SEEING'    # does not need to be present - is estimated
                                  # using parameters below
         #PTF:
-        #if telescope=='p48':
-        #key_ron = 'READNOI'
-        #key_satlevel = 'SATURVAL'
-        #key_ra = 'OBJRA'
-        #key_dec = 'OBJDEC'
+        if telescope=='p48':
+            key_ron = 'READNOI'
+            key_satlevel = 'SATURVAL'
+            key_ra = 'OBJRA'
+            key_dec = 'OBJDEC'
 
         # for seeing estimate
         fwhm_imafrac = 0.25      # fraction of image area that will be used
@@ -220,7 +223,7 @@ def global_pars(telescope=None):
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
         display = False          # show intermediate fits images
-        make_plots = False       # make diagnostic plots and save them as pdf
+        make_plots = True        # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
 
@@ -416,7 +419,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         log.info('dr_full, dx_full, dy_full [arcsec]: ' + str(dr_full) + ', ' + str(dx_full) + ', ' + str(dy_full))
     
     #fratio_median, fratio_std = np.median(fratio), np.std(fratio)
-    fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2)
+    fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2, log=log)
     if verbose:
         log.info('fratio_mean_full, fratio_std_full, fratio_median_full: ' + str(fratio_mean_full) + ', ' + str(fratio_std_full) + ', ' + str(fratio_median_full))
     
@@ -506,7 +509,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             
     log.info('Executing run_ZOGY on subimages ...')
 
-    for nsub in range(nsubs):
+    def zogy_subloop (nsub):
+    #for nsub in range(nsubs):
 
         if timing: tloop = time.time()
         
@@ -725,7 +729,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                                            bkg_ref[index_extract]) / gain_ref
         
 
-        if display and (nsub==0 or nsub == nsubs/2 or nsub==nsubs-1):
+        if display and (nsub==0 or nsub==sizes[0]-1 or nsub == nsubs/2 or
+                        nsub==nsubs-sizes[0] or nsub==nsubs-1):
 
             # just for displaying purpose:
             fits.writeto('D.fits', data_D.astype(np.float32), overwrite=True)
@@ -758,21 +763,26 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                    'std_new.fits', 'std_ref.fits',
                    'VSn.fits', 'VSr.fits', 'VSn_ast.fits', 'VSr_ast.fits',
                    'Sn.fits', 'Sr.fits', 'kn.fits', 'kr.fits', 'Pn_hat.fits', 'Pr_hat.fits',
-                   'psf_ima_config_new_sub.fits', 'psf_ima_config_ref_sub.fits',
-                   'psf_ima_resized_norm_new_sub.fits', 'psf_ima_resized_norm_ref_sub.fits', 
-                   'psf_ima_center_new_sub.fits', 'psf_ima_center_ref_sub.fits', 
-                   'psf_ima_shift_new_sub.fits', 'psf_ima_shift_ref_sub.fits']
+                   'psf_ima_config_new_sub'+str(nsub)+'.fits', 'psf_ima_config_ref_sub'+str(nsub)+'.fits',
+                   'psf_ima_resized_norm_new_sub'+str(nsub)+'.fits', 'psf_ima_resized_norm_ref_sub'+str(nsub)+'.fits', 
+                   'psf_ima_center_new_sub'+str(nsub)+'.fits', 'psf_ima_center_ref_sub'+str(nsub)+'.fits', 
+                   'psf_ima_shift_new_sub'+str(nsub)+'.fits', 'psf_ima_shift_ref_sub'+str(nsub)+'.fits']
 
             result = subprocess.call(cmd)
 
         if timing: log.info('wall-time spent in nsub loop ' +str(time.time()-tloop))
 
-
+    # call above function [zogy_subloop] with pool.map
+    pool = ThreadPool(1)
+    pool.map(zogy_subloop, range(nsubs))
+    pool.close()
+    pool.join()
+        
     # compute statistics on full Scorr image and show histogram
     if verbose:
         mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr_full,
                                                             clip_zeros=False,
-                                                            show_hist=display, log=log)
+                                                            make_hist=make_plots, log=log)
         log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' +
                  str(median_Scorr) + ', ' + str(std_Scorr))
         
@@ -930,9 +940,13 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
     psf_size = np.shape(Pcube_noshift)[1]
     psf_hsize = psf_size/2
     
+
+    # previously this was a loop; now turned to a function to
+    # try pool.map multithreading below
     # loop coordinates
     for i in range(ncoords):
-
+    #def loop_optflux_xycoords(i):
+    
         # extract data around position to use
         # indices of pixel in which [x],[y] is located
         # in case of odd-sized psf:
@@ -948,6 +962,7 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
         if ypos<0 or ypos>=ysize or xpos<0 or xpos>=xsize:
             #print 'Position x,y='+str(xpos)+','+str(ypos)+' outside image - skipping'
             continue
+            #return
             
         # if PSF footprint is partially off the image, just go ahead
         # with the pixels on the image
@@ -1060,6 +1075,11 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
                                     maskopt=mask_opt.astype(int),
                                     S_sub=S_sub, P_sub=P_sub_shift,
                                     D_replaced=D_replaced[index])
+
+    #pool = ThreadPool(nthreads)
+    #pool.map(loop_optflux_xycoords, range(ncoords))
+    #pool.close()
+    #pool.join()
                 
     if False and display:
         ds9_arrays(D=D, D_replaced=D_replaced)
@@ -1076,11 +1096,321 @@ def get_optflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
 
 ################################################################################
 
+def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
+                             dx2, dy2, dxy, satlevel=50000,
+                             psf_oddsized=True, psffit=False, log=None):
+    
+    """Function that returns the optimal flux and its error (using the
+       function [flux_optimal] of a source at pixel positions
+       [xcoords], [ycoords] given the inputs: .psf file produced by
+       PSFex [psfex_bintable], data [D], sky [S], sky standard
+       deviation [S_std] and read noise [RON]. [D], [S] and [RON] are
+       assumed to be in electrons.
+    
+       [D] is a 2D array meant to be the full image. [S] can be a 2D
+       array with the same shape as [D] or a scalar. [xcoords] and
+       [ycoords] are arrays, and the output flux and its error will be
+       arrays as well.
+    
+       The function will also return D(_replaced) where any saturated
+       values in the PSF footprint of the [xcoords],[ycoords]
+       coordinates that are being processed is replaced by the
+       expected flux according to the PSF.
+
+    """
+        
+    log.info('Executing get_psfoptflux_xycoords ...')
+    t = time.time()
+
+    # make sure x and y have same length
+    if np.isscalar(xcoords) or np.isscalar(ycoords):
+        log.error('Error: xcoords and ycoords should be arrays')
+    else:
+        assert len(xcoords) == len(ycoords)
+        
+    # initialize output arrays
+    ncoords = len(xcoords)
+    flux_opt = np.zeros(ncoords)
+    fluxerr_opt = np.zeros(ncoords)
+    if psffit:
+        flux_psf = np.zeros(ncoords)
+        fluxerr_psf = np.zeros(ncoords)
+        xshift_psf = np.zeros(ncoords)
+        yshift_psf = np.zeros(ncoords)
+        chi2_psf = np.zeros(ncoords)
+        
+    D_replaced = np.copy(D)
+    
+    # get dimensions of D
+    ysize, xsize = np.shape(D)
+
+    # read in PSF output binary table from psfex
+    with fits.open(psfex_bintable) as hdulist:
+        header = hdulist[1].header
+        data = hdulist[1].data[0][0][:]
+
+    # read in some header keyword values
+    polzero1 = header['POLZERO1']
+    polzero2 = header['POLZERO2']
+    polscal1 = header['POLSCAL1']
+    polscal2 = header['POLSCAL2']
+    poldeg = header['POLDEG1']
+    psf_fwhm = header['PSF_FWHM']
+    psf_samp = header['PSF_SAMP']
+    # [psf_size_config] is the size of the PSF grid as defined in the
+    # PSFex configuration file ([PSF_SIZE] parameter)
+    psf_size_config = header['PSFAXIS1']
+    if verbose:
+        log.info('polzero1                   ' + str(polzero1))
+        log.info('polscal1                   ' + str(polscal1))
+        log.info('polzero2                   ' + str(polzero2))
+        log.info('polscal2                   ' + str(polscal2))
+        log.info('order polynomial:          ' + str(poldeg))
+        log.info('PSFex FWHM:                ' + str(psf_fwhm))
+        log.info('PSF sampling size (pixels):' + str(psf_samp))
+        log.info('PSF size defined in config:' + str(psf_size_config))
+        
+    # initialize output PSF array
+
+    # [psf_size] is the PSF size in image pixels,
+    # i.e. [psf_size_config] multiplied by the PSF sampling (roughly
+    # 4-5 pixels per FWHM) which is set by the [psf_sampling] parameter.
+    # If set to zero, it is automatically determined by PSFex.
+    psf_size = np.int(np.ceil(psf_size_config * psf_samp))
+    # depending on [psf_oddsized], make the psf size odd or even
+    if psf_oddsized:
+        if psf_size % 2 == 0:
+            psf_size += 1
+    else:
+        if psf_size % 2 != 0:
+            psf_size += 1
+    # now change psf_samp slightly:
+    psf_samp_update = float(psf_size) / float(psf_size_config)
+
+    # define psf_hsize
+    psf_hsize = psf_size/2
+    
+    if timing: log.info('wall-time spent in get_psfoptflux_xycoords before the loop' + str(time.time()-t))
+
+    # previously this was a loop; now turned to a function to
+    # try pool.map multithreading below
+    # loop coordinates
+    #for i in range(ncoords):
+    def loop_psfoptflux_xycoords(i):
+    
+        # extract data around position to use
+        # indices of pixel in which [x],[y] is located
+        # in case of odd-sized psf:
+        if psf_oddsized:
+            xpos = int(xcoords[i]-0.5)
+            ypos = int(ycoords[i]-0.5)
+        else:
+            # in case of even-sized psf:
+            xpos = int(xcoords[i])
+            ypos = int(ycoords[i])
+
+        # check if position is within image
+        if ypos<0 or ypos>=ysize or xpos<0 or xpos>=xsize:
+            #print 'Position x,y='+str(xpos)+','+str(ypos)+' outside image - skipping'
+            #continue
+            return
+            
+        # if PSF footprint is partially off the image, just go ahead
+        # with the pixels on the image
+        y1 = max(0, ypos-psf_hsize)
+        x1 = max(0, xpos-psf_hsize)
+        if psf_oddsized:
+            y2 = min(ysize, ypos+psf_hsize+1)
+            x2 = min(xsize, xpos+psf_hsize+1)
+            # make sure axis sizes are odd
+            if (x2-x1) % 2 == 0:
+                if x1==0:
+                    x2 -= 1
+                else:
+                    x1 += 1
+            if (y2-y1) % 2 == 0:
+                if y1==0:
+                    y2 -= 1
+                else:
+                    y1 += 1
+        else:
+            y2 = min(ysize, ypos+psf_hsize)
+            x2 = min(xsize, xpos+psf_hsize)
+            # make sure axis sizes are even
+            if (x2-x1) % 2 != 0:
+                if x1==0:
+                    x2 -= 1
+                else:
+                    x1 += 1
+            if (y2-y1) % 2 != 0:
+                if y1==0:
+                    y2 -= 1
+                else:
+                    y1 += 1
+        index = [slice(y1,y2),slice(x1,x2)]
+
+        # extract subsection from D, S, and S_std
+        D_sub = np.copy(D[index])
+        if not np.isscalar(S):
+            S_sub = S[index]
+            S_std_sub = S_std[index]
+        else:
+            S_sub = S
+            S_std_sub = S_std
+
+
+        # get P_shift and P_noshift
+        x = (int(xcoords[i]) - polzero1) / polscal1
+        y = (int(ycoords[i]) - polzero2) / polscal2
+        
+        if ncoords==1 or use_single_psf:
+            psf_ima_config = data[0]
+        else:
+            if poldeg==2:
+                psf_ima_config = data[0] + data[1] * x + data[2] * x**2 + \
+                                 data[3] * y + data[4] * x * y + data[5] * y**2
+            elif poldeg==3:
+                psf_ima_config = data[0] + data[1] * x + data[2] * x**2 + data[3] * x**3 + \
+                                 data[4] * y + data[5] * x * y + data[6] * x**2 * y + \
+                                 data[7] * y**2 + data[8] * x * y**2 + data[9] * y**3
+
+        # shift to the subpixel center of the object (object at
+        # fractional pixel position 0.5,0.5 doesn't need the PSF to
+        # shift as the PSF image is constructed to be even
+        if psf_oddsized:
+            xshift = xcoords[i]-np.round(xcoords[i])
+            yshift = ycoords[i]-np.round(ycoords[i])
+        else:
+            xshift = (xcoords[i]-int(xcoords[i])-0.5)
+            yshift = (ycoords[i]-int(ycoords[i])-0.5)
+                    
+        # if [psf_samp_update] is lower than unity, then perform this
+        # shift before the PSF image is re-sampled to the image
+        # pixels, as the original PSF will have higher resolution in
+        # that case
+        order = 3
+        if psf_samp_update < 1:
+            # multiply with PSF sampling to get shift in units of image
+            # pixels
+            xshift *= psf_samp_update
+            yshift *= psf_samp_update
+            # shift PSF
+            psf_ima_shift = ndimage.shift(psf_ima_config, (yshift, xshift), order=order)
+            # using Eran's function:
+            #psf_ima_shift = image_shift_fft(psf_ima_config, xshift, yshift)
+            # resample PSF image at image pixel scale
+            psf_ima_shift_resized = ndimage.zoom(psf_ima_shift, psf_samp_update, order=order)
+            # also resample non-shifted PSF image at image pixel scale
+            psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, order=order)
+        else:
+            # resample PSF image at image pixel scale
+            psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, order=order)
+            # shift PSF
+            psf_ima_shift_resized = ndimage.shift(psf_ima_resized, (yshift, xshift), order=order)
+            # using Eran's function:
+            #psf_ima_shift_resized = image_shift_fft(psf_ima_resized, xshift, yshift)
+
+        # clean and normalize PSF
+        psf_shift = clean_norm_psf(psf_ima_shift_resized, psf_clean_factor)
+        # also return normalized PSF without any shift
+        psf_noshift = clean_norm_psf(psf_ima_resized, psf_clean_factor)
+
+
+        # extract subsection from psf_shift and psf_noshift
+        y1_P = y1 - (ypos - psf_hsize)
+        x1_P = x1 - (xpos - psf_hsize)
+        y2_P = y2 - (ypos - psf_hsize)
+        x2_P = x2 - (xpos - psf_hsize)
+        index_P = [slice(y1_P,y2_P),slice(x1_P,x2_P)]
+        
+        P_shift = psf_shift[index_P]
+        P_noshift = psf_noshift[index_P]
+        
+        # could provide mask to flux_optimal, so that saturated pixels
+        # can already be flagged, and flux_optimal could return a mask
+        # indicating the pixels that were rejected
+
+        # create mask of saturated pixels
+        mask_sat = (D_sub >= satlevel)
+        # add adjacent pixels to these
+        mask_sat = ndimage.binary_dilation(mask_sat, structure=np.ones((3,3)).astype('bool'))
+        # and its inverse
+        mask_nonsat = ~mask_sat
+        
+
+        # call flux_optimal
+        #print 'xcoords[i], ycoords[i]', xcoords[i], ycoords[i]
+        #print 'dx2[i], dy2[i]', dx2[i], dy2[i]
+        flux_opt[i], fluxerr_opt[i], mask_opt = flux_optimal (P_shift, P_noshift, D_sub,
+                                                              S_sub, S_std_sub, RON, mask_use=mask_nonsat,
+                                                              dx2=dx2[i], dy2=dy2[i], dxy=dxy[i], log=log)
+        
+        # if psffit=True, perform PSF fitting
+        if psffit:
+            flux_psf[i], fluxerr_psf[i], xshift_psf[i], yshift_psf[i], chi2_psf[i] =\
+            flux_psffit (P_noshift, D_sub, S_sub, RON, flux_opt[i],
+                         xshift, yshift, mask_use=mask_nonsat, log=log)
+
+            # xshift_psf and yshift_psf are the shifts with respect to
+            # the integer xpos and ypos positions defined at the top
+            # of this loop over the sources. This is because the fit
+            # is using the PSF image that is not shifted
+            # (P_noshift) to the exact source position.  Redefine
+            # them here with respect to the fractional coordinates
+            # xcoords and ycoords
+            xshift_psf[i] += xshift
+            yshift_psf[i] += yshift
+                        
+        #print 'i, flux_opt[i], fluxerr_opt[i], flux_psf[i], fluxerr_psf[i]',\
+        #    i, flux_opt[i], fluxerr_opt[i], flux_psf[i], fluxerr_psf[i]
+
+        
+        # if any pixels close to the center of the object are
+        # saturated, replace them
+        mask_inner = (P_shift >= 0.25*np.amax(P_shift))
+        if np.any(mask_sat[mask_inner]):
+
+            # replace saturated values
+            D_replaced[index][mask_sat] = P_shift[mask_sat] * flux_opt[i] + S_sub[mask_sat]
+
+            # and put through [flux_optimal] once more without a
+            # saturated pixel mask
+            #flux_opt[i], fluxerr_opt[i], mask_opt = flux_optimal (P_shift, P_noshift, D_sub,
+            #                                                      S_sub, S_std_sub, RON,
+            #                                                      dx2=dx2[i], dy2=dy2[i], dxy=dxy[i])
+            #D_replaced[index][mask_opt] = P_shift[mask_opt] * flux_opt[i] + S_sub[mask_opt]
+
+            if False and display:
+                result = ds9_arrays(D_sub=D_sub, mask_nonsat=mask_nonsat.astype(int), 
+                                    maskopt=mask_opt.astype(int),
+                                    S_sub=S_sub, P=P_shift,
+                                    D_replaced=D_replaced[index])
+
+    pool = ThreadPool(nthreads)
+    pool.map(loop_psfoptflux_xycoords, range(ncoords))
+    pool.close()
+    pool.join()
+                
+    if False and display:
+        ds9_arrays(D=D, D_replaced=D_replaced)
+
+    if timing: log.info('wall-time spent in get_psfoptflux_xycoords ' + str(time.time()-t))
+    
+    if psffit:
+        x_psf = xcoords + xshift_psf
+        y_psf = ycoords + yshift_psf
+        return flux_opt, fluxerr_opt, D_replaced, flux_psf, fluxerr_psf, x_psf, y_psf
+    else:
+        return flux_opt, fluxerr_opt, D_replaced
+            
+
+################################################################################
+
 def flux_psffit(P, D, S, RON, flux_opt, xshift, yshift, mask_use=None, log=None):
 
     # if S is a scalar, expand it to 2D array
     if np.isscalar(S):
-        S = np.ndarray(P.shape).fill(S)
+        S = np.ndarray(P.shape, dtype='float32').fill(S)
         
     # replace negative values in D with the sky
     D[D<0] = S[D<0]
@@ -1236,7 +1566,7 @@ def flux_optimal (P, P_noshift, D, S, S_std, RON, nsigma_inner=10,
 
     # if S is a scalar, expand it to 2D array
     if np.isscalar(S):
-        S = np.ndarray(P.shape).fill(S)
+        S = np.ndarray(P.shape, dtype='float32').fill(S)
 
     if add_V_ast:
         # calculate astrometric variance
@@ -1301,7 +1631,7 @@ def flux_optimal (P, P_noshift, D, S, S_std, RON, nsigma_inner=10,
         log.info('np.amax((D - flux_opt * P - S)**2 / V): ' + str(np.amax(sigma2)))
         
         if not add_V_ast:
-            V_ast = np.zeros(D.shape)
+            V_ast = np.zeros(D.shape, dtype='float32')
             
         result = ds9_arrays(data=D, psf=P, sky=S, variance=V, fluxoptPsky = flux_opt*P+S,
                             data_min_fluxoptP_min_sky=(D - flux_opt * P - S),
@@ -1364,7 +1694,7 @@ def flux_optimal_s2n (P, D, S, RON, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
 
 def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=False,
                   clip_zeros=True, get_median=True, get_mode=False, mode_binsize=0.1,
-                  verbose=False, show_hist=False, log=None):
+                  verbose=False, make_hist=False, log=None):
     
     # remove zeros
     if clip_zeros:
@@ -1378,7 +1708,8 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
     for i in range(max_iters):
         mean = array.mean()
         std = array.std()
-        if abs(mean_old-mean)/mean < epsilon:
+        #log.info('i: {:d}, mean: {:.3f}, std: {:.3f}'.format(i, mean, std))
+        if abs(mean_old-mean)/abs(mean) < epsilon:
             break
         mean_old = mean
         index = ((array>(mean-nsigma*std)) & (array<(mean+nsigma*std)))
@@ -1394,25 +1725,28 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
             
     # and mode
     if get_mode:
-        bins = np.arange(np.int(np.amin(array)), np.int(np.amax(array)), 0.5)
+        bins = np.arange(np.int(mean-nsigma*std), np.int(mean+nsigma*std), mode_binsize)
         hist, bin_edges = np.histogram(array, bins)
         index = np.argmax(hist)
         mode = (bins[index]+bins[index+1])/2.
         if abs(mode-mean)/mean>0.1:
             log.info('Warning: mean and mode in clipped_stats differ by more than 10%')
 
-    if show_hist:
-        bins = np.arange(np.int(np.amin(array)), np.int(np.amax(array)), 0.5)
-        hist, bin_edges = np.histogram(array, bins)
-        plt.hist(array, bins, color='green')
+    if make_hist:
+        bins = np.arange(np.int(mean-nsigma*std), np.int(mean+nsigma*std), mode_binsize)
+        plt.hist(np.ravel(array), bins, color='green')
         x1,x2,y1,y2 = plt.axis()
-        plt.plot([mean, mean], [y2,y1], color='red')
+        plt.plot([mean, mean], [y2,y1], color='black')
         plt.plot([mean+std, mean+std], [y2,y1], color='red', linestyle='--')
         plt.plot([mean-std, mean-std], [y2,y1], color='red', linestyle='--')
+        title = 'mean: {:.3f}, std: {:.3f}'.format(mean, std)
         if get_median:
-            plt.plot([median, median], [y2,y1], color='magenta')
+            plt.plot([median, median], [y2,y1], color='blue')
+            title += ', median: {:.3f}'.format(median)
         if get_mode:
-            plt.plot([mode, mode], [y2,y1], color='blue')
+            plt.plot([mode, mode], [y2,y1], color='red')
+            title += ', mode: {:.3f}'.format(mode)
+        plt.title(title)
         if make_plots: plt.savefig('clipped_stats_hist.pdf')
         if show_plots: plt.show()
         plt.close()
@@ -1627,8 +1961,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # and subsequently mapped to the new image.
     if bkg_method==1:
         # initialize arrays
-        data_bkg = np.zeros(data.shape)
-        data_bkg_std = np.zeros(data.shape)
+        data_bkg = np.zeros(data.shape, dtype='float32')
+        data_bkg_std = np.zeros(data.shape, dtype='float32')
         # prepare mask_use based on data_objmask image built by
         # SExtractor, and remapped to the new image if needed
         mask_reject = ((data_objmask==0) | (data<=0))
@@ -1636,17 +1970,16 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         if verbose:
             log.info('np.sum(mask_reject) ' + str(np.sum(mask_reject)))
         
-
         for nsub in range(nsubs):
             subcut = cuts_ima[nsub]
             index_subcut = [slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])]
             # now determine background for method 1, where clipped median
             # of each subimage is used
             mask_use_sub = mask_use[index_subcut]
-            mean, std, median = clipped_stats(data[index_subcut], nsigma=bkg_nsigma)
+            mean, std, median = clipped_stats(data[index_subcut], nsigma=bkg_nsigma, log=log)
             if verbose:
                 log.info('nsub+1, mean, std, median: ' + str(nsub+1) + ', ' + str(mean) + ', ' + str(std) + ', ' + str(median))
-            mean, std, median = clipped_stats(data[index_subcut][mask_use_sub], nsigma=bkg_nsigma)
+            mean, std, median = clipped_stats(data[index_subcut][mask_use_sub], nsigma=bkg_nsigma, log=log)
             if verbose:
                 log.info('masked: nsub+1, mean, std, median: ' + str(nsub+1) + ', ' + str(mean) + ', ' + str(std) + ', ' + str(median))
             data_bkg[index_subcut] = median
@@ -1727,12 +2060,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     fitpsf = False
     if fitpsf:
         flux_opt, fluxerr_opt, data_replaced, flux_psf, fluxerr_psf, x_psf, y_psf =\
-            get_optflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
+            get_psfoptflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
                                   xwin, ywin, errx2win, erry2win, errxywin,
                                   satlevel=satlevel*gain, psffit=fitpsf, log=log)
     else:
         flux_opt, fluxerr_opt, data_replaced =\
-            get_optflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
+            get_psfoptflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
                                   xwin, ywin, errx2win, erry2win, errxywin,
                                   satlevel=satlevel*gain, log=log)
         
@@ -1946,7 +2279,7 @@ def fixpix (data, mask_in, bkg, log, satlevel=60000.):
     # do not seem to completely define all the bad pixels/columns
     # correctly - temporarily remake a mask here from negative or
     # saturated pixels
-    mask = np.zeros(data.shape)
+    mask = np.zeros(data.shape, dtype='int8')
     mask[data < 0] = 1 
     mask[data >= satlevel] = 4
 
@@ -2030,7 +2363,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
         # masked
         if clip:
             # get clipped_stats mean, std and median 
-            mean_full, std_full, median_full = clipped_stats(data[mask_use])
+            mean_full, std_full, median_full = clipped_stats(data[mask_use], log=log)
         else:
             median_full = np.median(data[mask_use])
             std_full = np.std(data[mask_use])
@@ -2042,6 +2375,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
         ysize, xsize = data.shape
         centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(bkg_boxsize,
                                                                            ysize, xsize, log)        
+        nsubs = centers.shape[0]
 
         # loop subimages
         if ysize % bkg_boxsize != 0 or xsize % bkg_boxsize !=0:
@@ -2050,36 +2384,49 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
         nysubs = ysize / bkg_boxsize
         nxsubs = xsize / bkg_boxsize
         # prepare output median and std output arrays
-        mesh_median = np.ndarray((nysubs, nxsubs))
-        mesh_std = np.ndarray((nysubs, nxsubs))
-        nsub = -1
+        mesh_median = np.ndarray(nsubs)
+        mesh_std = np.ndarray(nsubs)
+
         mask_minsize = 0.5*bkg_boxsize**2
-        for i in range(nxsubs):
-            for j in range(nysubs):
-                nsub += 1
-                subcut = cuts_ima[nsub]
-                data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
-                mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
-                if np.sum(mask_sub) > mask_minsize:
-                    if clip:
-                        # get clipped_stats mean, std and median 
-                        mean, std, median = clipped_stats(data_sub[mask_sub], clip_upper10=True)
-                    else:
-                        median = np.median(data_sub[mask_sub])
-                        std = np.std(data_sub[mask_sub])
+
+        # previously this was a loop; now turned to a function to
+        # try pool.map multithreading below
+        def get_median_std (nsub):
+        # for nsub in range(nsubs):
+            subcut = cuts_ima[nsub]
+            data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+            mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+            if np.sum(mask_sub) > mask_minsize:
+                if clip:
+                    # get clipped_stats mean, std and median 
+                    mean, std, median = clipped_stats(data_sub[mask_sub], clip_upper10=True, log=log)
                 else:
-                    # if less than half of the elements of mask_sub
-                    # are True, use values from entire masked image
-                    median, std = median_full, std_full
-                    if verbose:
-                        log.info('Warning: using median and std of entire masked image for this background patch')
-                        log.info('nsub' + str(nsub))
-                        log.info('subcut' + str(subcut))
-                        log.info('np.sum(mask_sub) / bkg_boxsize**2: ' + str(np.float(np.sum(mask_sub)) / bkg_boxsize**2))
-                        
-                # fill median and std arrays
-                mesh_median[j,i] = median
-                mesh_std[j,i] = std
+                    median = np.median(data_sub[mask_sub])
+                    std = np.std(data_sub[mask_sub])
+            else:
+                # if less than half of the elements of mask_sub
+                # are True, use values from entire masked image
+                median, std = median_full, std_full
+                #if verbose:
+                #    log.info('Warning: using median and std of entire masked image for this background patch')
+                #    log.info('nsub' + str(nsub))
+                #    log.info('subcut' + str(subcut))
+                #    log.info('np.sum(mask_sub) / bkg_boxsize**2: ' + str(np.float(np.sum(mask_sub)) / bkg_boxsize**2))
+
+            # fill median and std arrays
+            mesh_median[nsub] = median
+            mesh_std[nsub] = std
+            
+        if timing: t1 = time.time()
+        pool = ThreadPool(nthreads)
+        pool.map(get_median_std, range(nsubs))
+        pool.close()
+        pool.join()
+        if timing: log.info('wall-time spent in get_back pool ' + str(time.time() - t1))
+
+        # reshape and transpose
+        mesh_median = mesh_median.reshape((nysubs, nxsubs)).transpose()
+        mesh_std = mesh_std.reshape((nysubs, nxsubs)).transpose()
 
         # median filter the meshes with filter of size [bkg_filtersize]
         shape_filter = (bkg_filtersize, bkg_filtersize)
@@ -2292,8 +2639,12 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     # loop through nsubs and construct psf at the center of each
     # subimage, using the output from PSFex that was run on the full
     # image
-    for nsub in range(nsubs):
-        
+    #for nsub in range(nsubs):
+    #
+    # previously this was a loop; now turned to a function to
+    # try pool.map multithreading below
+    def loop_psf_sub(nsub):
+    
         x = (centers[nsub,1] - polzero1) / polscal1
         y = (centers[nsub,0] - polzero2) / polscal2
 
@@ -2338,27 +2689,23 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         # perform fft shift
         psf_ima_shift[nsub] = fft.fftshift(psf_ima_center[nsub])
 
-        if display:
-            fits.writeto('psf_ima_config_'+imtype+'_sub.fits', psf_ima_config, overwrite=True)
-            fits.writeto('psf_ima_resized_norm_'+imtype+'_sub.fits',
+        if display and (nsub==0 or nsub==sizes[0]-1 or nsub == nsubs/2 or
+                        nsub==nsubs-sizes[0] or nsub==nsubs-1):
+            fits.writeto('psf_ima_config_'+imtype+'_sub'+str(nsub)+'.fits', psf_ima_config, overwrite=True)
+            fits.writeto('psf_ima_resized_norm_'+imtype+'_sub'+str(nsub)+'.fits',
                          psf_ima_resized_norm.astype(np.float32), overwrite=True)
-            fits.writeto('psf_ima_center_'+imtype+'_sub.fits',
+            fits.writeto('psf_ima_center_'+imtype+'_sub'+str(nsub)+'.fits',
                          psf_ima_center[nsub].astype(np.float32), overwrite=True)            
-            fits.writeto('psf_ima_shift_'+imtype+'_sub.fits',
+            fits.writeto('psf_ima_shift_'+imtype+'_sub'+str(nsub)+'.fits',
                          psf_ima_shift[nsub].astype(np.float32), overwrite=True)            
 
-        # test suggested by Barak: sum of (x * f(x)) should be zero
-        # where f(x) is the value at pixel x, and x indices are (0,0)
-        # in top left corner, (0,xsize-1) in the top left corner,
-        # (ysize-1, 0) in the bottom left corner and (xsize-1, ysize-1)
-        # in the bottom right one
-        #x = np.arange(0, xsize_fft)
-        #y = np.arange(0, ysize_fft)
-        #xx, yy = np.meshgrid(x, y)
-        #xvalues = np.maximum(xx, yy)
-        #sum_barak = np.sum(xvalues * psf_ima_center[nsub])
-        #log.info('Barak test: sum of x f(x) '+str(sum_barak))
 
+    # call above function [get_psf_sub] with pool.map
+    pool = ThreadPool(nthreads)
+    pool.map(loop_psf_sub, range(nsubs))
+    pool.close()
+    pool.join()
+    
     if timing: log.info('wall-time spent in get_psf ' + str(time.time() - t))
 
     return psf_ima_shift, psf_ima
@@ -2427,10 +2774,15 @@ def get_psf_xycoords(psfex_bintable, xcoords, ycoords, log, psf_oddsized=False, 
     psf_cube_noshift = np.ndarray((ncoords,psf_size,psf_size), dtype='float32')
     xshift_array = np.zeros(ncoords)
     yshift_array = np.zeros(ncoords)
-    
+
+
     # loop through coordinates and construct psf
     for i in range(ncoords):
-
+    #
+    # previously this was a loop; now turned to a function to
+    # try pool.map multithreading below
+    #def loop_psf_xycoords(i):    
+    
         x = (int(xcoords[i]) - polzero1) / polscal1
         y = (int(ycoords[i]) - polzero2) / polscal2
         
@@ -2487,7 +2839,13 @@ def get_psf_xycoords(psfex_bintable, xcoords, ycoords, log, psf_oddsized=False, 
 
         # also return normalized PSF without any shift
         psf_cube_noshift[i] = clean_norm_psf(psf_ima_resized, psf_clean_factor)
-        
+
+
+    #pool = ThreadPool(nthreads)
+    #pool.map(loop_psf_xycoords, range(ncoords))
+    #pool.close()
+    #pool.join()
+    
     if timing: log.info('wall-time spent in get_psf_xycoords ' + str(time.time() - t))
 
     return psf_cube_noshift, psf_cube_shift, xshift_array, yshift_array
@@ -2995,7 +3353,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
         # write small image to fits
         image_fraction = image.replace('.fits','_fraction.fits')
-        fits.writeto(image_fraction, data_fraction.astype(np.float32), header, overwrite=True)
+        fits.writeto(image_fraction, data_fraction.astype('float32'), header, overwrite=True)
 
         # make image point to image_fraction
         image = image_fraction
@@ -3091,13 +3449,13 @@ def get_fwhm (cat_ldac, fraction, log, class_Sort = False, get_elongation=False)
         log.info('WARNING: fewer than 10 objects are selected for FWHM determination')
     
     # determine mean, median and standard deviation through sigma clipping
-    fwhm_mean, fwhm_std, fwhm_median = clipped_stats(fwhm_select)
+    fwhm_mean, fwhm_std, fwhm_median = clipped_stats(fwhm_select, log=log)
     if verbose:
         log.info('catalog: ' + cat_ldac)
         log.info('fwhm_mean, fwhm_median, fwhm_std: ' + str(fwhm_mean) +', '+ str(fwhm_median) +', '+ str(fwhm_std))
     if get_elongation:
         # determine mean, median and standard deviation through sigma clipping
-        elongation_mean, elongation_std, elongation_median = clipped_stats(elongation_select)
+        elongation_mean, elongation_std, elongation_median = clipped_stats(elongation_select, log=log)
         if verbose:
             log.info('elongation_mean, elongation_median, elongation_std: ' +
                 str(elongation_mean) + ', ' + str(elongation_median) + ', ' + str(elongation_std))
@@ -3385,16 +3743,16 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
         #print 'dy is finite?', np.isfinite(dy)
     
     if display:
-        fits.writeto('Pn_hat.fits', np.real(Pn_hat).astype(np.float32), overwrite=True)
-        fits.writeto('Pr_hat.fits', np.real(Pr_hat).astype(np.float32), overwrite=True)
-        fits.writeto('kr.fits', np.real(kr).astype(np.float32), overwrite=True)
-        fits.writeto('kn.fits', np.real(kn).astype(np.float32), overwrite=True)
-        fits.writeto('Sr.fits', Sr.astype(np.float32), overwrite=True)
-        fits.writeto('Sn.fits', Sn.astype(np.float32), overwrite=True)
-        fits.writeto('VSr.fits', VSr.astype(np.float32), overwrite=True)
-        fits.writeto('VSn.fits', VSn.astype(np.float32), overwrite=True)
-        fits.writeto('VSr_ast.fits', VSr_ast.astype(np.float32), overwrite=True)
-        fits.writeto('VSn_ast.fits', VSn_ast.astype(np.float32), overwrite=True)
+        fits.writeto('Pn_hat.fits', np.real(Pn_hat).astype('float32'), overwrite=True)
+        fits.writeto('Pr_hat.fits', np.real(Pr_hat).astype('float32'), overwrite=True)
+        fits.writeto('kr.fits', np.real(kr).astype('float32'), overwrite=True)
+        fits.writeto('kn.fits', np.real(kn).astype('float32'), overwrite=True)
+        fits.writeto('Sr.fits', Sr.astype('float32'), overwrite=True)
+        fits.writeto('Sn.fits', Sn.astype('float32'), overwrite=True)
+        fits.writeto('VSr.fits', VSr.astype('float32'), overwrite=True)
+        fits.writeto('VSn.fits', VSn.astype('float32'), overwrite=True)
+        fits.writeto('VSr_ast.fits', VSr_ast.astype('float32'), overwrite=True)
+        fits.writeto('VSn_ast.fits', VSn_ast.astype('float32'), overwrite=True)
 
     # and finally S_corr
     V_S = VSr + VSn
