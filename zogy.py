@@ -222,7 +222,7 @@ def global_pars(telescope=None):
         redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = False          # show intermediate fits images
+        display = True           # show intermediate fits images
         make_plots = True        # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
@@ -370,7 +370,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     # determine cutouts
     centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = \
         centers_cutouts(subimage_size, ysize_new, xsize_new, log)
-
+    nxsubs = xsize_new/subimage_size
+    nysubs = ysize_new/subimage_size
+    
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
     nsubs = centers.shape[0]
@@ -729,8 +731,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                                            bkg_ref[index_extract]) / gain_ref
         
 
-        if display and (nsub==0 or nsub==sizes[0]-1 or nsub == nsubs/2 or
-                        nsub==nsubs-sizes[0] or nsub==nsubs-1):
+        if display and (nsub==0 or nsub==nysubs-1 or nsub==nsubs/2 or
+                        nsub==nsubs-nysubs or nsub==nsubs-1):
 
             # just for displaying purpose:
             fits.writeto('D.fits', data_D.astype(np.float32), overwrite=True)
@@ -1314,7 +1316,6 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
         psf_shift = clean_norm_psf(psf_ima_shift_resized, psf_clean_factor)
         # also return normalized PSF without any shift
         psf_noshift = clean_norm_psf(psf_ima_resized, psf_clean_factor)
-
 
         # extract subsection from psf_shift and psf_noshift
         y1_P = y1 - (ypos - psf_hsize)
@@ -2583,6 +2584,8 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(subimage_size, ysize, xsize, log)
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
+    nxsubs = xsize/subimage_size
+    nysubs = ysize/subimage_size
 
     if imtype == 'ref':
         # in case of the ref image, the PSF was determined from the
@@ -2689,8 +2692,9 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         # perform fft shift
         psf_ima_shift[nsub] = fft.fftshift(psf_ima_center[nsub])
 
-        if display and (nsub==0 or nsub==sizes[0]-1 or nsub == nsubs/2 or
-                        nsub==nsubs-sizes[0] or nsub==nsubs-1):
+
+        if display and (nsub==0 or nsub==nysubs-1 or nsub==nsubs/2 or
+                        nsub==nsubs-nysubs or nsub==nsubs-1):
             fits.writeto('psf_ima_config_'+imtype+'_sub'+str(nsub)+'.fits', psf_ima_config, overwrite=True)
             fits.writeto('psf_ima_resized_norm_'+imtype+'_sub'+str(nsub)+'.fits',
                          psf_ima_resized_norm.astype(np.float32), overwrite=True)
