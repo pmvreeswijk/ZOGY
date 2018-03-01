@@ -39,8 +39,6 @@ import sys
 from multiprocessing.dummy import Pool as ThreadPool
 from multiprocessing.dummy import Lock
 nthreads = 1
-# to check if object is pickleable
-# import dill
 
 def global_pars(telescope=None):
 
@@ -135,11 +133,10 @@ def global_pars(telescope=None):
 
         # background estimation: these are the optional methods to estimate the
         # backbround and its standard deviation (STD):
-        # (1) clipped median and STD of each object-masked subimage (simplest)
-        # (2) background and STD/RMS map determined by SExtractor (fastest)
-        # (3) improved background and STD map using masking of all sources (recommended)
-        # (4) similar to 3 but using photutils' Background2D (very very slow!)
-        bkg_method = 3           # background method to use
+        # (1) background and STD/RMS map determined by SExtractor (fastest)
+        # (2) improved background and STD map using masking of all sources (recommended)
+        # (3) similar to 3 but using photutils' Background2D (very very slow!)
+        bkg_method = 2           # background method to use
         bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                                  # clipped; used in methods 1, 3 and 4
         bkg_boxsize = 240        # size of region used to determine
@@ -222,11 +219,11 @@ def global_pars(telescope=None):
                                       # used for aperture photometry
                                       # in SExtractor general
 
-        redo = True              # execute functions even if output file exist
+        redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = True           # show intermediate fits images
-        make_plots = True        # make diagnostic plots and save them as pdf
+        display = False          # show intermediate fits images
+        make_plots = False       # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
 
@@ -317,7 +314,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         sexcat_new = base_new+'.sexcat_ldac'
         fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg, sex_par,
                                                 pixscale_new, log, fit_psf=False, return_fwhm=True,
-                                                fraction=fwhm_imafrac, fwhm=5.0, save_bkgs=False,
+                                                fraction=fwhm_imafrac, fwhm=5.0, save_bkg=False,
                                                 update_vignet=False)
         log.info('fwhm_new: {:.3f} +- {:.3f}'.format(fwhm_new, fwhm_std_new))
         # if SEEING keyword exists, report its value in the log
@@ -328,7 +325,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         sexcat_ref = base_ref+'.sexcat_ldac'
         fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg, sex_par,
                                                 pixscale_ref, log, fit_psf=False, return_fwhm=True,
-                                                fraction=fwhm_imafrac, fwhm=5.0, save_bkgs=False,
+                                                fraction=fwhm_imafrac, fwhm=5.0, save_bkg=False,
                                                 update_vignet=False)
         log.info('fwhm_ref: {:.3f} +- {:.3f}'.format(fwhm_ref, fwhm_std_ref))
         # if SEEING keyword exists, report its value in the log
@@ -341,7 +338,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         if not os.path.isfile(sexcat_new) or redo:
             result = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg, sex_par,
                                     pixscale_new, log, fit_psf=False, return_fwhm=False,
-                                    fraction=1.0, fwhm=fwhm_new, save_bkgs=True,
+                                    fraction=1.0, fwhm=fwhm_new, save_bkg=True,
                                     update_vignet=True)
             # copy the LDAC binary fits table output from SExtractor (with
             # '_ldac' in the name) to a normal binary fits table;
@@ -360,7 +357,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         if not os.path.isfile(sexcat_ref) or redo:
             result = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg, sex_par,
                                     pixscale_ref, log, fit_psf=False, return_fwhm=False,
-                                    fraction=1.0, fwhm=fwhm_ref, save_bkgs=True,
+                                    fraction=1.0, fwhm=fwhm_ref, save_bkg=True,
                                     update_vignet=True)
             ldac2fits (sexcat_ref, sexcat_ref.replace('_ldac',''), log)
         # determine WCS solution of ref_fits
@@ -496,8 +493,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             
     log.info('Executing run_ZOGY on subimages ...')
 
-    #log.info('dill.pickles(run_ZOGY)' + str(dill.pickles(run_ZOGY)))
-    
     def zogy_subloop (nsub):
     #for nsub in range(nsubs):
 
@@ -975,7 +970,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
     # define psf_hsize
     psf_hsize = psf_size/2
     
-    if timing: log.info('wall-time spent in get_psfoptflux_xycoords before the loop' + str(time.time()-t))
+    if timing: log.info('wall-time spent in get_psfoptflux_xycoords before the loop ' + str(time.time()-t))
 
     # previously this was a loop; now turned to a function to
     # try pool.map multithreading below
@@ -1571,6 +1566,7 @@ def read_header(header, keywords, log):
             raise SystemExit
     return values
 
+
 ################################################################################
     
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
@@ -1619,7 +1615,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # ------------------------------
     # construction of background map
     # ------------------------------
-        
+
+    # the background and standard deviation maps have already been
+    # constructed in [run_sexctractor]
+    
     # fits filenames for background and std/RMS maps and object mask
     # as produced by SExtractor (i.e. in the case of the ref image
     # before remapping)
@@ -1630,101 +1629,51 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
 
     # in case of the reference image for subpipe, these parameters
     # should point to the images that have already been created at the
-    # reference building stage - still to be implemented
+    # reference building stage
     bkg_fits = base+'_bkg.fits'
     bkg_std_fits = base+'_bkg_std.fits'
     objmask_fits = base+'_objmask.fits'
 
-    # if bkg_fits and bkg_std_fits already exist and [redo] parameter
-    # is set to False, do not bother to execute [get_back] but just
-    # read in those images - this will use the existing background
-    # image, regardless of the [bkg_method] that was set.
-    # At the moment this will not work as SExtractor produces a
-    # background image and stddev image with the same names.
-    #if os.path.isfile(bkg_fits) and os.path.isfile(bkg_std_fits) and not redo:
-    #    with fits.open(bkg_fits) as hdulist:
-    #        data_bkg = hdulist[0].data * gain
-    #    with fits.open(bkg_std_fits) as hdulist:
-    #        data_bkg_std = hdulist[0].data * gain
-    #else:
-
-    # read in SExtractor's object mask to use in background
-    # estimation for methods 1,3 and 4.
-    with fits.open(objmask_fits) as hdulist:
-        data_objmask = hdulist[0].data
-    
-    # read in SExtractor's background and RMS/std maps which have
-    # already been produced.    
-    if bkg_method==2:
-        with fits.open(bkg_fits) as hdulist:
-            data_bkg = hdulist[0].data * gain
-        with fits.open(bkg_std_fits) as hdulist:
-            data_bkg_std = hdulist[0].data * gain
-
-    # construct background image using [get_back]; in the case of
-    # the reference image these data need to refer to the image
-    # before remapping
-    if bkg_method==3:
-        data_bkg, data_bkg_std = get_back(data_wcs, data_objmask, log)
-
-    # similar as above, but now photutils' Background2D is used
-    # inside [get_back]
-    if bkg_method==4:
-        data_bkg, data_bkg_std = get_back(data_wcs, data_objmask, log,
-                                          use_photutils=True)
-
-
     if imtype=='ref':
-        # in case of the reference image, the background maps
-        # produced above need to be projected to the coordinate
-        # frame of the new or remapped reference image. At the
-        # moment this is done with swarp, but this is a very slow
-        # solution - try to improve.
+        # in case of the reference image, the background maps need to
+        # be projected to the coordinate frame of the new or remapped
+        # reference image. At the moment this is done with swarp, but
+        # this is a very slow solution - try to improve.
 
-        # update headers of the background and std/RMS fits image
-        # with that of the original wcs-corrected reference image
-        # for all background methods except 1
-        if bkg_method!=1:
-            fits.writeto(bkg_fits, (data_bkg/gain).astype(np.float32),
-                         header=header_wcs, overwrite=True)
-            fits.writeto(bkg_std_fits, (data_bkg_std/gain).astype(np.float32),
-                         header=header_wcs, overwrite=True)
-            # project ref image background maps to new image
-            bkg_fits_remap = base_ref+'_bkg_remap.fits'
-            if not os.path.isfile(bkg_fits_remap) or redo:
-                result = run_remap(base_new+'_wcs.fits', bkg_fits, bkg_fits_remap,
-                                   [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
-                                   resampling_type='NEAREST')
-            bkg_std_fits_remap = base_ref+'_bkg_std_remap.fits'
-            if not os.path.isfile(bkg_std_fits_remap) or redo:
-                result = run_remap(base_new+'_wcs.fits', bkg_std_fits, bkg_std_fits_remap,
-                                   [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
-                                   resampling_type='NEAREST')
-            # and read back into array, replacing the previous arrays
-            with fits.open(bkg_fits_remap) as hdulist:
-                data_bkg = hdulist[0].data * gain
-            with fits.open(bkg_std_fits_remap) as hdulist:
-                data_bkg_std = hdulist[0].data * gain
-        # only for method 1 the objmask needs to be projected
-        else:
-            fits.writeto(objmask_fits, data_objmask.astype(np.float32),
-                         header=header_wcs, overwrite=True)
-            objmask_fits_remap = base_ref+'_objmask_remap.fits'
-            if not os.path.isfile(objmask_fits_remap) or redo:
-                result = run_remap(base_new+'_wcs.fits', objmask_fits, objmask_fits_remap,
-                                   [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
-                                   resampling_type='NEAREST')
-            with fits.open(objmask_fits_remap) as hdulist:
-                data_objmask = hdulist[0].data
+        # update headers of the background and std/RMS fits image with
+        # that of the original wcs-corrected reference image
+        with fits.open(bkg_fits, 'update') as hdulist:
+            hdulist[0].header += header_wcs[:]
+        with fits.open(bkg_std_fits, 'update') as hdulist:
+            hdulist[0].header += header_wcs[:]
+
+        # project ref image background maps to new image
+        bkg_fits_remap = base_ref+'_bkg_remap.fits'
+        if not os.path.isfile(bkg_fits_remap) or redo:
+            result = run_remap(base_new+'_wcs.fits', bkg_fits, bkg_fits_remap,
+                               [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
+                               resampling_type='NEAREST')
+        bkg_std_fits_remap = base_ref+'_bkg_std_remap.fits'
+        if not os.path.isfile(bkg_std_fits_remap) or redo:
+            result = run_remap(base_new+'_wcs.fits', bkg_std_fits, bkg_std_fits_remap,
+                               [ysize, xsize], gain=gain, log=log, config=swarp_cfg,
+                               resampling_type='NEAREST')
+        # and read back into array, replacing the previous arrays
+        with fits.open(bkg_fits_remap) as hdulist:
+            data_bkg = hdulist[0].data * gain
+        with fits.open(bkg_std_fits_remap) as hdulist:
+            data_bkg_std = hdulist[0].data * gain
 
         # also the reference mask image, if it existed in the first
         # place, needs to be remapped to the new image
         if os.path.isfile(mask_fits):
-            # write the mask with the updated header to a temporary file
-            fits.writeto('mask_ref_temp.fits', data_mask.astype(np.int),
-                         header=header_wcs, overwrite=True)
 
-            # project ref image background maps to new image
+            # update headers of the reference mask fits image with
+            # that of the original wcs-corrected reference image
+            with fits.open(mask_fits, 'update') as hdulist:
+                hdulist[0].header = header_wcs
+
+            # project ref mask image to new image
             mask_fits_remap = base_ref+'_mask_remap.fits'
             if not os.path.isfile(mask_fits_remap) or redo:
                 result = run_remap(base_new+'_wcs.fits', 'mask_ref_temp.fits', mask_fits_remap,
@@ -1734,7 +1683,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             with fits.open(mask_fits_remap) as hdulist:
                 # remapping turns mask values into floats
                 data_mask = (hdulist[0].data+0.5).astype(int)
+
+    else:
             
+        # read background images of new fits
+        with fits.open(bkg_fits) as hdulist:
+            data_bkg = hdulist[0].data * gain
+        with fits.open(bkg_std_fits) as hdulist:
+            data_bkg_std = hdulist[0].data * gain
+
     # let data refer to data_remap in case of ref image
     # and the original wcs-corrected image otherwise
     if remap is not None:
@@ -1747,63 +1704,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
 
-    # If [bkg_method]==1 (median) then make it here. For this method
-    # in case of a reference image, the background and the STD/RMS
-    # maps are determined from the remapped image directly. For the
-    # other methods, they are determined from the original ref image
-    # and subsequently mapped to the new image.
-    if bkg_method==1:
-        # initialize arrays
-        data_bkg = np.zeros(data.shape, dtype='float32')
-        data_bkg_std = np.zeros(data.shape, dtype='float32')
-        # prepare mask_use based on data_objmask image built by
-        # SExtractor, and remapped to the new image if needed
-        mask_reject = ((data_objmask==0) | (data<=0))
-        mask_use = ~mask_reject
-        if verbose:
-            log.info('np.sum(mask_reject) ' + str(np.sum(mask_reject)))
-        
-        for nsub in range(nsubs):
-            subcut = cuts_ima[nsub]
-            index_subcut = [slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])]
-            # now determine background for method 1, where clipped median
-            # of each subimage is used
-            mask_use_sub = mask_use[index_subcut]
-            mean, std, median = clipped_stats(data[index_subcut], nsigma=bkg_nsigma, log=log)
-            if verbose:
-                log.info('nsub+1, mean, std, median: ' + str(nsub+1) + ', ' + str(mean) + ', ' + str(std) + ', ' + str(median))
-            mean, std, median = clipped_stats(data[index_subcut][mask_use_sub], nsigma=bkg_nsigma, log=log)
-            if verbose:
-                log.info('masked: nsub+1, mean, std, median: ' + str(nsub+1) + ', ' + str(mean) + ', ' + str(std) + ', ' + str(median))
-            data_bkg[index_subcut] = median
-            data_bkg_std[index_subcut] = std
-
-    # In case of new image and background method other than 2, or
-    # reference and background methods 3 and 4, write the background
-    # and its RMS/STD arrays to fits. The units in these images are
-    # ADU.
-    # For subpipe this needs to be implemented such that the original
-    # reference image background maps are not overwritten.
-    if (imtype=='new' and bkg_method!=2) or (imtype=='ref' and bkg_method>2):
-        bkg_fits = input_fits.replace('_wcs.fits', '_bkg.fits')
-        fits.writeto(bkg_fits, (data_bkg/gain).astype(np.float32), overwrite=True)
-        bkg_std_fits = input_fits.replace('_wcs.fits', '_bkg_std.fits')
-        fits.writeto(bkg_std_fits, (data_bkg_std/gain).astype(np.float32), overwrite=True)
-            
-            
     # fix pixels using [fixpix] function which requires data (remapped
-    # image in case, mask and background. Note
-    # that in case background method 1 was selected, the background
-    # used here is that determined by SExtractor
+    # image in case of reference image), mask and background
     if os.path.isfile(mask_fits):
         data = fixpix (data, data_mask, data_bkg, log, satlevel=satlevel*gain)
 
-    
     # determine psf of input image with get_psf function - needs to be
     # done before optimal fluxes are determined
     psf, psf_orig = get_psf(input_fits, header_wcs, nsubs, imtype, fwhm, pixscale, log)
 
-    
     # -------------------------------
     # determination of optimal fluxes
     # -------------------------------
@@ -1817,106 +1726,111 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # make it work below temporarily, transform the coordinates
     # from the original reference image to the remapped image.
 
-    if timing: t1 = time.time()
-    log.info('deriving optimal fluxes ...')
+    # [mypsffit] determines if PSF-fitting part is also performed;
+    # this is different from SExtractor PSF-fitting
+    mypsffit = False
     
-    # first read SExtractor fits table
-    sexcat = input_fits.replace('.fits', '.sexcat')
-    with fits.open(sexcat) as hdulist:
-        data_sex = hdulist[1].data
-    # read in positions and their errors
-    xwin = data_sex['XWIN_IMAGE']
-    ywin = data_sex['YWIN_IMAGE']    
-    # skip coordinates outside the image
-    #mask_use = ((xwin>0) & (xwin<(xsize+0.5)) & (ywin>0) & (ywin<(ysize+0.5)))
-    xwin = data_sex['XWIN_IMAGE']#[mask_use]
-    ywin = data_sex['YWIN_IMAGE']#[mask_use]
-    errx2win = data_sex['ERRX2WIN_IMAGE']#[mask_use]
-    erry2win = data_sex['ERRY2WIN_IMAGE']#[mask_use]
-    errxywin = data_sex['ERRXYWIN_IMAGE']#[mask_use]
-        
-    if imtype == 'ref':
-        # first infer ra, dec corresponding to x, y pixel positions in
-        # the original ref image, using the .wcs file from
-        # Astrometry.net
-        wcs = WCS(base_ref+'.wcs')
-        ra_temp, dec_temp = wcs.all_pix2world(xwin, ywin, 1)
-        # then convert ra, dec back to x, y in the coordinate
-        # frame of the new or remapped reference image
-        wcs = WCS(base_new+'.wcs')
-        xwin, ywin = wcs.all_world2pix(ra_temp, dec_temp, 1,
-                                       tolerance=1e-3, adaptive=True,
-                                       quiet=True)
-        
-    psfex_bintable = input_fits.replace('_wcs.fits', '.psf')
-
-    fitpsf = False
-    if fitpsf:
-        flux_opt, fluxerr_opt, data_replaced, flux_psf, fluxerr_psf, x_psf, y_psf =\
-            get_psfoptflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
-                                  xwin, ywin, errx2win, erry2win, errxywin,
-                                  satlevel=satlevel*gain, psffit=fitpsf, log=log)
-    else:
-        flux_opt, fluxerr_opt, data_replaced =\
-            get_psfoptflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
-                                  xwin, ywin, errx2win, erry2win, errxywin,
-                                  satlevel=satlevel*gain, log=log)
-        
-    # uncomment this line to use image with saturated stars replaced
-    # with psf estimate
-    data = data_replaced
-
-    # flux_opt is in e-, while flux_auto and flux_psf from
-    # SExtractor catalog are in counts
-    flux_opt /= gain
-    fluxerr_opt /= gain
-    if fitpsf:
-        flux_psf /= gain
-        fluxerr_psf /= gain
-        
-    if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
-
-    if timing: t2 = time.time()
-
-    # merge these two columns with sextractor catalog
-    cols = [] 
-    cols.append(fits.Column(name='FLUX_OPT', format='D', array=flux_opt))
-    cols.append(fits.Column(name='FLUXERR_OPT', format='D', array=fluxerr_opt))
-    if fitpsf:
-        cols.append(fits.Column(name='X_PSF', format='D', array=x_psf))
-        cols.append(fits.Column(name='Y_PSF', format='D', array=y_psf))
-        cols.append(fits.Column(name='FLUX_PSF', format='D', array=flux_psf))
-        cols.append(fits.Column(name='FLUXERR_PSF', format='D', array=fluxerr_psf))
-    new_cols = fits.ColDefs(cols)
-
-    orig_cols = data_sex.columns
-    # At this stage let's remove the VIGNET entries in the SExtractor
-    # catalog take up a lot of space; if not mistaken, this can be
-    # done for both the new and ref catalogs.
-    #
-    # For the ref catalogs, the PSFex products should be saved so
-    # PSFex need not be run again (and therefore the VIGNET is not
-    # needed). However, this would mean that if a different PSF is
-    # required for the reference image than that was saved before, the
-    # SExtractor catalog with VIGNET needs to be produced again.
-    #
-    # For now, only remove the VIGNET arrays in the new image catalog:
-    if imtype=='new':
-        orig_cols.del_col('VIGNET')
-
-    # the following adds the orig_cols and new_cols along with the
-    # image header to the 1st extension of the hdu
-    hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols, header_wcs)
     newcat = input_fits.replace('.fits', '.sexcat_fluxopt')
-    hdu.writeto(newcat, overwrite=True)
-    # This fits table which includes the optimal fluxes could be
-    # converted to LDAC format, but this is not really needed anymore
-    # since PSFex is already finished.
-
-    if timing: log.info('wall-time spent creating binary fits table including fluxopt '
-                        + str(time.time()-t2))
+    if not os.path.isfile(newcat) or redo:
     
+        if timing: t1 = time.time()
+        log.info('deriving optimal fluxes ...')
+    
+        # first read SExtractor fits table
+        sexcat = input_fits.replace('.fits', '.sexcat')
+        with fits.open(sexcat) as hdulist:
+            data_sex = hdulist[1].data
+        # read in positions and their errors
+        xwin = data_sex['XWIN_IMAGE']
+        ywin = data_sex['YWIN_IMAGE']    
+        # skip coordinates outside the image
+        #mask_use = ((xwin>0) & (xwin<(xsize+0.5)) & (ywin>0) & (ywin<(ysize+0.5)))
+        xwin = data_sex['XWIN_IMAGE']#[mask_use]
+        ywin = data_sex['YWIN_IMAGE']#[mask_use]
+        errx2win = data_sex['ERRX2WIN_IMAGE']#[mask_use]
+        erry2win = data_sex['ERRY2WIN_IMAGE']#[mask_use]
+        errxywin = data_sex['ERRXYWIN_IMAGE']#[mask_use]
+        
+        if imtype == 'ref':
+            # first infer ra, dec corresponding to x, y pixel positions in
+            # the original ref image, using the .wcs file from
+            # Astrometry.net
+            wcs = WCS(base_ref+'.wcs')
+            ra_temp, dec_temp = wcs.all_pix2world(xwin, ywin, 1)
+            # then convert ra, dec back to x, y in the coordinate
+            # frame of the new or remapped reference image
+            wcs = WCS(base_new+'.wcs')
+            xwin, ywin = wcs.all_world2pix(ra_temp, dec_temp, 1,
+                                           tolerance=1e-3, adaptive=True,
+                                           quiet=True)
+        
+        psfex_bintable = input_fits.replace('_wcs.fits', '.psf')
 
+        if mypsffit:
+            flux_opt, fluxerr_opt, data_replaced, flux_psf, fluxerr_psf, x_psf, y_psf =\
+                get_psfoptflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
+                                         xwin, ywin, errx2win, erry2win, errxywin,
+                                         satlevel=satlevel*gain, psffit=mypsffit, log=log)
+        else:
+            flux_opt, fluxerr_opt, data_replaced =\
+                get_psfoptflux_xycoords (psfex_bintable, data, data_bkg, data_bkg_std, readnoise,
+                                         xwin, ywin, errx2win, erry2win, errxywin,
+                                         satlevel=satlevel*gain, log=log)
+        
+        # uncomment this line to use image with saturated stars replaced
+        # with psf estimate
+        data = data_replaced
+
+        # flux_opt is in e-, while flux_auto and flux_psf from
+        # SExtractor catalog are in counts
+        flux_opt /= gain
+        fluxerr_opt /= gain
+        if mypsffit:
+            flux_psf /= gain
+            fluxerr_psf /= gain
+        
+        if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
+
+        if timing: t2 = time.time()
+
+        # merge these two columns with sextractor catalog
+        cols = [] 
+        cols.append(fits.Column(name='FLUX_OPT', format='D', array=flux_opt))
+        cols.append(fits.Column(name='FLUXERR_OPT', format='D', array=fluxerr_opt))
+        if mypsffit:
+            cols.append(fits.Column(name='X_PSF', format='D', array=x_psf))
+            cols.append(fits.Column(name='Y_PSF', format='D', array=y_psf))
+            cols.append(fits.Column(name='FLUX_PSF', format='D', array=flux_psf))
+            cols.append(fits.Column(name='FLUXERR_PSF', format='D', array=fluxerr_psf))
+        new_cols = fits.ColDefs(cols)
+
+        orig_cols = data_sex.columns
+        # At this stage let's remove the VIGNET entries in the SExtractor
+        # catalog take up a lot of space; if not mistaken, this can be
+        # done for both the new and ref catalogs.
+        #
+        # For the ref catalogs, the PSFex products should be saved so
+        # PSFex need not be run again (and therefore the VIGNET is not
+        # needed). However, this would mean that if a different PSF is
+        # required for the reference image than that was saved before, the
+        # SExtractor catalog with VIGNET needs to be produced again.
+        #
+        # For now, only remove the VIGNET arrays in the new image catalog:
+        if imtype=='new':
+            orig_cols.del_col('VIGNET')
+
+        # the following adds the orig_cols and new_cols along with the
+        # image header to the 1st extension of the hdu
+        hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols, header_wcs)
+        hdu.writeto(newcat, overwrite=True)
+        # This fits table which includes the optimal fluxes could be
+        # converted to LDAC format, but this is not really needed anymore
+        # since PSFex is already finished.
+
+        if timing: log.info('wall-time spent creating binary fits table including fluxopt '
+                            + str(time.time()-t2))
+    
+        
     # split full image into subimages to be used in run_ZOGY - this
     # needs to be done after determination of optimal fluxes as
     # otherwise the potential replacement of the saturated pixels will
@@ -1939,6 +1853,28 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     if timing: log.info('wall-time spent filling fftdata cubes ' + str(time.time()-t2))
         
     if make_plots:
+
+        # in case optimal flux block above was skipped, the SExtractor
+        # catalogue with FLUX_OPT needs to be read in here to be able
+        # to make the plots below
+        try:
+            data_sex['FLUX_AUTO'][0]
+        except NameError:
+            # read SExtractor fits table
+            with fits.open(newcat) as hdulist:
+                data_sex = hdulist[1].data
+            # and define flux_opt and fluxerr_opt
+            flux_opt = data_sex['FLUX_OPT']
+            fluxerr_opt = data_sex['FLUXERR_OPT']
+            if mypsffit:
+                flux_mypsf = data_sex['FLUX_PSF']
+                fluxerr_mypsf = data_sex['FLUXERR_PSF']
+                x_psf = data_sex['X_PSF']
+                y_psf = data_sex['Y_PSF']
+        else:
+            if verbose:
+                log.info('data_sex array is already defined; no need to read it in')
+                
         # compare flux_opt with flux_auto
         index = ((data_sex['FLUX_AUTO']>0) & (data_sex['FLAGS']==0))
         class_star = data_sex['CLASS_STAR'][index]
@@ -1950,20 +1886,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         x_win = data_sex['XWIN_IMAGE'][index]
         y_win = data_sex['YWIN_IMAGE'][index]
         fwhm_image = data_sex['FWHM_IMAGE'][index]
-        if fitpsf:
+        if mypsffit:
             flux_mypsf = flux_psf[index]
             fluxerr_mypsf = fluxerr_psf[index]
             x_psf = x_psf[index]
             y_psf = y_psf[index]
             
         flux_diff = (flux_opt - flux_auto) / flux_auto
-        limits = (1,2*np.amax(s2n_auto),-0.2,0.2)
+        limits = (1,2*np.amax(s2n_auto),-0.3,0.3)
         plot_scatter (s2n_auto, flux_diff, limits, class_star,
                       xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_AUTO) / FLUX_AUTO', 
                       filename='fluxopt_vs_fluxauto_'+imtype+'.pdf',
                       title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
-        if fitpsf:
+        if mypsffit:
             # compare flux_mypsf with flux_auto
             flux_diff = (flux_mypsf - flux_auto) / flux_auto
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
@@ -2007,7 +1943,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                           filename='fluxauto_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
-            if fitpsf:
+            if mypsffit:
                 flux_diff = (flux_mypsf - flux_aper) / flux_aper
                 plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel='S/N (AUTO)', ylabel='(FLUX_MYPSF - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
@@ -2032,7 +1968,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                           filename='fluxsexpsf_vs_fluxopt_'+imtype+'.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
-            if fitpsf:
+            if mypsffit:
                 # and compare 'my' psf with SExtractor psf
                 flux_diff = (flux_sexpsf - flux_mypsf) / flux_mypsf
                 plot_scatter (s2n_auto, flux_diff, limits, class_star,
@@ -2040,7 +1976,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                               filename='fluxsexpsf_vs_fluxmypsf_'+imtype+'.pdf',
                               title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
             
-            # and compare auto with psf
+            # and compare auto with SExtractor psf
             flux_diff = (flux_sexpsf - flux_auto) / flux_auto
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_AUTO) / FLUX_AUTO', 
@@ -2344,6 +2280,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         # something goes wrong when feeding the above zeroflags catalog to PSFEx
         # not sure what - too restrictive? For now, just supply the full ldac catalog.
         result = run_psfex(sexcat_ldac, psfex_cfg, psfexcat, log, fwhm, imtype)
+
 
     # If [dosex_psffit] parameter is set, then again run SExtractor,
     # but now using output PSF from PSFEx, so that PSF-fitting can be
@@ -3102,7 +3039,7 @@ def update_vignet_size (sex_par_in, sex_par_out, log):
 ################################################################################
 
 def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
-                   fit_psf=False, return_fwhm=True, fraction=1.0, fwhm=5.0, save_bkgs=True,
+                   fit_psf=False, return_fwhm=True, fraction=1.0, fwhm=5.0, save_bkg=True,
                    update_vignet=True):
 
     """Function that runs SExtractor on [image], and saves the output
@@ -3116,11 +3053,13 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
        zeros. If [fraction] is less than the default 1.0, SExtractor
        will be run on a fraction [fraction] of the area of the full
        image. Sextractor will use the input value [fwhm], which is
-       important for the star-galaxy classification. If [save-bkgs] is
+       important for the star-galaxy classification. If [save-bkg] is
        True, the background image, its standard deviation and the
        -OBJECTS image (background-subtracted image with all objects
-       masked with zero values), all produced by SExtractor, will
-       be saved."""
+       masked with zero values), all produced by SExtractor, will be
+       saved. If [bkg_method] is not set to 1 (use SExtractor's
+       background), then improve the estimates of the background and
+       its standard deviation."""
 
     if timing: t = time.time()
     log.info('Executing run_sextractor ...')
@@ -3146,7 +3085,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
         # write small image to fits
         image_fraction = image.replace('.fits','_fraction.fits')
-        fits.writeto(image_fraction, data_fraction.astype('float32'), header, overwrite=True)
+        fits.writeto(image_fraction, data_fraction.astype(np.float32), header, overwrite=True)
 
         # make image point to image_fraction
         image = image_fraction
@@ -3179,7 +3118,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     # background-subtracted image with all pixels where objects were
     # detected set to zero (-OBJECTS). These are used to build an
     # improved background map. 
-    if save_bkgs:
+    if save_bkg:
         bkg = image.replace('.fits','_bkg.fits')
         bkg_std = image.replace('.fits','_bkg_std.fits')
         objmask = image.replace('.fits','_objmask.fits')
@@ -3199,8 +3138,40 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     log.info(stdoutstr)
     log.info(stderrstr)
 
-    # improve background
+    # improve background estimate if [bkg_method] not set to 1 (= use
+    # background determined by SExtractor)
+    if save_bkg and bkg_method != 1:
 
+        # read in SExtractor's background and RMS/std maps created above
+        with fits.open(bkg) as hdulist:
+            data_bkg = hdulist[0].data
+        with fits.open(bkg_std) as hdulist:
+            data_bkg_std = hdulist[0].data
+
+        # read in SExtractor's object mask created above
+        with fits.open(objmask) as hdulist:
+            data_objmask = hdulist[0].data
+
+        # read in input image and header
+        with fits.open(image) as hdulist:
+            data = hdulist[0].data
+
+        # construct background image using [get_back]; in the case of
+        # the reference image these data need to refer to the image
+        # before remapping
+        if bkg_method==2:
+            data_bkg, data_bkg_std = get_back(data, data_objmask, log)
+
+        # similar as above, but now photutils' Background2D is used
+        # inside [get_back]
+        if bkg_method==3:
+            data_bkg, data_bkg_std = get_back(data, data_objmask, log,
+                                              use_photutils=True)
+
+        # write the improved background and standard deviation to fits
+        # overwriting the fits images produced by SExtractor
+        fits.writeto(bkg, data_bkg.astype(np.float32), overwrite=True)
+        fits.writeto(bkg_std, data_bkg_std.astype(np.float32), overwrite=True)
     
     if return_fwhm:
         # get estimate of seeing from output catalog
@@ -3442,16 +3413,16 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
         #print 'dy is finite?', np.isfinite(dy)
     
     if display:
-        fits.writeto('Pn_hat.fits', np.real(Pn_hat).astype('float32'), overwrite=True)
-        fits.writeto('Pr_hat.fits', np.real(Pr_hat).astype('float32'), overwrite=True)
-        fits.writeto('kr.fits', np.real(kr).astype('float32'), overwrite=True)
-        fits.writeto('kn.fits', np.real(kn).astype('float32'), overwrite=True)
-        fits.writeto('Sr.fits', Sr.astype('float32'), overwrite=True)
-        fits.writeto('Sn.fits', Sn.astype('float32'), overwrite=True)
-        fits.writeto('VSr.fits', VSr.astype('float32'), overwrite=True)
-        fits.writeto('VSn.fits', VSn.astype('float32'), overwrite=True)
-        fits.writeto('VSr_ast.fits', VSr_ast.astype('float32'), overwrite=True)
-        fits.writeto('VSn_ast.fits', VSn_ast.astype('float32'), overwrite=True)
+        fits.writeto('Pn_hat.fits', np.real(Pn_hat).astype(np.float32), overwrite=True)
+        fits.writeto('Pr_hat.fits', np.real(Pr_hat).astype(np.float32), overwrite=True)
+        fits.writeto('kr.fits', np.real(kr).astype(np.float32), overwrite=True)
+        fits.writeto('kn.fits', np.real(kn).astype(np.float32), overwrite=True)
+        fits.writeto('Sr.fits', Sr.astype(np.float32), overwrite=True)
+        fits.writeto('Sn.fits', Sn.astype(np.float32), overwrite=True)
+        fits.writeto('VSr.fits', VSr.astype(np.float32), overwrite=True)
+        fits.writeto('VSn.fits', VSn.astype(np.float32), overwrite=True)
+        fits.writeto('VSr_ast.fits', VSr_ast.astype(np.float32), overwrite=True)
+        fits.writeto('VSn_ast.fits', VSn_ast.astype(np.float32), overwrite=True)
 
     # and finally S_corr
     V_S = VSr + VSn
