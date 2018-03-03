@@ -3,7 +3,7 @@ a Python implementation of proper image subtraction (Zackay, Ofek &amp; Gal-Yam 
 
 Written by Paul Vreeswijk with vital input from Barak Zackay and Eran Ofek. Adapted by Kerry Paterson for integration into pipeline for MeerLICHT.
 
-This module accepts a new and a reference fits image, finds their WCS solution using Astrometry.net, runs SExtractor (inside Astrometry.net), PSFex to extract the PSF from the images, and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), the corrected significance image (Scorr), and PSF photometry image (Fpsf - alpha in the paper) and associated error image (Fpsferr).
+This module accepts a new and a reference fits image, runs SExtractor on them, finds their WCS solution using Astrometry.net, uses PSFex to infer the position-dependent PSFs of the images and SWarp to map the reference image to the new image and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), the corrected significance image (Scorr), and PSF photometry image (Fpsf - alpha in the paper) and associated error image (Fpsferr). The inferred PSFs are also used to extract optimal photometry (following Horne 1986, PASP, 98, 609) of all sources detected by SEXtractor. The configuration files of SExtractor, PSFex and SWarp are located in the Config directory.
 
 It makes grateful use of the following programs that first need to be installed:
 
@@ -16,4 +16,4 @@ It makes grateful use of the following programs that first need to be installed:
  - pyfftw to speed up the many FFTs performed
  - the other modules imported at the top (e.g. astropy, matplotlib, etc.)
  
-Warning: this module is still being developed and has so far only been tested on a couple of KMTNet images. It is designed specifically to be included in the MeerLICHT and BlackGEM pipelines. However, the hope is to make it more general in the near future so any two images can be supplied to perform optimal subtraction on.
+Warning: this module is still being developed and has so far been tested on KMTNet and MeerLICHT images. It is designed specifically to be included in the MeerLICHT and BlackGEM pipelines, but could be useful to apply to images of other telescopes as well.
