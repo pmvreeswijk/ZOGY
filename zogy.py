@@ -38,12 +38,17 @@ import sys
 #from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool
 from multiprocessing.dummy import Lock
-nthreads = 1
+#nthreads = 1
+
+from astropy.time import Time
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+
+from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 
 def global_pars(telescope=None):
 
     # make these global parameters
-    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order
+    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order, obs_lat, obs_long, obs_height, ext_coeff, cal_cat
 
     if telescope is not None:
         # In the case of a subpipe run (and telescope is defined), all
@@ -135,7 +140,7 @@ def global_pars(telescope=None):
         # backbround and its standard deviation (STD):
         # (1) background and STD/RMS map determined by SExtractor (fastest)
         # (2) improved background and STD map using masking of all sources (recommended)
-        # (3) similar to 3 but using photutils' Background2D (very very slow!)
+        # (3) similar to 2 but using photutils' Background2D (very very slow!)
         bkg_method = 2           # background method to use
         bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                                  # clipped; used in methods 1, 3 and 4
@@ -147,7 +152,7 @@ def global_pars(telescope=None):
         # ZOGY parameters
         fratio_local = True      # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
         dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
-        transient_nsigma = 5     # required significance in Scorr for transient detection
+        transient_nsigma = 6     # required significance in Scorr for transient detection
 
         # optional fake stars
         nfakestars = 1           # number of fake stars to be added to each subimage
@@ -206,6 +211,14 @@ def global_pars(telescope=None):
         # Astrometry.net's tweak order
         astronet_tweak_order = 3
 
+        # Photometric calibration
+        obs_lat = -32.38722 # degrees (North)
+        obs_long = 20.81667 # degrees (East)
+        obs_height = 1798.  # meters above sealevel
+        # these [ext_coeff] are very rough extinction estimates for SAAO; update!
+        ext_coeff = {'u':0.4, 'g':0.2, 'q':0.15, 'r':0.1, 'i':0.1, 'z':0.1}
+        cal_cat = 'bg_skymapper_DR1p1.fits'        
+
         # path and names of configuration files
         cfg_dir = './Config/'
         sex_cfg = cfg_dir+'sex.config'     # SExtractor configuration file
@@ -222,8 +235,8 @@ def global_pars(telescope=None):
         redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = False          # show intermediate fits images
-        make_plots = False       # make diagnostic plots and save them as pdf
+        display = False          # show intermediate fits images (centre and 4 corners)
+        make_plots = True        # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
 
@@ -413,6 +426,11 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref, log,
                                  remap=ref_fits_remap)
 
+    log.info('data_new.dtype {}'.format(data_new.dtype))
+    log.info('psf_new.dtype {}'.format(psf_new.dtype))
+    log.info('data_new_bkg.dtype {}'.format(data_new_bkg.dtype))
+    log.info('data_new_bkg_std.dtype {}'.format(data_new_bkg_std.dtype))
+    
     # get x, y and fratios from matching PSFex stars across entire frame
     x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'.psfexcat',
                                                              base_ref+'.psfexcat',
@@ -674,7 +692,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             data_new[nsub][xpos+1, ypos+1] = 1.
 
 
-        if nthreads > 1: lock.acquire()    
+        #if nthreads > 1: lock.acquire()    
             
         # call Barak's function
         data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = run_ZOGY(data_ref[nsub], data_new[nsub], 
@@ -684,7 +702,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                                                                        f_ref, f_new,
                                                                        var_ref, var_new,
                                                                        dx_sub, dy_sub, log)
-        if nthreads > 1: lock.release()    
+        #if nthreads > 1: lock.release()
 
         # check that robust std of Scorr is around unity
         if verbose:
@@ -729,7 +747,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             fits.writeto('D.fits', data_D.astype(np.float32), overwrite=True)
             fits.writeto('S.fits', data_S.astype(np.float32), overwrite=True)
             fits.writeto('Scorr.fits', data_Scorr.astype(np.float32), overwrite=True)
-            fits.writeto('Scorr_abs.fits', np.abs(data_Scorr).astype(np.float32), overwrite=True)
             #fits.writeto('Scorr_1sigma.fits', data_Scorr_1sigma, overwrite=True)
         
             # write new and ref subimages to fits
@@ -762,10 +779,13 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
             result = subprocess.call(cmd)
 
-        if timing: log.info('wall-time spent in nsub loop ' +str(time.time()-tloop))
+        if timing:
+            log.info('wall-time spent in nsub loop ' +str(time.time()-tloop))
+            log.info('peak memory (in GB) used in nsub loop {}'.
+                     format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     # call above function [zogy_subloop] with pool.map
-    pool = ThreadPool(nthreads)
+    pool = ThreadPool(1)
     lock = Lock()
     pool.map(zogy_subloop, range(nsubs))
     pool.close()
@@ -778,19 +798,33 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                                                             make_hist=make_plots, log=log)
         log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' +
                  str(median_Scorr) + ', ' + str(std_Scorr))
-        
-        
-    # find transient sources in Scorr
-    #Scorr_peaks = ndimage.filters.maximum_filter(data_Scorr_full)
-    #transient_nsigma = 5     # required significance in Scorr for transient detection
-    #Scorr_peaks = Scorr_peaks[Scorr_peaks > transient_nsigma]
-    #Scorr_peaks_mask = (data_Scorr_full == Scorr_peaks)
-    # alternavitvely, use SExtractor:
-    #fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
-    #sex_trans_cfg = cfg_dir+'sex_trans.config'     # SExtractor configuration file
-    #result = run_sextractor('Scorr.fits', 'trans.cat', sex_trans_cfg, sex_par, pixscale_new,
-    #                        fwhm=fwhm_new)
     
+    # write full new, ref, D and S images to fits
+    if nfakestars>0:
+        fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
+        fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
+    if not subpipe:
+        fits.writeto('D.fits', data_D_full, overwrite=True)
+        fits.writeto('S.fits', data_S_full, overwrite=True)
+        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
+        fits.writeto('Scorr_neg.fits', np.negative(data_Scorr_full), overwrite=True)
+        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
+        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
+    if subpipe:
+        fits.writeto('D.fits', data_D_full, overwrite=True)
+        fits.writeto('S.fits', data_S_full, overwrite=True)
+        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
+        header_new.add_comment('Propagated header from new image to sub image.')
+        fits.writeto(sub, np.abs(data_Scorr_full), header_new, overwrite=True)
+        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
+        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
+                
+    # find transients using function [find_transients]
+    transcat_pos = base_new+'_'+base_ref+'.transcat_pos'
+    result = get_trans ('Scorr.fits', transcat_pos, pixscale_new, 'green', log)
+    transcat_neg = base_new+'_'+base_ref+'.transcat_neg'
+    result = get_trans ('Scorr_neg.fits', transcat_neg, pixscale_new, 'pink', log)
+
     end_time = os.times()
     dt_usr  = end_time[2] - start_time2[2]
     dt_sys  = end_time[3] - start_time2[3]
@@ -807,27 +841,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     log.info("Elapsed user time in {0}:  {1:.3f} sec".format("total", dt_usr))
     log.info("Elapsed CPU time in {0}:  {1:.3f} sec".format("total", dt_sys))
     log.info("Elapsed wall time in {0}:  {1:.3f} sec".format("total", dt_wall))
-
-    # write full new, ref, D and S images to fits
-    if nfakestars>0:
-        fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
-        fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
-    if not subpipe:
-        fits.writeto('D.fits', data_D_full, overwrite=True)
-        fits.writeto('S.fits', data_S_full, overwrite=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
-        fits.writeto('Scorr_abs.fits', np.abs(data_Scorr_full), overwrite=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
-    if subpipe:
-        fits.writeto('D.fits', data_D_full, overwrite=True)
-        fits.writeto('S.fits', data_S_full, overwrite=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
-        header_new.add_comment('Propagated header from new image to sub image.')
-        fits.writeto(sub, np.abs(data_Scorr_full), header_new, overwrite=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
-                
+    
     # make comparison plot of flux input and output
     if make_plots and nfakestars>0:
 
@@ -864,14 +878,66 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         plt.close()
         
     # and display
-    if display:
+    # if display:
+    if True:
         if nfakestars>0:
-            cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','S.fits','Scorr.fits',
-                   'Fpsf.fits', 'Fpsferr.fits']
+            cmd = ['ds9','-zscale','new.fits','ref.fits','D.fits','Scorr.fits']
         else:
-            cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','S.fits','Scorr.fits',
-                   'Fpsf.fits', 'Fpsferr.fits']
+            cmd = ['ds9','-zscale',new_fits,ref_fits_remap,'D.fits','Scorr.fits']
+        if os.path.isfile(transcat_pos+'_ds9regions'):
+            cmd += ['-regions', transcat_pos+'_ds9regions']
+        if os.path.isfile(transcat_neg+'_ds9regions'):
+            cmd += ['-regions', transcat_neg+'_ds9regions']
+
         result = subprocess.call(cmd)
+
+
+################################################################################
+
+def get_trans(Scorr, transcat, pixscale, color, log):
+
+    if not os.path.isfile(transcat) or redo:
+        sex_trans_cfg = cfg_dir+'sex_trans.config'     
+        result = run_sextractor(Scorr, transcat, sex_trans_cfg, sex_par,
+                                pixscale, log, fit_psf=False, return_fwhm=False,
+                                fraction=1.0, fwhm=fwhm_new, save_bkg=False,
+                                update_vignet=False)
+
+    # read catalog
+    with fits.open(transcat) as hdulist:
+        data = hdulist[2].data
+        # select objects based on FLUX_MAX, FLAG, CLASS_STAR
+        index = ((data['FLUX_MAX'] >= transient_nsigma) &
+                 (data['FLAGS'] == 0) &
+                 (data['XWIN_IMAGE'] > 100) &
+                 (data['XWIN_IMAGE'] < 10460) &
+                 (data['YWIN_IMAGE'] > 100) &
+                 (data['YWIN_IMAGE'] < 10460) &
+                 #(data['FWHM_IMAGE'] > 0) &
+                 (data['PETRO_RADIUS'] > 0))
+        data_trans = data[:][index]
+        hdulist[2].data = data_trans
+        hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
+        hdulist_new.writeto(transcat+'_selected', overwrite=True)
+        hdulist_new.close()
+
+    # prepare ds9 region file
+    f = open(transcat+'_ds9regions', 'w')
+    ntrans = np.shape(data_trans)[0]
+    log.info('ntrans: {}'.format(ntrans))
+    for i in range(ntrans):
+        f.write('circle({},{},{}) # color={} width=2 text={{{}}} font="times 7"\n'.
+                format(data_trans['XWIN_IMAGE'][i], data_trans['YWIN_IMAGE'][i],
+                       2.*fwhm_new, color, i))
+    f.close()
+
+    # find transient sources in Scorr
+    #Scorr_peaks = ndimage.filters.maximum_filter(data_Scorr_full)
+    #transient_nsigma = 5     # required significance in Scorr for transient detection
+    #Scorr_peaks = Scorr_peaks[Scorr_peaks > transient_nsigma]
+    #Scorr_peaks_mask = (data_Scorr_full == Scorr_peaks)
+    # alternavitvely, use SExtractor:
+    #fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
 
 
 ################################################################################
@@ -1172,7 +1238,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
                                     D_replaced=D_replaced[index])
 
     if timing: t1 = time.time()
-    pool = ThreadPool(nthreads)
+    pool = ThreadPool(1)
     pool.map(loop_psfoptflux_xycoords, range(ncoords))
     pool.close()
     pool.join()
@@ -1182,7 +1248,10 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
     if False and display:
         ds9_arrays(D=D, D_replaced=D_replaced)
 
-    if timing: log.info('wall-time spent in get_psfoptflux_xycoords ' + str(time.time()-t))
+    if timing:
+        log.info('wall-time spent in get_psfoptflux_xycoords ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in get_psfoptflux_xycoords {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
     
     if psffit:
         x_psf = xcoords + xshift_psf
@@ -1593,12 +1662,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         with fits.open(mask_fits) as hdulist:
             data_mask = hdulist[0].data
             
-    # get gain, readnoise and pixscale from header_wcs
-    gain = header_wcs[key_gain]
-    readnoise = header_wcs[key_ron]
-    pixscale = header_wcs[key_pixscale]
-    satlevel = header_wcs[key_satlevel]
+    # get gain, readnoise, pixscale and saturation level from header_wcs
+    keywords = [key_gain, key_ron, key_pixscale, key_satlevel]
+    gain, readnoise, pixscale, satlevel = read_header(header_wcs, keywords, log)
+
     ysize, xsize = np.shape(data_wcs)
+    
     # convert counts to electrons
     data_wcs *= gain
     if remap is not None:
@@ -1617,7 +1686,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     # ------------------------------
 
     # the background and standard deviation maps have already been
-    # constructed in [run_sexctractor]
+    # constructed in [run_sextractor]
     
     # fits filenames for background and std/RMS maps and object mask
     # as produced by SExtractor (i.e. in the case of the ref image
@@ -1750,19 +1819,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         errx2win = data_sex['ERRX2WIN_IMAGE']#[mask_use]
         erry2win = data_sex['ERRY2WIN_IMAGE']#[mask_use]
         errxywin = data_sex['ERRXYWIN_IMAGE']#[mask_use]
-        
-        if imtype == 'ref':
-            # first infer ra, dec corresponding to x, y pixel positions in
-            # the original ref image, using the .wcs file from
-            # Astrometry.net
-            wcs = WCS(base_ref+'.wcs')
-            ra_temp, dec_temp = wcs.all_pix2world(xwin, ywin, 1)
-            # then convert ra, dec back to x, y in the coordinate
-            # frame of the new or remapped reference image
-            wcs = WCS(base_new+'.wcs')
-            xwin, ywin = wcs.all_world2pix(ra_temp, dec_temp, 1,
-                                           tolerance=1e-3, adaptive=True,
-                                           quiet=True)
+
+        # PMV 2018/03/06: unclear why the following is still needed; uncomment for now
+        #if imtype == 'ref':
+        #    # first infer ra, dec corresponding to x, y pixel positions in
+        #    # the original ref image, using the .wcs file from
+        #    # Astrometry.net
+        #    wcs = WCS(base_ref+'.wcs')
+        #    ra_temp, dec_temp = wcs.all_pix2world(xwin, ywin, 1)
+        #    # then convert ra, dec back to x, y in the coordinate
+        #    # frame of the new or remapped reference image
+        #    wcs = WCS(base_new+'.wcs')
+        #    xwin, ywin = wcs.all_world2pix(ra_temp, dec_temp, 1,
+        #                                   tolerance=1e-3, adaptive=True,
+        #                                   quiet=True)
         
         psfex_bintable = input_fits.replace('_wcs.fits', '.psf')
 
@@ -1789,48 +1859,104 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             flux_psf /= gain
             fluxerr_psf /= gain
         
-        if timing: log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
+        if timing:
+            log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
+            log.info('peak memory (in GB) used deriving optimal fluxes {}'.
+                     format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
         if timing: t2 = time.time()
 
-        # merge these two columns with sextractor catalog
-        cols = [] 
-        cols.append(fits.Column(name='FLUX_OPT', format='D', array=flux_opt))
-        cols.append(fits.Column(name='FLUXERR_OPT', format='D', array=fluxerr_opt))
-        if mypsffit:
-            cols.append(fits.Column(name='X_PSF', format='D', array=x_psf))
-            cols.append(fits.Column(name='Y_PSF', format='D', array=y_psf))
-            cols.append(fits.Column(name='FLUX_PSF', format='D', array=flux_psf))
-            cols.append(fits.Column(name='FLUXERR_PSF', format='D', array=fluxerr_psf))
-        new_cols = fits.ColDefs(cols)
+        # determine image zeropoint if ML/BG calibration catalog
+        # exists and the ML/BG FIELD_ID is in the header
+        # read calibration catalog
+        if os.path.isfile(cal_cat):
+            with fits.open(cal_cat) as hdulist:
+                data_cal = hdulist[1].data
 
-        orig_cols = data_sex.columns
-        # At this stage let's remove the VIGNET entries in the SExtractor
-        # catalog take up a lot of space; if not mistaken, this can be
-        # done for both the new and ref catalogs.
-        #
-        # For the ref catalogs, the PSFex products should be saved so
-        # PSFex need not be run again (and therefore the VIGNET is not
-        # needed). However, this would mean that if a different PSF is
-        # required for the reference image than that was saved before, the
-        # SExtractor catalog with VIGNET needs to be produced again.
-        #
-        # For now, only remove the VIGNET arrays in the new image catalog:
-        if imtype=='new':
-            orig_cols.del_col('VIGNET')
+            # use .wcs file to get RA, DEC of central pixel
+            if imtype=='new':
+                wcs = WCS(base_new+'.wcs')
+            else:
+                wcs = WCS(base_ref+'.wcs')
+            ra_center, dec_center = wcs.all_pix2world(xsize/2, ysize/2, 1)
+            log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+            
+            # use function [find_stars] to select stars in calibration
+            # catalog that are within the current field-of-view
+            dist_deg = np.amax([xsize/2, ysize/2]) * pixscale / 3600.
+            mask_field = find_stars(data_cal, ra_center, dec_center, dist_deg, log)
+            data_cal = data_cal[:][mask_field]
+                
+            # read a few extra header keywords needed in [get_apply_zp]
+            keywords = [key_exptime, 'FILTNAME', 'DATE-OBS']
+            exptime, filt, obsdate = read_header(header_wcs, keywords, log)
 
-        # the following adds the orig_cols and new_cols along with the
-        # image header to the 1st extension of the hdu
-        hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols, header_wcs)
-        hdu.writeto(newcat, overwrite=True)
-        # This fits table which includes the optimal fluxes could be
-        # converted to LDAC format, but this is not really needed anymore
-        # since PSFex is already finished.
+            ra_sex = data_sex['ALPHAWIN_J2000']
+            dec_sex = data_sex['DELTAWIN_J2000']
+            ra_cal = data_cal['RA']
+            dec_cal = data_cal['DEC']
+            mag_cal = data_cal[filt]
+            magerr_cal = data_cal['err_'+filt]
 
+            # get airmasses
+            airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, log)
+            
+            mag_opt, magerr_opt, zp, zp_std = \
+                get_apply_zp(ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
+                             ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, log)
+
+            
+        # add flux_opt and fluxerr_opt to SExtractor catalog
+        use_old = False
+        if use_old:
+            
+            cols = [] 
+            cols.append(fits.Column(name='FLUX_OPT', format='D', array=flux_opt))
+            cols.append(fits.Column(name='FLUXERR_OPT', format='D', array=fluxerr_opt))
+            if mypsffit:
+                cols.append(fits.Column(name='X_PSF', format='D', array=x_psf))
+                cols.append(fits.Column(name='Y_PSF', format='D', array=y_psf))
+                cols.append(fits.Column(name='FLUX_PSF', format='D', array=flux_psf))
+                cols.append(fits.Column(name='FLUXERR_PSF', format='D', array=fluxerr_psf))
+            new_cols = fits.ColDefs(cols)
+
+            orig_cols = data_sex.columns
+            # At this stage let's remove the VIGNET entries in the SExtractor
+            # catalog take up a lot of space; if not mistaken, this can be
+            # done for both the new and ref catalogs.
+            #
+            # For the ref catalogs, the PSFex products should be saved so
+            # PSFex need not be run again (and therefore the VIGNET is not
+            # needed). However, this would mean that if a different PSF is
+            # required for the reference image than that was saved before, the
+            # SExtractor catalog with VIGNET needs to be produced again.
+            #
+            # For now, only remove the VIGNET arrays in the new image catalog:
+            if imtype=='new':
+                orig_cols.del_col('VIGNET')
+                
+            # the following adds the orig_cols and new_cols along with the
+            # image header to the 1st extension of the hdu
+            hdu = fits.BinTableHDU.from_columns(orig_cols + new_cols, header_wcs)
+            hdu.writeto(newcat, overwrite=True)
+            # This fits table which includes the optimal fluxes could be
+            # converted to LDAC format, but this is not really needed anymore
+            # since PSFex is already finished.
+
+        else:
+            
+            data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
+                                     [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
+            data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
+                                     [mag_opt, magerr_opt], usemask=False, asrecarray=True)
+            data_sex = drop_fields(data_sex, 'VIGNET')
+            fits.writeto(newcat, data_sex, overwrite=True)
+            
+            
         if timing: log.info('wall-time spent creating binary fits table including fluxopt '
                             + str(time.time()-t2))
     
-        
+
     # split full image into subimages to be used in run_ZOGY - this
     # needs to be done after determination of optimal fluxes as
     # otherwise the potential replacement of the saturated pixels will
@@ -1984,11 +2110,162 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
         
-    if timing: log.info('wall-time spent in prep_optimal_subtraction ' + str(time.time()-t))
+    if timing:
+        log.info('wall-time spent in prep_optimal_subtraction ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in prep_optimal_subtraction {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
     
 
+################################################################################
+
+def get_apply_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
+                  ra_cal, dec_cal, mag_cal, magerr_cal, 
+                  exptime, filt, log):
+
+    if timing: t = time.time()
+    log.info('Executing get_apply_zp ...')
+
+    # maximum distance in degrees between sources to match
+    dist_max = 1./3600
+
+    # return zeropoints in array with same number of rows as ra_sex
+    # allows to potentially build a zeropoint map as a function of x,y
+    # coordinates
+    nrows = np.shape(ra_sex)[0]
+    zp_array = np.zeros(nrows)
+
+    # instrumental magnitudes and errors
+    mag_sex_inst = np.zeros(nrows)-1
+    magerr_sex_inst = np.zeros(nrows)-1
+    mask_pos = (flux_opt > 0.)
+    mag_sex_inst[mask_pos] = -2.5*np.log10(flux_opt[mask_pos]/exptime)
+    pogson = 2.5/np.log(10.)
+    magerr_sex_inst[mask_pos] = pogson*fluxerr_opt[mask_pos]/flux_opt[mask_pos]
+
+    ncal = np.shape(ra_cal)[0]
+    # loop calibration stars and find a match in SExtractor sources
+    for i in range(ncal):
+        
+        # make a big cut in declination in the SExtractor arrays to
+        # speed up distance calculation below
+        mask_cut = (np.abs(dec_sex-dec_cal[i])<=dist_max)
+        ra_sex_temp = ra_sex[mask_cut]
+        dec_sex_temp = dec_sex[mask_cut]
+        
+        # calculate distances using function [haversine]
+        dist = haversine(ra_sex_temp, dec_sex_temp, ra_cal[i], dec_cal[i])
+
+        # prepare match mask the size of SExtractor catalog
+        mask_match = np.zeros(nrows).astype('bool')
+        mask_match[mask_cut] = (dist <= dist_max)
+
+        if np.sum(mask_match)==1:
+            # there's one match, calculate its zeropoint
+            # need to calculate airmass for each star, as around A=2,
+            # difference in airmass across the FOV is 0.1, i.e. a 5% change
+            zp_array[mask_match] = mag_cal[i] - mag_sex_inst[mask_match] + \
+                                   airmass_sex[mask_match] * ext_coeff[filt]
+            if verbose: 
+                log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}'.
+                         format(ra_cal[i], dec_cal[i], mag_cal[i], zp_array[mask_match]))
+
+            
+    # determine median zeropoint
+    # use values with nonzero values and where flux_opt>0
+    mask_nonzero = ((zp_array>0) & (mask_pos))2018-03-10 17:23:03,143 INFO ra_cal: 53.504472, dec_cal: -36.49046, mag_cal: 16.7163467407
+    zp_mean, zp_std, zp_median = clipped_stats(zp_array[mask_nonzero], log=log)
+    if verbose:
+        log.info('number of useful calibration stars in the field: {}'.
+                 format(np.size(mask_nonzero)))
+        log.info('zp_mean: {:.3f}, zp_median: {:.3f}, zp_std: {:.3f}'.
+                 format(zp_mean, zp_median, zp_std))
+
+    # now apply this zeropoint to SExtractor sources
+    mag_sex = zp_median + mag_sex_inst - airmass_sex*ext_coeff[filt]
+    # set magnitudes of sources with non-positive optimal fluxes to -1
+    mag_sex[~mask_pos] = -1
+    magerr_sex = magerr_sex_inst
+    magerr_sex[~mask_pos] = -1
+    # could add error in zeropoint determination
+        
+    if timing:
+        log.info('wall-time spent in get_apply_zp ' + str(time.time() - t))
+        log.info('peak memory (in GB) used in get_apply_zp {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
+    return mag_sex, magerr_sex, zp_median, zp_std
+
+
+################################################################################
+
+def find_stars (data, ra, dec, radec_range, log):
+
+    if timing: t = time.time()
+    log.info('Executing find_stars ...')
+
+    # find entries in [data] within [radec_range] of [ra] and [dec]
+    index_data = np.zeros(data.shape[0]).astype('bool')
+    # make a big cut in the data array to speed up calculations
+    index_calc = (np.abs(data['DEC']-dec)<=radec_range)
+    ra_cat = data['RA'][index_calc]
+    dec_cat = data['DEC'][index_calc]
+
+    # find within circle:
+    #dsigma = haversine(ra_cat, dec_cat, ra, dec)
+    #index_data[index_calc] = (dsigma<=radec_range)
+
+    # find within box:
+    dsigma_ra = haversine(ra_cat, dec_cat, ra, dec_cat)
+    dsigma_dec = haversine(ra_cat, dec_cat, ra_cat, dec)
+    index_data[index_calc] = ((dsigma_ra<=radec_range) & (dsigma_dec<=radec_range))
+
+    if timing:
+        log.info('wall-time spent in find_stars ' + str(time.time() - t))
+        log.info('peak memory (in GB) used in find_stars {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
+    return index_data
+
+################################################################################
+        
+def haversine (ra1, dec1, ra2, dec2):
+
+    """Function that calculates angle in degrees between RA, DEC
+    coordinates ra1, dec1 and ra2, dec2. Input coordinates can be
+    scalars or arrays. """
+    
+    # convert to radians
+    ra1, ra2, dec1, dec2 = map(np.radians, [ra1, ra2, dec1, dec2])
+    
+    d_ra = np.abs(ra1-ra2)
+    d_dec = np.abs(dec1-dec2)
+    
+    a = np.sin(d_dec/2)**2 + np.cos(dec1) * np.cos(dec2) * np.sin(d_ra/2)**2
+    c = 2*np.arcsin(np.sqrt(a))
+    return map(np.degrees, [c])[0]
+
+
+################################################################################
+
+def get_airmass (ra, dec, obsdate, log):
+
+    if timing: t = time.time()
+    log.info('Executing get_airmass ...')
+
+    location = EarthLocation(lat=obs_lat, lon=obs_long, height=obs_height)
+    coords = SkyCoord(ra, dec, frame='icrs', unit='deg')
+    coords_altaz = coords.transform_to(AltAz(obstime=Time(obsdate), location=location))
+
+    if timing:
+        log.info('wall-time spent in get_airmass ' + str(time.time() - t))
+        log.info('peak memory (in GB) used in get_airmass {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
+    return coords_altaz.secz
+
+        
 ################################################################################
 
 def fixpix (data, mask_in, bkg, log, satlevel=60000.):
@@ -2037,7 +2314,10 @@ def fixpix (data, mask_in, bkg, log, satlevel=60000.):
     #data_fixed = inpaint.replace_nans(data, max_iter=5, kernel_radius=1,
     #                                  kernel_sigma=2, method='localmean')
 
-    if timing: log.info('wall-time spent in fixpix ' + str(time.time() - t))
+    if timing:
+        log.info('wall-time spent in fixpix ' + str(time.time() - t))
+        log.info('peak memory (in GB) used in fixpix {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     #ds9_arrays(data=data, data_fixed=data_fixed)
 
@@ -2149,7 +2429,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
 
 
         if timing: t1 = time.time()
-        pool = ThreadPool(nthreads)
+        pool = ThreadPool(1)
         pool.map(get_median_std, range(nsubs))
         pool.close()
         pool.join()
@@ -2189,7 +2469,10 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             # these now include the remaining patches
                         
             
-    if timing: log.info('wall-time spent in get_back ' + str(time.time() - t))
+    if timing:
+        log.info('wall-time spent in get_back ' + str(time.time() - t))
+        log.info('peak memory (in GB) used in get_back {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     return background, background_std
     
@@ -2449,13 +2732,15 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
 
     # call above function [get_psf_sub] with pool.map
     if timing: t1 = time.time()
-    pool = ThreadPool(nthreads)
+    pool = ThreadPool(1)
     pool.map(loop_psf_sub, range(nsubs))
     pool.close()
     pool.join()
-    if timing: log.info('wall-time spent in loop_psf_sub pool ' + str(time.time() - t1))
-    
-    if timing: log.info('wall-time spent in get_psf ' + str(time.time() - t))
+    if timing:
+        log.info('wall-time spent in loop_psf_sub pool ' + str(time.time() - t1))
+        log.info('wall-time spent in get_psf ' + str(time.time() - t))
+        log.info('peak memory (in GB) used in get_psf {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     return psf_ima_shift, psf_ima
 
@@ -2538,7 +2823,10 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     if verbose:
         log.info('fraction of PSF stars that match: ' + str(float(nmatch)/len(x_new)))
             
-    if timing: log.info('wall-time spent in get_fratio_radec ' + str(time.time()-t))
+    if timing:
+        log.info('wall-time spent in get_fratio_radec ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in get_fratio_radec {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     return np.array(x_new_match), np.array(y_new_match), np.array(fratio), \
         np.array(dra_match), np.array(ddec_match)
@@ -2615,9 +2903,11 @@ def show_image(image):
 
 ################################################################################
 
-def ds9_arrays(**kwargs):
+def ds9_arrays(regions=None, **kwargs):
 
     cmd = ['ds9', '-zscale', '-zoom', '4', '-cmap', 'heat']
+    if regionw is not None:
+        cmd += ['-regions', regions]
     for name, array in kwargs.items():
         # write array to fits
         fitsfile = 'ds9_'+name+'.fits'
@@ -2752,6 +3042,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, log, imtype):
     if timing:
         #log.info('extra time for creating LDAC fits table ' + str(time.time()-t2))
         log.info('wall-time spent in run_wcs ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in run_wcs {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
         
 ################################################################################
@@ -2830,8 +3122,11 @@ def ldac2fits (cat_ldac, cat_fits, log):
         hdulist_new.writeto(cat_fits, overwrite=True)
         hdulist_new.close()
         
-    if timing: log.info('wall-time spent in ldac2fits ' + str(time.time()-t))
-    
+    if timing:
+        log.info('wall-time spent in ldac2fits ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in ldac2fits {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
     
 ################################################################################
     
@@ -2880,7 +3175,10 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         log.error('Swarp failed with exit code '+str(status)+'.')
         return 'error'
     
-    if timing: log.info('wall-time spent in run_remap ' + str(time.time()-t))
+    if timing:
+        log.info('wall-time spent in run_remap ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in run_remap {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     
 ################################################################################
@@ -2994,7 +3292,10 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elongation=False):
             if show_plots: plt.show()
             plt.close()
             
-    if timing: log.info('wall-time spent in get_fwhm {:.3f}'.format(time.time()-t))
+    if timing:
+        log.info('wall-time spent in get_fwhm {:.3f}'.format(time.time()-t))
+        log.info('peak memory (in GB) used in get_fwhm {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
     if get_elongation:
         return fwhm_median, fwhm_std, elongation_median, elongation_std
@@ -3138,21 +3439,18 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     log.info(stdoutstr)
     log.info(stderrstr)
 
+    log.info('peak memory (in GB) used in run_sextractor before get_back {}'.
+             format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
     # improve background estimate if [bkg_method] not set to 1 (= use
     # background determined by SExtractor)
     if save_bkg and bkg_method != 1:
 
-        # read in SExtractor's background and RMS/std maps created above
-        with fits.open(bkg) as hdulist:
-            data_bkg = hdulist[0].data
-        with fits.open(bkg_std) as hdulist:
-            data_bkg_std = hdulist[0].data
-
         # read in SExtractor's object mask created above
         with fits.open(objmask) as hdulist:
-            data_objmask = hdulist[0].data
+            data_objmask = hdulist[0].data.astype(np.float16)
 
-        # read in input image and header
+        # read in input image
         with fits.open(image) as hdulist:
             data = hdulist[0].data
 
@@ -3180,7 +3478,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         fwhm = 0.
         fwhm_std = 0.
                 
-    if timing: log.info('wall-time spent in run_sextractor ' + str(time.time()-t))
+    if timing:
+        log.info('wall-time spent in run_sextractor ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in run_sextractor {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
     return fwhm, fwhm_std
 
 ################################################################################
@@ -3223,8 +3525,12 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
     log.info(stdoutstr) 
     log.info(stderrstr)  
 
-    if timing: log.info('wall-time spent in run_psfex ' + str(time.time()-t))
+    if timing:
+        log.info('wall-time spent in run_psfex ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in run_psfex {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
+        
 ################################################################################
 
 def get_samp_PSF_config_size (fwhm, imtype):
@@ -3450,8 +3756,9 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
     alpha_std[V_S>=0] = np.sqrt(V_S[V_S>=0]) / F_S
 
     if timing:
-        log.info('wall-time spent in optimal subtraction ' + str(time.time()-t))
-        #print 'peak memory used in run_ZOGY in GB', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e9
+        log.info('wall-time spent in run_ZOGY ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in run_ZOGY {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
     
     return D, S, S_corr, alpha, alpha_std
 
