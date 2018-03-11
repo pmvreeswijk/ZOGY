@@ -235,7 +235,7 @@ def global_pars(telescope=None):
         redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = False          # show intermediate fits images (centre and 4 corners)
+        display = True           # show intermediate fits images (centre and 4 corners)
         make_plots = True        # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
@@ -399,6 +399,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     if nfakestars>0:
         data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+    if display:
+        data_psf_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+        data_psf_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         
     # determine cutouts
     centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = \
@@ -738,8 +741,16 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                                            bkg_new[index_extract]) / gain_new
             data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
                                            bkg_ref[index_extract]) / gain_ref
-        
-
+        if display:
+            # blow up psf_orig images to the size of the subimage, so
+            # they can be shown in detail across the full image
+            psf_new_temp = ndimage.zoom(psf_orig_new[nsub],
+                                        1.*xsize_fft/np.shape(psf_orig_new[nsub])[0])
+            psf_ref_temp = ndimage.zoom(psf_orig_ref[nsub],
+                                        1.*xsize_fft/np.shape(psf_orig_ref[nsub])[0])            
+            data_psf_new_full[index_subcut] = psf_new_temp[index_extract]
+            data_psf_ref_full[index_subcut] = psf_ref_temp[index_extract]
+            
         if display and (nsub==0 or nsub==nysubs-1 or nsub==nsubs/2 or
                         nsub==nsubs-nysubs or nsub==nsubs-1):
 
@@ -810,6 +821,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         fits.writeto('Scorr_neg.fits', np.negative(data_Scorr_full), overwrite=True)
         fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
         fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
+        if display:
+            fits.writeto('psf_new.fits', data_psf_new_full, overwrite=True)
+            fits.writeto('psf_ref.fits', data_psf_ref_full, overwrite=True)
     if subpipe:
         fits.writeto('D.fits', data_D_full, overwrite=True)
         fits.writeto('S.fits', data_S_full, overwrite=True)
@@ -1947,12 +1961,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
             
             data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
                                      [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
-            data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
-                                     [mag_opt, magerr_opt], usemask=False, asrecarray=True)
-            data_sex = drop_fields(data_sex, 'VIGNET')
-            fits.writeto(newcat, data_sex, overwrite=True)
-            
-            
+            if os.path.isfile(cal_cat):
+                data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
+                                         [mag_opt, magerr_opt], usemask=False, asrecarray=True)
+                data_sex = drop_fields(data_sex, 'VIGNET')
+                fits.writeto(newcat, data_sex, overwrite=True)
+                        
         if timing: log.info('wall-time spent creating binary fits table including fluxopt '
                             + str(time.time()-t2))
     
@@ -2174,7 +2188,7 @@ def get_apply_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
             
     # determine median zeropoint
     # use values with nonzero values and where flux_opt>0
-    mask_nonzero = ((zp_array>0) & (mask_pos))2018-03-10 17:23:03,143 INFO ra_cal: 53.504472, dec_cal: -36.49046, mag_cal: 16.7163467407
+    mask_nonzero = ((zp_array>0) & (mask_pos))
     zp_mean, zp_std, zp_median = clipped_stats(zp_array[mask_nonzero], log=log)
     if verbose:
         log.info('number of useful calibration stars in the field: {}'.
