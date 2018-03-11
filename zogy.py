@@ -909,10 +909,10 @@ def get_trans(Scorr, transcat, pixscale, color, log):
         # select objects based on FLUX_MAX, FLAG, CLASS_STAR
         index = ((data['FLUX_MAX'] >= transient_nsigma) &
                  (data['FLAGS'] == 0) &
-                 (data['XWIN_IMAGE'] > 100) &
-                 (data['XWIN_IMAGE'] < 10460) &
-                 (data['YWIN_IMAGE'] > 100) &
-                 (data['YWIN_IMAGE'] < 10460) &
+                 #(data['XWIN_IMAGE'] > 100) &
+                 #(data['XWIN_IMAGE'] < 10460) &
+                 #(data['YWIN_IMAGE'] > 100) &
+                 #(data['YWIN_IMAGE'] < 10460) &
                  #(data['FWHM_IMAGE'] > 0) &
                  (data['PETRO_RADIUS'] > 0))
         data_trans = data[:][index]
