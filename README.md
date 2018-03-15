@@ -12,7 +12,7 @@ It makes grateful use of the following programs that first need to be installed:
  - SWarp: http://www.astromatic.net/software/swarp
  - PSFex: http://www.astromatic.net/software/psfex
  - ds9
- - sip_to_pv module from David Shupe: https://github.com/stargaser/sip_tpv/blob/master/sip_to_pv.py
+ - sip_to_pv package from David Shupe: https://github.com/stargaser/sip_tpv
  - pyfftw to speed up the many FFTs performed
  - the other modules imported at the top (e.g. astropy, matplotlib, etc.)
  

@@ -27,7 +27,10 @@ from photutils import Background2D, MedianBackground
 # for PSF fitting - see https://lmfit.github.io/lmfit-py/index.html
 from lmfit import minimize, Minimizer, Parameters, Parameter, report_fit
 
-from sip_to_pv import *
+# see https://github.com/stargaser/sip_tpv (version June 2017):
+# download from GitHub and "python install setup.py --user" for local
+# install or "sudo python install setup.py" for system install
+from sip_tpv import sip_to_pv
 
 import resource
 from skimage import restoration
@@ -234,7 +237,7 @@ def global_pars(telescope=None):
         redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = True           # show intermediate fits images (centre and 4 corners)
+        display = False          # show intermediate fits images (centre and 4 corners)
         make_plots = True        # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
@@ -259,7 +262,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     - PSFex
     - ds9
     - sip_to_pv module from David Shupe: 
-      https://github.com/stargaser/sip_tpv/blob/master/sip_to_pv.py
+      https://github.com/stargaser/sip_tpv
     - pyfftw to speed up the many FFTs performed
     - the other modules imported at the top
  
@@ -2940,18 +2943,25 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, log, imtype):
     with fits.open(wcsfile) as hdulist:
         header_wcs = hdulist[0].header
 
-    # add original and wcs headers and write image_out
-    fits.writeto(image_out, data, header+header_wcs, overwrite=True)
-    
     # convert SIP header keywords from Astrometry.net to PV keywords
     # that swarp, scamp (and sextractor) understand using this module
-    # from David Shupe:
-    # Note: tpv_format=False gives warning line/breaks cloud in wcs.all_pix2world
-    status = sip_to_pv(image_out, image_out, log, tpv_format=True)
-    if status == False:
-        log.error('sip_to_pv failed.')
-        return 'error'
+    # from David Shupe: sip_to_pv
 
+    # new version (June 2017) of sip_to_pv works on image header
+    # rather than header+image (see below); the header is modified in
+    # place; compared to the old version this saves an image write
+    result = sip_to_pv(header_wcs, tpv_format=True, preserve=False)
+        
+    # add original and wcs headers and write image_out
+    fits.writeto(image_out, data, header+header_wcs, overwrite=True)
+
+    # using the old version of sip_to_pv (before June 2017):
+    #status = sip_to_pv(image_out, image_out, log, tpv_format=True)
+    #if status == False:
+    #    log.error('sip_to_pv failed.')
+    #    return 'error'
+
+             
     # read data from SExtractor catalog
     with fits.open(sexcat) as hdulist:
         prihdu = hdulist[0]
