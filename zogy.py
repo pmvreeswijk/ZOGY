@@ -50,7 +50,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 def global_pars(telescope=None):
 
     # make these global parameters
-    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order, obs_lat, obs_long, obs_height, ext_coeff, cal_cat
+    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order, obs_lat, obs_long, obs_height, ext_coeff, cal_cat, skip_wcs
 
     if telescope is not None:
         # In the case of a subpipe run (and telescope is defined), all
@@ -192,6 +192,10 @@ def global_pars(telescope=None):
         fwhm_frac = 0.25         # fraction of objects, sorted in brightness
                                  # or class_star, used for fwhm estimate
 
+        # WCS
+        skip_wcs = True          # skip Astrometry.net step if image already
+                                 # contains a reliable WCS solution
+                                 
         # PSF parameters
         use_single_psf = False   # use the same central PSF for all subimages
         psf_clean_factor = 0     # pixels with values below (PSF peak * this
@@ -369,10 +373,18 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         # determine WCS solution of new_fits
         new_fits_wcs = base_new+'_wcs.fits'
         if not os.path.isfile(new_fits_wcs) or redo:
-            result = run_wcs(new_fits, new_fits_wcs, ra_new, dec_new,
-                             pixscale_new, xsize_new, ysize_new, log, 'new')
+            if not skip_wcs:
+                result = run_wcs(new_fits, new_fits_wcs, ra_new, dec_new,
+                                 pixscale_new, xsize_new, ysize_new, log, 'new')
+            else:
+                # just copy original image to _wcs.fits image
+                cmd = ['cp', new_fits, new_fits_wcs]
+                result = subprocess.call(cmd)               
+                # same for the SExtractor catalog
+                cmd = ['cp', base_new+'.sexcat', base_new+'_wcs.sexcat']
+                result = subprocess.call(cmd)                
 
-
+                
         # same steps for the reference image
         if not os.path.isfile(sexcat_ref) or redo:
 
@@ -388,15 +400,35 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         # determine WCS solution of ref_fits
         ref_fits_wcs = base_ref+'_wcs.fits'
         if not os.path.isfile(ref_fits_wcs) or redo:
-            result = run_wcs(ref_fits, ref_fits_wcs, ra_ref, dec_ref,
-                             pixscale_ref, xsize_ref, ysize_ref, log, 'ref')
+            if not skip_wcs:
+                result = run_wcs(ref_fits, ref_fits_wcs, ra_ref, dec_ref,
+                                 pixscale_ref, xsize_ref, ysize_ref, log, 'ref')
+            else:
+                # just copy original image to _wcs.fits image
+                cmd = ['cp', ref_fits, ref_fits_wcs]
+                result = subprocess.call(cmd)                
+                # same for the SExtractor catalog
+                cmd = ['cp', base_ref+'.sexcat', base_ref+'_wcs.sexcat']
+                result = subprocess.call(cmd)                
+
 
         # remap ref to new
         ref_fits_remap = base_ref+'_wcs_remap.fits'
         if not os.path.isfile(ref_fits_remap) or redo:
+            resampling_type='LANCZOS3' 
+            # if reference image is poorly sampled, could use bilinear
+            # interpolation for the remapping using SWarp - this
+            # removes artefacts around bright stars (see Fig.6 in the
+            # SWarp User's Guide). However, despite these artefacts,
+            # the Scorr image still appears to be better with LANCZOS3
+            # than when BILINEAR is used.
+            #
+            # if fwhm_ref <= 2: resampling_type='BILINEAR'
             result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
-                               [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg)
-
+                               [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg,
+                               resampling_type=resampling_type)
+            
+            
         # also remap reference image background, std and mask
         # (first update headers of the background and std/RMS fits
         # image with that of the wcs-corrected reference image)
@@ -598,6 +630,11 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         data_new[nsub][mask_infnan] = bkg_new[mask_infnan]
         mask_infnan = ~np.isfinite(data_ref[nsub])
         data_ref[nsub][mask_infnan] = bkg_ref[mask_infnan]
+
+        # pixels with zero values in ref need to be set to zero in new
+        # as well, to avoid subtracting non-overlapping image part
+        mask_refzero = (data_ref[nsub]==0.)
+        data_new[nsub][mask_refzero] = 0.
         
         # replace values <= 0 with the background
         mask_nonpos = (data_new[nsub] <= 0.)
