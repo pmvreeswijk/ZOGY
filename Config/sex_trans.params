@@ -11,4 +11,3 @@ FLAGS                  # Extraction flags
 FWHM_IMAGE             # FWHM assuming a gaussian core                     [pixel]
 CLASS_STAR             # S/G classifier output                            
 FLUX_MAX               # Peak flux above background                        [count]
-VIGNET(32,32)
