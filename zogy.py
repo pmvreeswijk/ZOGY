@@ -50,7 +50,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 def global_pars(telescope=None):
 
     # make these global parameters
-    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order, obs_lat, obs_long, obs_height, ext_coeff, cal_cat, skip_wcs
+    global subimage_size, subimage_border, bkg_method, bkg_nsigma, bkg_boxsize, bkg_filtersize, fratio_local, dxdy_local, transient_nsigma, nfakestars, fakestar_s2n, dosex, dosex_psffit, fwhm_imafrac, fwhm_detect_thresh, fwhm_class_sort, fwhm_frac, use_single_psf, psf_clean_factor, psf_radius, psf_sampling, psf_samp_fwhmfrac, cfg_dir, sex_cfg, sex_cfg_psffit, sex_par, sex_par_psffit, sex_par_ref, psfex_cfg, swarp_cfg, apphot_radii, redo, verbose, timing, display, make_plots, show_plots, key_gain, key_ron, key_satlevel, key_ra, key_dec, key_pixscale, key_exptime, key_seeing, astronet_tweak_order, obs_lat, obs_long, obs_height, ext_coeff, cal_cat, skip_wcs
 
     if telescope is not None:
         # In the case of a subpipe run (and telescope is defined), all
@@ -146,7 +146,7 @@ def global_pars(telescope=None):
         bkg_method = 2           # background method to use
         bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                                  # clipped; used in methods 1, 3 and 4
-        bkg_boxsize = 256        # size of region used to determine
+        bkg_boxsize = 240        # size of region used to determine
                                  # background in methods 2, 3 and 4
         bkg_filtersize = 5       # size of filter used for smoothing the above
                                  # regions for method 2, 3 and 4
@@ -193,7 +193,7 @@ def global_pars(telescope=None):
                                  # or class_star, used for fwhm estimate
 
         # WCS
-        skip_wcs = True          # skip Astrometry.net step if image already
+        skip_wcs = False         # skip Astrometry.net step if image already
                                  # contains a reliable WCS solution
                                  
         # PSF parameters
@@ -212,7 +212,7 @@ def global_pars(telescope=None):
                                  # If non-zero, its value is using for the sampling
                                  # step in both images.
         psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
-                                  # this is not used if [psf_sampling]=0.
+                                  # this is only used if [psf_sampling]=0.
                                  
         # Astrometry.net's tweak order
         astronet_tweak_order = 3
@@ -223,7 +223,7 @@ def global_pars(telescope=None):
         obs_height = 1798.  # meters above sealevel
         # these [ext_coeff] are very rough extinction estimates for SAAO; update!
         ext_coeff = {'u':0.4, 'g':0.2, 'q':0.15, 'r':0.1, 'i':0.1, 'z':0.1}
-        cal_cat = 'MLBG_calcat_sdssDR14+skymapperDR1p1.fits'        
+        cal_cat = '/home/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1.fits'
         
         # path and names of configuration files
         cfg_dir = './Config/'
@@ -231,6 +231,7 @@ def global_pars(telescope=None):
         sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
         sex_par = cfg_dir+'sex.params'     # SExtractor output parameters definition file
         sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
+        sex_par_ref = cfg_dir+'sex_ref.params' # same for reference image output version
         psfex_cfg = cfg_dir+'psfex.config' # PSFex configuration file
         swarp_cfg = cfg_dir+'swarp.config' # SWarp configuration file
 
@@ -238,11 +239,11 @@ def global_pars(telescope=None):
                                       # used for aperture photometry
                                       # in SExtractor general
 
-        redo = True              # execute functions even if output file exist
+        redo = False             # execute functions even if output file exist
         verbose = True           # print out extra info
         timing = True            # (wall-)time the different functions
-        display = True           # show intermediate fits images (centre and 4 corners)
-        make_plots = True        # make diagnostic plots and save them as pdf
+        display = False          # show intermediate fits images (centre and 4 corners)
+        make_plots = False       # make diagnostic plots and save them as pdf
         show_plots = False       # show diagnostic plots
 
 
@@ -384,7 +385,10 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 cmd = ['cp', base_new+'.sexcat', base_new+'_wcs.sexcat']
                 result = subprocess.call(cmd)                
 
-                
+        # read the header including WCS info
+        with fits.open(new_fits_wcs) as hdulist:
+            header_new_wcs = hdulist[0].header
+
         # same steps for the reference image
         if not os.path.isfile(sexcat_ref) or redo:
 
@@ -392,7 +396,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             ref_fits_mask = base_ref+'_mask.fits'
             if not os.path.isfile(ref_fits_mask):
                 ref_fits_mask = None   
-            result = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg, sex_par,
+            result = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg, sex_par_ref,
                                     pixscale_ref, log, fit_psf=False, return_fwhm=False,
                                     fraction=1.0, fwhm=fwhm_ref, save_bkg=True,
                                     update_vignet=True, mask=ref_fits_mask)
@@ -411,6 +415,9 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                 cmd = ['cp', base_ref+'.sexcat', base_ref+'_wcs.sexcat']
                 result = subprocess.call(cmd)                
 
+        # read the header including WCS info
+        with fits.open(ref_fits_wcs) as hdulist:
+            header_ref_wcs = hdulist[0].header
 
         # remap ref to new
         ref_fits_remap = base_ref+'_wcs_remap.fits'
@@ -432,9 +439,6 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         # also remap reference image background, std and mask
         # (first update headers of the background and std/RMS fits
         # image with that of the wcs-corrected reference image)
-        with fits.open(ref_fits_wcs) as hdulist:
-            header_ref_wcs = hdulist[0].header
-
         ref_fits_bkg = base_ref+'_bkg.fits'
         with fits.open(ref_fits_bkg, 'update') as hdulist:
             hdulist[0].header += header_ref_wcs[:]
@@ -445,7 +449,7 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                                [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg,
                                resampling_type='NEAREST')
 
-        # same for std image
+        # same for bkg_std image
         ref_fits_bkg_std = base_ref+'_bkg_std.fits'
         with fits.open(ref_fits_bkg_std, 'update') as hdulist:
             hdulist[0].header += header_ref_wcs[:]
@@ -476,6 +480,10 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             if os.path.isfile(new_fits_mask):
                 with fits.open(new_fits_mask) as hdulist:
                     data_mask = (hdulist[0].data+0.5).astype(np.int16)
+            else:
+                log.info('Warning: {} does not exist, while {} does'.
+                         format(new_fits_mask,ref_fits_mask))
+                data_mask = np.zeros(data_mask_remap.shape)
             # not sure how to combine; just add for now
             data_mask_comb = (data_mask + data_mask_remap).astype(np.int16)
             fits.writeto(base_new+'_'+base_ref+'_mask.fits', data_mask_comb, overwrite=True)
@@ -914,27 +922,22 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     
     # write full new, ref, D and S images to fits
     if nfakestars>0:
-        fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
-        fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
-    if not subpipe:
-        fits.writeto('D.fits', data_D_full, overwrite=True)
-        fits.writeto('S.fits', data_S_full, overwrite=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
-        fits.writeto('Scorr_neg.fits', np.negative(data_Scorr_full), overwrite=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
-        if display:
-            fits.writeto('psf_new.fits', data_psf_new_full, overwrite=True)
-            fits.writeto('psf_ref.fits', data_psf_ref_full, overwrite=True)
-    if subpipe:
-        fits.writeto('D.fits', data_D_full, overwrite=True)
-        fits.writeto('S.fits', data_S_full, overwrite=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
-        header_new.add_comment('Propagated header from new image to sub image.')
-        fits.writeto(sub, np.abs(data_Scorr_full), header_new, overwrite=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, overwrite=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, overwrite=True)
+        fits.writeto('new.fits', data_new_full, header_new_wcs, overwrite=True)
+        fits.writeto('ref.fits', data_ref_full, header_ref_wcs, overwrite=True)
 
+    header_new.add_comment('Propagated header from new image (including WCS solution)')
+    fits.writeto('D.fits', data_D_full, header_new_wcs, overwrite=True)
+    fits.writeto('S.fits', data_S_full, header_new_wcs, overwrite=True)
+    fits.writeto('Scorr.fits', data_Scorr_full, header_new_wcs, overwrite=True)
+    fits.writeto('Scorr_neg.fits', np.negative(data_Scorr_full), header_new_wcs, overwrite=True)
+    fits.writeto('Fpsf.fits', data_Fpsf_full, header_new_wcs, overwrite=True)
+    fits.writeto('Fpsferr.fits', data_Fpsferr_full, header_new_wcs, overwrite=True)
+    if display:
+        fits.writeto('psf_new.fits', data_psf_new_full, overwrite=True)
+        fits.writeto('psf_ref.fits', data_psf_ref_full, overwrite=True)
+
+    if subpipe:
+        fits.writeto(sub, np.abs(data_Scorr_full), header_new_wcs, overwrite=True)
 
     fits_mask_comb = base_new+'_'+base_ref+'_mask.fits'
     if not os.path.isfile(fits_mask_comb):
@@ -944,10 +947,36 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     transcat_pos = base_new+'_'+base_ref+'.transcat_pos'
     result = get_trans ('Scorr.fits', transcat_pos, pixscale_new, 'green', log,
                         mask=fits_mask_comb)
+    # add PSF fluxes and errors 
+    result = get_trans_flux (transcat_pos, data_Fpsf_full, data_Fpsferr_full)
+
     transcat_neg = base_new+'_'+base_ref+'.transcat_neg'
     result = get_trans ('Scorr_neg.fits', transcat_neg, pixscale_new, 'pink', log,
                         mask=fits_mask_comb)
-    
+    result = get_trans_flux (transcat_neg, data_Fpsf_full, data_Fpsferr_full)
+
+    #if telescope=='meerlicht' or telescope=='blackgem':
+    if True:
+        # using the function [format_cat], write the new, ref and
+        # transient output catalogues with the desired format, where the
+        # thumbnail images (new, ref, D and Scorr) around each transient
+        # are added as array columns in the transient catalogue.
+        # new catalogue
+        cat_new = base_new+'_wcs.sexcat_fluxopt'
+        result = format_cat (cat_new, cat_new+'_format', log, cat_type='new',
+                             header_toadd=header_new)
+        # ref catalogue
+        cat_ref = base_ref+'_wcs.sexcat_fluxopt'
+        result = format_cat (cat_ref, cat_ref+'_format', log, cat_type='ref',
+                             header_toadd=header_ref)
+        # trans catalogue
+        thumbnail_data = [data_new_full, data_ref_full, data_D_full, data_Scorr_full]
+        thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 'THUMBNAIL_SCORR']
+        result = format_cat (transcat_pos, transcat_pos+'_format', log, cat_type='trans',
+                             thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
+                             thumbnail_size=32, header_toadd=header_new)
+
+
     end_time = os.times()
     dt_usr  = end_time[2] - start_time2[2]
     dt_sys  = end_time[3] - start_time2[3]
@@ -1017,6 +1046,209 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
 ################################################################################
 
+def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
+                thumbnail_size=32, cat_type=None, header_toadd=None):
+
+    if timing: t = time.time()
+
+    with fits.open(cat_in) as hdulist:
+        prihdu = hdulist[0]
+        header = hdulist[1].header
+        data = hdulist[1].data
+
+    if header_toadd is not None:
+        header += header_toadd
+
+    thumbnail_size2 = str(thumbnail_size**2)
+        
+    # this [formats] dictionary lists the output format, the output
+    # column unit, and the desired format
+    formats = {
+        'NUMBER':         ['J', ''     , 'uint16'],
+        'XWIN_IMAGE':     ['E', 'pix'  , 'flt32' ],
+        'YWIN_IMAGE':     ['E', 'pix'  , 'flt32' ],
+        'ERRX2WIN_IMAGE': ['E', 'pix^2', 'flt16' ],
+        'ERRY2WIN_IMAGE': ['E', 'pix^2', 'flt16' ],
+        'ERRXYWIN_IMAGE': ['E', 'pix^2', 'flt16' ],
+        'X2WIN_IMAGE':    ['E', 'pix^2', 'flt16' ],
+        'Y2WIN_IMAGE':    ['E', 'pix^2', 'flt16' ],
+        'XYWIN_IMAGE':    ['E', 'pix^2', 'flt16' ],
+        'ELONGATION':     ['E', ''     , 'flt16' ],
+        'ALPHAWIN_J2000': ['E', 'deg'  , 'flt32' ],
+        'DELTAWIN_J2000': ['E', 'deg'  , 'flt32' ],
+        'FLAGS':          ['I', ''     , 'uint8' ],
+        'IMAFLAGS_ISO':   ['I', ''     , 'uint8' ],
+        'FWHM_IMAGE':     ['E', 'pix'  , 'flt16' ],
+        'CLASS_STAR':     ['E', ''     , 'flt16' ],
+        'FLUX_APER':      ['E', 'e-/s' , 'flt32' ],
+        'FLUXERR_APER':   ['E', 'e-/s' , 'flt16' ],
+        'BACKGROUND':     ['E', 'e-/s' , 'flt16' ],
+        'FLUX_MAX':       ['E', 'e-/s' , 'flt16' ],
+        'FLUX_AUTO':      ['E', 'e-/s' , 'flt32' ],
+        'FLUXERR_AUTO':   ['E', 'e-/s' , 'flt16' ],
+        'KRON_RADIUS':    ['E', 'pix'  , 'flt16' ],
+        'FLUX_ISO':       ['E', 'e-/s' , 'flt32' ],
+        'FLUXERR_ISO':    ['E', 'e-/s' , 'flt16' ],
+        'ISOAREA_IMAGE':  ['E', 'pix^2', 'flt16' ],
+        'MU_MAX':         ['E', 'e-/s' , 'flt16' ],
+        'FLUX_RADIUS':    ['E', 'pix'  , 'flt16' ],
+        'FLUX_PETRO':     ['E', 'e-/s' , 'flt32' ],
+        'FLUXERR_PETRO':  ['E', 'e-/s' , 'flt16' ],
+        'PETRO_RADIUS':   ['E', 'pix'  , 'flt16' ],
+        'FLUX_OPT':       ['E', 'e-/s' , 'flt32' ],
+        'FLUXERR_OPT':    ['E', 'e-/s' , 'flt16' ],
+        'MAG_OPT':        ['E', 'e-/s' , 'flt32' ],
+        'MAGERR_OPT':     ['E', 'e-/s' , 'flt16' ],
+        'FLUX_PSF':       ['E', 'e-/s' , 'flt32' ],
+        'FLUXERR_PSF':    ['E', 'e-/s' , 'flt16' ],
+        'THUMBNAIL_RED':  [thumbnail_size2+'E', 'e-/s' , 'flt16' ],
+        'THUMBNAIL_REF':  [thumbnail_size2+'E', 'e-/s' , 'flt16' ],
+        'THUMBNAIL_D':    [thumbnail_size2+'E', 'e-/s' , 'flt16' ],
+        'THUMBNAIL_SCORR':[thumbnail_size2+'E', 'e-/s' , 'flt16' ]
+    }
+
+    if cat_type is None:
+        keys_to_record = data.names
+    elif cat_type == 'ref':
+        keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
+                          'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
+                          'X2WIN_IMAGE', 'Y2WIN_IMAGE', 'XYWIN_IMAGE',   
+                          'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
+                          'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
+                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
+                          'FLUX_AUTO', 'FLUXERR_AUTO', 'KRON_RADIUS',   
+                          'FLUX_ISO', 'FLUXERR_ISO', 'ISOAREA_IMAGE', 'MU_MAX', 'FLUX_RADIUS',
+                          'FLUX_PETRO', 'FLUXERR_PETRO', 'PETRO_RADIUS',
+                          'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+    elif cat_type == 'new':
+        keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
+                          'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
+                          'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
+                          'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
+                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
+                          'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+    elif cat_type == 'trans':
+        keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
+                          'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
+                          'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
+                          'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
+                          'FLUX_MAX', 'FLUX_PSF', 'FLUXERR_PSF']
+        
+    columns = []
+    for key in keys_to_record:
+        if key=='FLUX_APER' or key=='FLUXERR_APER':
+            # loop apertures
+            for i_ap in range(len(apphot_radii)):
+                name = key+'_R'+str(apphot_radii[i_ap])+'xFWHM'
+                col = fits.Column(name=name, format=formats[key][0], unit=formats[key][1], 
+                                  disp=formats[key][2], array=data[key][:,i_ap])
+                columns.append(col)
+        else:
+            col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
+                              disp=formats[key][2], array=data[key])
+            columns.append(col)
+        
+    # add [thumbnails]
+    if thumbnail_data is not None and thumbnail_keys is not None:
+        
+        # number of thumbnail images to add
+        nthumbnails = len(thumbnail_keys)
+        
+        # coordinates to loop
+        xcoords = data['XWIN_IMAGE']
+        ycoords = data['YWIN_IMAGE']
+        ncoords = len(xcoords)
+
+        # loop thumbnails
+        for i_tn in range(nthumbnails):
+
+            ysize, xsize = thumbnail_data[i_tn].shape
+            
+            # initialise output column
+            data_col = np.zeros((ncoords,thumbnail_size,thumbnail_size))
+            
+            # loop x,y coordinates
+            for i_pos in range(ncoords):
+
+                # get index around x,y position using function [get_index_around_xy]
+                index = get_index_around_xy(ysize, xsize, ycoords[i_pos], xcoords[i_pos],
+                                            thumbnail_size)
+                # record in data_col
+                data_col[i_pos] = thumbnail_data[i_tn][index]
+                        
+            # add column to table
+            dim_str = '('+str(thumbnail_size)+','+str(thumbnail_size)+')'
+            key = thumbnail_keys[i_tn]
+            col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
+                              disp=formats[key][2], array=data_col, dim=dim_str)
+            columns.append(col)
+
+            
+    coldefs = fits.ColDefs(columns)
+    hdu = fits.BinTableHDU.from_columns(coldefs)
+    hdu.header += header
+    hdu.writeto(cat_out, overwrite=True)
+    
+    if timing:
+        log.info('wall-time spent in format_cat ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in format_cat {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
+        
+
+################################################################################
+
+def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
+
+    if size % 2 == 0:
+        oddsized = False
+        xpos = int(xcoord)
+        ypos = int(ycoord)
+    else:
+        oddsized = True
+        xpos = int(xcoord-0.5)
+        ypos = int(ycoord-0.5)
+
+    hsize = size/2
+
+    # if footprint is partially off the image, just go ahead
+    # with the pixels on the image
+    y1 = max(0, ypos-hsize)
+    x1 = max(0, xpos-hsize)
+    if oddsized:
+        y2 = min(ysize, ypos+hsize+1)
+        x2 = min(xsize, xpos+hsize+1)
+        # make sure axis sizes are odd
+        if (x2-x1) % 2 == 0:
+            if x1==0:
+                x2 -= 1
+            else:
+                x1 += 1
+        if (y2-y1) % 2 == 0:
+            if y1==0:
+                y2 -= 1
+            else:
+                y1 += 1
+    else:
+        y2 = min(ysize, ypos+hsize)
+        x2 = min(xsize, xpos+hsize)
+        # make sure axis sizes are even
+        if (x2-x1) % 2 != 0:
+            if x1==0:
+                x2 -= 1
+            else:
+                x1 += 1
+        if (y2-y1) % 2 != 0:
+            if y1==0:
+                y2 -= 1
+            else:
+                y1 += 1
+
+    return [slice(y1,y2),slice(x1,x2)]
+
+
+################################################################################
+
 def get_trans(Scorr, transcat, pixscale, color, log, mask=None):
 
     if not os.path.isfile(transcat) or redo:
@@ -1030,26 +1262,22 @@ def get_trans(Scorr, transcat, pixscale, color, log, mask=None):
     # read catalog
     with fits.open(transcat) as hdulist:
         data = hdulist[2].data
-        # select objects based on FLUX_MAX, FLAG, CLASS_STAR
 
+        # select objects based on FLUX_MAX, FLAG, CLASS_STAR
         index = ((data['FLUX_MAX'] >= transient_nsigma) &
                  (data['FLAGS'] == 0))
-                 #(data['XWIN_IMAGE'] > 100) &
-                 #(data['XWIN_IMAGE'] < 10460) &
-                 #(data['YWIN_IMAGE'] > 100) &
-                 #(data['YWIN_IMAGE'] < 10460) &
-                 #(data['FWHM_IMAGE'] > 0) &
-                 #(data['PETRO_RADIUS'] > 0))
-                 
+
         # add constraint on IMAFLAGS_ISO which should be present in
         # SExtractor output in case that a mask image was provided
         if 'IMAFLAGS_ISO' in data.names:
             index = ((index) & (data['IMAFLAGS_ISO'] == 0))
 
         data_trans = data[:][index]
+
         hdulist[2].data = data_trans
         hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
-        hdulist_new.writeto(transcat+'_selected', overwrite=True)
+        #hdulist_new.writeto(transcat+'_selected', overwrite=True)
+        hdulist_new.writeto(transcat, overwrite=True)
         hdulist_new.close()
 
     # prepare ds9 region file
@@ -1071,6 +1299,40 @@ def get_trans(Scorr, transcat, pixscale, color, log, mask=None):
     #fits.writeto('Scorr.fits', data_Scorr_full, overwrite=True)
 
 
+################################################################################
+
+def get_trans_flux (transcat, data_Fpsf, data_Fpsferr):
+    
+    # read catalog
+    with fits.open(transcat) as hdulist:
+        data = hdulist[1].data
+
+    # coordinates to loop
+    xcoords = data['XWIN_IMAGE']
+    ycoords = data['YWIN_IMAGE']
+    ncoords = len(xcoords)
+ 
+    # initialise output fluxes
+    flux_psf = np.zeros(ncoords)
+    fluxerr_psf = np.zeros(ncoords)
+        
+    # loop coordinates
+    for i in range(ncoords):
+
+        xpos = int(xcoords[i]-0.5)
+        ypos = int(ycoords[i]-0.5)
+
+        flux_psf[i] = data_Fpsf[ypos, xpos]
+        fluxerr_psf[i] = data_Fpsferr[ypos, xpos]
+    
+    # add PSF fluxes to catalog
+    data = append_fields(data, ['FLUX_PSF','FLUXERR_PSF'],
+                         [flux_psf, fluxerr_psf], usemask=False, asrecarray=True)
+
+    # write updated catalog to file
+    fits.writeto(transcat, data, overwrite=True)
+    
+    
 ################################################################################
 
 def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
@@ -1253,7 +1515,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
 
         # shift to the subpixel center of the object (object at
         # fractional pixel position 0.5,0.5 doesn't need the PSF to
-        # shift as the PSF image is constructed to be even
+        # shift if the PSF image is constructed to be even)
         if psf_oddsized:
             xshift = xcoords[i]-np.round(xcoords[i])
             yshift = ycoords[i]-np.round(ycoords[i])
@@ -1947,15 +2209,16 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
                              ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, imtype, log)
             
 
-
-
         data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
                                  [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
+
         if os.path.isfile(cal_cat):
             data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
                                      [mag_opt, magerr_opt], usemask=False, asrecarray=True)
             data_sex = drop_fields(data_sex, 'VIGNET')
-            fits.writeto(newcat, data_sex, overwrite=True)
+
+        # write updated catalog to file
+        fits.writeto(newcat, data_sex, overwrite=True)
                         
         if timing: log.info('wall-time spent creating binary fits table including fluxopt '
                             + str(time.time()-t2))
@@ -2559,7 +2822,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
             data = hdulist[1].data[0][0][:]
         # use function [get_samp_PSF_config_size] to determine [psf_samp]
         # and [psf_size_config]
-        psf_samp, psf_size_config = get_samp_PSF_config_size (fwhm, imtype)
+        psf_samp, psf_size_config = get_samp_PSF_config_size()
         log.info('psf_samp, psf_size_config: '+str(psf_samp)+' '+str(psf_size_config))
         # check that the above [psf_size_config] is the same as
         # the size of the images in the data array, or equivalently,
@@ -2590,7 +2853,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         #result = run_psfex(sexcat_ldac_zeroflags, psfex_cfg, psfexcat, log, fwhm, imtype)
         # something goes wrong when feeding the above zeroflags catalog to PSFEx
         # not sure what - too restrictive? For now, just supply the full ldac catalog.
-        result = run_psfex(sexcat_ldac, psfex_cfg, psfexcat, log, fwhm, imtype)
+        result = run_psfex(sexcat_ldac, psfex_cfg, psfexcat, log)
 
 
     # If [dosex_psffit] parameter is set, then again run SExtractor,
@@ -2668,11 +2931,10 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     # If global parameter [psf_sampling] is set, then
     #   [psf_samp] = [psf_samling]
     # where [psf_samp(ling)] is the PSF sampling step in image pixels.
-    # If [psf_sampling] is set to zero, [psf_samp] is automatically
-    # determined by PSFex:
+    # If [psf_sampling] is set to zero, [psf_samp] is determined as follows:
     #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
-    # where [psf_samp_fwhmfrac] should be set to about 0.25
-    # so for an oversampled image with FWHM~8: [psf_samp]~2,
+    # where [psf_samp_fwhmfrac] is a global parameter which should be set
+    # to about 0.25 so for an oversampled image with FWHM~8: [psf_samp]~2,
     # while an undersampled image with FWHM~2: [psf_samp]~1/4
     psf_size = np.int(np.ceil(psf_size_config * psf_samp))
     # if this is even, make it odd
@@ -3543,7 +3805,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
+def run_psfex(cat_in, file_config, cat_out, log):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -3553,7 +3815,7 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
 
     # use function [get_samp_PSF_config_size] to determine [psf_samp]
     # and [psf_size_config] required to run PSFEx
-    psf_samp, psf_size_config = get_samp_PSF_config_size (fwhm, imtype)
+    psf_samp, psf_size_config = get_samp_PSF_config_size()
     psf_size_config_str = str(psf_size_config)+','+str(psf_size_config)
 
     if verbose:
@@ -3589,7 +3851,7 @@ def run_psfex(cat_in, file_config, cat_out, log, fwhm, imtype):
         
 ################################################################################
 
-def get_samp_PSF_config_size (fwhm, imtype):
+def get_samp_PSF_config_size():
 
     # [psf_size] is the PSF size in image pixels:
     #   [psf_size] = [psf_size_config] * [psf_samp]
@@ -3598,40 +3860,39 @@ def get_samp_PSF_config_size (fwhm, imtype):
     # If global parameter [psf_sampling] is set, then
     #   [psf_samp] = [psf_samling]
     # where [psf_samp(ling)] is the PSF sampling step in image pixels.
-    # If [psf_sampling] is set to zero, [psf_samp] is automatically
-    # determined by PSFex:
+    # If [psf_sampling] is set to zero, [psf_samp] is determined as follows:
     #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
     # where [psf_samp_fwhmfrac] is a global parameter which should be set
     # to about 0.25 so for an oversampled image with FWHM~8: [psf_samp]~2,
     # while an undersampled image with FWHM~2: [psf_samp]~1/4
     if psf_sampling == 0:
-        # determine [psf_size_config] based on [psf_radius], which is
-        #   [psf_size_config] = 2 * [psf_radius] * [psf_samp_fwhmfrac] * FWHM
-        #   [psf_size_config] = 2 * [psf_radius] * [psf_samp]
-        # where
-        #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
-        # for now set by hand (could make this a global parameter):
-        psf_samp = psf_samp_fwhmfrac * fwhm
-        psf_size_config = 2 * psf_radius * fwhm / psf_samp
-        # or:
-        # psf_size_config = 2 * psf_radius / psf_samp_fwhmfrac
-        # in case of reference image, scale this by the ratio of
-        # FWHMs so that the final psf stamp of the reference image is
-        # as large as the psf stamp of the new image
-        if imtype=='ref':
-            psf_size_config *= fwhm_new/fwhm_ref
-        # convert to integer
-        psf_size_config = np.int(psf_size_config+0.5)
-        # make sure it's odd
-        if psf_size_config % 2 == 0: psf_size_config += 1
+        psf_samp = psf_samp_fwhmfrac * fwhm_new
     else:
-        # use [psf_sampling] in PSFex
         psf_samp = psf_sampling
-        # use some reasonable default size
-        psf_size_config = 45
+
+    # throughout this function the [fwhm] of the new image is used, so
+    # that for both the new and ref image the [psf_size_config] is the
+    # same
+    
+    # determine [psf_size_config] based on [psf_radius], which is
+    #   [psf_size_config] = [psf_size] / [psf_samp]
+    #   [psf_size_config] = 2 * [psf_radius] * FWHM / [psf_samp]
+    # and since:
+    #   [psf_samp] = [psf_samp_fwhmfrac] * FWHM in pixels
+    # this can be written:
+    #   [psf_size_config] = 2 * [psf_radius] / [psf_samp_fwhmfrac]
+    # this is independent of the image FWHM since the FWHM is sampled
+    # by a fixed number of steps defined by [psf_samp_fwhmfrac]
+    psf_size_config = 2. * psf_radius * fwhm_new / psf_samp
+
+    # convert to integer
+    psf_size_config = np.int(psf_size_config+0.5)
+    # make sure it's odd
+    if psf_size_config % 2 == 0: psf_size_config += 1
 
     return psf_samp, psf_size_config
-    
+
+
 ################################################################################
 
 def clean_norm_psf(psf_array, clean_factor):
