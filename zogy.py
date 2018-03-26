@@ -355,12 +355,12 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             
         # now run SExtractor on the full image with the above seeing
         # estimate, saving the background images
+        # if mask is present, provide it to SExtractor as the flag image
+        new_fits_mask = base_new+'_mask.fits'
+        if not os.path.isfile(new_fits_mask): new_fits_mask = None
+
         if not os.path.isfile(sexcat_new) or redo:
 
-            # if mask is present, provide it to SExtractor as the flag image
-            new_fits_mask = base_new+'_mask.fits'
-            if not os.path.isfile(new_fits_mask):
-                new_fits_mask = None
             result = run_sextractor(base_new+'.fits', sexcat_new, sex_cfg, sex_par,
                                     pixscale_new, log, fit_psf=False, return_fwhm=False,
                                     fraction=1.0, fwhm=fwhm_new, save_bkg=True,
@@ -390,17 +390,16 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
             header_new_wcs = hdulist[0].header
 
         # same steps for the reference image
-        if not os.path.isfile(sexcat_ref) or redo:
+        ref_fits_mask = base_ref+'_mask.fits'
+        if not os.path.isfile(ref_fits_mask): ref_fits_mask = None   
 
-            # if mask is present, provide it to SExtractor as the flag image
-            ref_fits_mask = base_ref+'_mask.fits'
-            if not os.path.isfile(ref_fits_mask):
-                ref_fits_mask = None   
+        if not os.path.isfile(sexcat_ref) or redo:
             result = run_sextractor(base_ref+'.fits', sexcat_ref, sex_cfg, sex_par_ref,
                                     pixscale_ref, log, fit_psf=False, return_fwhm=False,
                                     fraction=1.0, fwhm=fwhm_ref, save_bkg=True,
                                     update_vignet=True, mask=ref_fits_mask)
             ldac2fits (sexcat_ref, sexcat_ref.replace('_ldac',''), log)
+
         # determine WCS solution of ref_fits
         ref_fits_wcs = base_ref+'_wcs.fits'
         if not os.path.isfile(ref_fits_wcs) or redo:
@@ -422,72 +421,18 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         # remap ref to new
         ref_fits_remap = base_ref+'_wcs_remap.fits'
         if not os.path.isfile(ref_fits_remap) or redo:
-            resampling_type='LANCZOS3' 
             # if reference image is poorly sampled, could use bilinear
             # interpolation for the remapping using SWarp - this
             # removes artefacts around bright stars (see Fig.6 in the
             # SWarp User's Guide). However, despite these artefacts,
             # the Scorr image still appears to be better with LANCZOS3
             # than when BILINEAR is used.
-            #
+            resampling_type='LANCZOS3' 
             # if fwhm_ref <= 2: resampling_type='BILINEAR'
             result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
                                [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg,
-                               resampling_type=resampling_type)
-            
-            
-        # also remap reference image background, std and mask
-        # (first update headers of the background and std/RMS fits
-        # image with that of the wcs-corrected reference image)
-        ref_fits_bkg = base_ref+'_bkg.fits'
-        with fits.open(ref_fits_bkg, 'update') as hdulist:
-            hdulist[0].header += header_ref_wcs[:]
-        # and remap    
-        ref_fits_bkg_remap = base_ref+'_bkg_remap.fits'
-        if not os.path.isfile(ref_fits_bkg_remap) or redo:
-            result = run_remap(base_new+'_wcs.fits', ref_fits_bkg, ref_fits_bkg_remap,
-                               [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg,
-                               resampling_type='NEAREST')
+                               resampling_type=resampling_type, resample='Y')
 
-        # same for bkg_std image
-        ref_fits_bkg_std = base_ref+'_bkg_std.fits'
-        with fits.open(ref_fits_bkg_std, 'update') as hdulist:
-            hdulist[0].header += header_ref_wcs[:]
-        # and remap    
-        ref_fits_bkg_std_remap = base_ref+'_bkg_std_remap.fits'
-        if not os.path.isfile(ref_fits_bkg_std_remap) or redo:
-            result = run_remap(base_new+'_wcs.fits', ref_fits_bkg_std, ref_fits_bkg_std_remap,
-                               [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg,
-                               resampling_type='NEAREST')
-        
-        # and the reference mask image, if it exists 
-        ref_fits_mask = base_ref+'_mask.fits'
-        if os.path.isfile(ref_fits_mask):
-
-            with fits.open(ref_fits_mask, 'update') as hdulist:
-                hdulist[0].header += header_ref_wcs[:]
-            # and remap
-            ref_fits_mask_remap = base_ref+'_mask_remap.fits'
-            if not os.path.isfile(ref_fits_mask_remap) or redo:
-                result = run_remap(base_new+'_wcs.fits', ref_fits_mask, ref_fits_mask_remap,
-                                   [ysize_new, xsize_new], gain=gain_new, log=log, config=swarp_cfg,
-                                   resampling_type='NEAREST')
-
-            # also prepare combined mask here
-            with fits.open(ref_fits_mask_remap) as hdulist:
-                data_mask_remap = (hdulist[0].data+0.5).astype(np.int16)
-            new_fits_mask = base_new+'_mask.fits'
-            if os.path.isfile(new_fits_mask):
-                with fits.open(new_fits_mask) as hdulist:
-                    data_mask = (hdulist[0].data+0.5).astype(np.int16)
-            else:
-                log.info('Warning: {} does not exist, while {} does'.
-                         format(new_fits_mask,ref_fits_mask))
-                data_mask = np.zeros(data_mask_remap.shape)
-            # not sure how to combine; just add for now
-            data_mask_comb = (data_mask + data_mask_remap).astype(np.int16)
-            fits.writeto(base_new+'_'+base_ref+'_mask.fits', data_mask_comb, overwrite=True)
-            
             
     if subpipe:
         fwhm_new = header_new['SEEING']
@@ -499,9 +444,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     data_Scorr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
     data_Fpsf_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
     data_Fpsferr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-    if nfakestars>0:
-        data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+    data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+    data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
     if display:
         data_psf_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_psf_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
@@ -527,11 +471,13 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
     # ref, psf and background images
 
     data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std = \
-        prep_optimal_subtraction(base_new+'_wcs.fits', nsubs, 'new', fwhm_new, log)
+        prep_optimal_subtraction(base_new+'_wcs.fits', nsubs, 'new', fwhm_new, log,
+                                 fits_mask=new_fits_mask)
     data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std = \
         prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref, log,
-                                 remap=ref_fits_remap)
+                                 fits_mask=ref_fits_mask, ref_fits_remap=ref_fits_remap)
 
+    
     log.info('data_new.dtype {}'.format(data_new.dtype))
     log.info('psf_new.dtype {}'.format(psf_new.dtype))
     log.info('data_new_bkg.dtype {}'.format(data_new_bkg.dtype))
@@ -841,16 +787,15 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
         x2, y2 = x1+subimage_size, y1+subimage_size
         index_extract = [slice(y1,y2), slice(x1,x2)]
 
-        data_D_full[index_subcut] = data_D[index_extract] / gain_new
+        data_D_full[index_subcut] = data_D[index_extract] #/ gain_new
         data_S_full[index_subcut] = data_S[index_extract]
         data_Scorr_full[index_subcut] = data_Scorr[index_extract]
         data_Fpsf_full[index_subcut] = data_Fpsf[index_extract]
         data_Fpsferr_full[index_subcut] = data_Fpsferr[index_extract]
-        if nfakestars>0:
-            data_new_full[index_subcut] = (data_new[nsub][index_extract] +
-                                           bkg_new[index_extract]) / gain_new
-            data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
-                                           bkg_ref[index_extract]) / gain_ref
+        data_new_full[index_subcut] = (data_new[nsub][index_extract] +
+                                       bkg_new[index_extract]) #/ gain_new
+        data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
+                                       bkg_ref[index_extract]) #/ gain_ref
         if display:
             # blow up psf_orig images to the size of the subimage, so
             # they can be shown in detail across the full image
@@ -921,9 +866,8 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
                  str(median_Scorr) + ', ' + str(std_Scorr))
     
     # write full new, ref, D and S images to fits
-    if nfakestars>0:
-        fits.writeto('new.fits', data_new_full, header_new_wcs, overwrite=True)
-        fits.writeto('ref.fits', data_ref_full, header_ref_wcs, overwrite=True)
+    fits.writeto('new.fits', data_new_full, header_new_wcs, overwrite=True)
+    fits.writeto('ref.fits', data_ref_full, header_ref_wcs, overwrite=True)
 
     header_new.add_comment('Propagated header from new image (including WCS solution)')
     fits.writeto('D.fits', data_D_full, header_new_wcs, overwrite=True)
@@ -1046,9 +990,76 @@ def optimal_subtraction(new_fits, ref_fits, ref_fits_remap=None, sub=None,
 
 ################################################################################
 
+def xy_index_ref (ysize, xsize, wcs_new, wcs_ref, log):
+
+    """Given an image with shape [ysize, xsize] and WCS solutions in
+    [wcs_new] and [wcs_ref], return the masks [mask_new, mask_ref]
+    identifying the pixels in the ref image that correspond to the
+    pixels in the new image, i.e. the new image pixels [mask_new] map
+    onto the reference image pixels [mask_ref]."""
+
+    if timing: t = time.time()
+
+    # Sample xx and yy every [step] pixels in each axis to perform the
+    # mapping on a coarse grid, which is interpolated and expanded
+    # back to the input grid below. This is done to avoid running the
+    # functions [wcs.all_pix2world] and [wcs.all_world2pix] on each
+    # and every image pixel.
+    nsteps = 1000
+    # It is important to use the [np.linspace] function below to
+    # ensure that the coarse grid includes the first and last pixel of
+    # each axis; the "+1" converts the indices to pixel coordinates.
+    yy, xx = np.meshgrid(np.linspace(0, ysize-1, nsteps)+1,
+                         np.linspace(0, xsize-1, nsteps)+1,
+                         indexing='ij')
+    ysize_coarse, xsize_coarse = yy.shape
+    
+    # flatten xx and yy into x and y
+    x = xx.flatten()
+    y = yy.flatten()
+    
+    # use [wcs_ref] file to get RA, DEC of pixel coordinates x, y
+    wcs = WCS(wcs_new)
+    ra, dec = wcs.all_pix2world(x, y, 1)
+
+    # use [wcs_new] file to get x_ref, y_ref pixel coordinates
+    # corresponding to ra, dec
+    wcs = WCS(wcs_ref)
+    x_ref, y_ref = wcs.all_world2pix(ra, dec, 1)
+
+    # reshape
+    xx_ref_coarse = x_ref.reshape((ysize_coarse, xsize_coarse))
+    yy_ref_coarse = y_ref.reshape((ysize_coarse, xsize_coarse))
+    
+    # resize coarse grid to full input grid
+    xx_ref = ndimage.zoom(xx_ref_coarse, 1.*xsize/xsize_coarse, order=1)
+    yy_ref = ndimage.zoom(yy_ref_coarse, 1.*ysize/ysize_coarse, order=1)
+
+    # define mask defining pixels in reference frame
+    mask_new = ((xx_ref>=0.5) & (yy_ref>=0.5) & (xx_ref<=xsize+0.5) & (yy_ref<=ysize+0.5))
+    
+    # flip to get mask_new of pixels in new frame
+    mask_ref = np.flip(np.flip(mask_new,1),0)
+
+    if timing:
+        log.info('wall-time spent in xy_index_ref ' + str(time.time()-t))
+        log.info('peak memory (in GB) used in xy_index_ref {}'.
+                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+
+    return mask_new, mask_ref
+        
+        
+################################################################################
+
 def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
                 thumbnail_size=32, cat_type=None, header_toadd=None):
 
+    """Function that formats binary fits table [cat_in] according to
+        MeerLICHT/BlackGEM specifications and saves the resulting
+        binary fits table [cat_out].
+
+    """
+    
     if timing: t = time.time()
 
     with fits.open(cat_in) as hdulist:
@@ -2034,8 +2045,9 @@ def read_header(header, keywords, log):
 
 ################################################################################
     
-def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
-    
+def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
+                             fits_mask=None, ref_fits_remap=None):
+
     log.info('Executing prep_optimal_subtraction ...')
     t = time.time()
        
@@ -2044,60 +2056,95 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     else:
         base = base_ref
 
-    # read in input_fits
+    # read in input_fits header
     with fits.open(input_fits) as hdulist:
         header_wcs = hdulist[0].header
-        data_wcs = hdulist[0].data
-    # read in background image
-    fits_bkg = base+'_bkg.fits'
-    with fits.open(fits_bkg) as hdulist:
-        data_bkg = hdulist[0].data
-    # read in background std image
-    fits_bkg_std = base+'_bkg_std.fits'
-    with fits.open(fits_bkg_std) as hdulist:
-        data_bkg_std = hdulist[0].data
-    # read mask image
-    fits_mask = base+'_mask.fits'
-    # first check if the mask image exists
-    if os.path.isfile(fits_mask):
-        with fits.open(fits_mask) as hdulist:
-            data_mask = (hdulist[0].data+0.5).astype(np.int16)
-
-    # if remapped image is provided, read that also
-    if remap is not None and os.path.isfile(remap):
-        with fits.open(remap) as hdulist:
-            data_remap = hdulist[0].data
-        # read remapped background image
-        fits_bkg_remap = base+'_bkg_remap.fits'
-        with fits.open(fits_bkg_remap) as hdulist:
-            data_bkg_remap = hdulist[0].data
-        # read remapped background std image
-        fits_bkg_std_remap = base+'_bkg_std_remap.fits'
-        with fits.open(fits_bkg_std_remap) as hdulist:
-            data_bkg_std_remap = hdulist[0].data
-        # read remapped mask image
-        fits_mask_remap = base+'_mask_remap.fits'
-        # first check if the mask image exists
-        if os.path.isfile(fits_mask_remap):
-            with fits.open(fits_mask_remap) as hdulist:
-                data_mask_remap = (hdulist[0].data+0.5).astype(np.int16)
+        data_wcs = hdulist[0].data.astype(np.float32)
 
     # get gain, readnoise, pixscale and saturation level from header_wcs
     keywords = [key_gain, key_ron, key_pixscale, key_satlevel]
     gain, readnoise, pixscale, satlevel = read_header(header_wcs, keywords, log)
     ysize, xsize = np.shape(data_wcs)
-    
+        
+    # read in background image
+    fits_bkg = base+'_bkg.fits'
+    with fits.open(fits_bkg) as hdulist:
+        data_bkg = hdulist[0].data.astype(np.float32)
+    # read in background std image
+    fits_bkg_std = base+'_bkg_std.fits'
+    with fits.open(fits_bkg_std) as hdulist:
+        data_bkg_std = hdulist[0].data.astype(np.float16)
+
+    # and mask image if not None
+    if fits_mask is not None:
+        with fits.open(fits_mask) as hdulist:
+            data_mask = (hdulist[0].data+0.5).astype(np.int16)
+            
+    # if remapped image is provided, read that also
+    if ref_fits_remap is not None:
+        with fits.open(ref_fits_remap) as hdulist:
+            data_ref_remap = hdulist[0].data.astype(np.float32)
+
+        # and prepare the remapped background, std and mask images
+        # instead of using SWarp to remap the background, std and mask
+        # images, use the function [xy_index_ref] to determine indices
+        # of pixels in reference image that correspond to pixels in
+        # new image: image_new[mask_new] correspond to
+        # image_ref[mask_ref]. This mapping needs to be done only
+        # once, and can be used for all three remappings.
+        mask_new, mask_ref = xy_index_ref (ysize, xsize,
+                                           base_new+'.wcs', base_ref+'.wcs', log)
+
+        # this function applies this mapping to an input fits image,
+        # and returns the remapped data
+        def get_data_remap (image_fits, mask_new, mask_ref):
+            with fits.open(image_fits) as hdulist:
+                data = hdulist[0].data
+            # initialise remapped image to zero
+            data_remap = np.zeros(data.shape)
+            data_remap[mask_new] += data[mask_ref]
+            return data_remap
+                
+        ref_fits_bkg_std = base_ref+'_bkg_std.fits'
+        ref_fits_bkg = base_ref+'_bkg.fits'
+        # remap reference image background
+        data_ref_bkg_remap = get_data_remap(ref_fits_bkg, mask_new, mask_ref).astype(np.float32)
+        # remap reference image background std
+        data_ref_bkg_std_remap = get_data_remap(ref_fits_bkg_std, mask_new, mask_ref).astype(np.float16)
+        # remap mask image if it exists
+        if fits_mask is not None:
+            data_ref_mask_remap = (get_data_remap(fits_mask, mask_new, mask_ref)+0.5).astype(np.int16)
+                
+            # prepare combined mask
+            # first read in mask of new image
+            data_new_mask = None
+            new_fits_mask = base_new+'_mask.fits'
+            if os.path.isfile(new_fits_mask):
+                with fits.open(new_fits_mask) as hdulist:
+                    data_new_mask = (hdulist[0].data+0.5).astype(np.int16)
+            else:
+                log.info('Warning: {} does not exist, while {} does'.
+                         format(new_fits_mask, ref_fits_mask))
+            # not sure how to combine; just add for now
+            if data_new_mask is not None:
+                data_mask_comb = (data_new_mask + data_ref_mask_remap).astype(np.int16)
+            else:
+                data_mask_comb = data_ref_mask_remap.astype(np.int16)
+            # write to fits
+            fits_mask_comb = base_new+'_'+base_ref+'_mask.fits'
+            fits.writeto(fits_mask_comb, data_mask_comb, overwrite=True)
+            
     # convert counts to electrons
     satlevel *= gain
     data_wcs *= gain
     data_bkg *= gain
     data_bkg_std *= gain
-    if remap is not None and os.path.isfile(remap):
-        data_remap *= gain
-        data_bkg_remap *= gain
-        data_bkg_std_remap *= gain
-
-    # print warning if any pixel value is not finite
+    if ref_fits_remap is not None:
+        data_ref_remap *= gain
+        data_ref_bkg_remap *= gain
+        data_ref_bkg_std_remap *= gain
+        
+        # print warning if any pixel value is not finite
     if np.any(~np.isfinite(data_wcs)):
         log.info('Warning: not all pixel values are finite')
         log.info('         replacing NANs with zeros and +-inf with large +-numbers')        
@@ -2135,15 +2182,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         if 'IMAFLAGS_ISO' in data_sex.columns.names:
             mask_use = (data_sex['IMAFLAGS_ISO'] != 2)
             data_sex = data_sex[:][mask_use]
-
+            
         # read in positions and their errors
         xwin = data_sex['XWIN_IMAGE']
-        ywin = data_sex['YWIN_IMAGE']    
-        xwin = data_sex['XWIN_IMAGE']#[mask_use]
-        ywin = data_sex['YWIN_IMAGE']#[mask_use]
-        errx2win = data_sex['ERRX2WIN_IMAGE']#[mask_use]
-        erry2win = data_sex['ERRY2WIN_IMAGE']#[mask_use]
-        errxywin = data_sex['ERRXYWIN_IMAGE']#[mask_use]
+        ywin = data_sex['YWIN_IMAGE']
+        errx2win = data_sex['ERRX2WIN_IMAGE']
+        erry2win = data_sex['ERRY2WIN_IMAGE']
+        errxywin = data_sex['ERRXYWIN_IMAGE']
 
         psfex_bintable = input_fits.replace('_wcs.fits', '.psf')
 
@@ -2235,19 +2280,17 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
 
-    if remap is not None and os.path.isfile(remap):
-        data = data_remap
-        data_bkg = data_bkg_remap
-        data_bkb_std = data_bkg_std_remap
-        if os.path.isfile(fits_mask_remap):
-            data_mask = data_mask_remap
+    if ref_fits_remap is not None:
+        data = data_ref_remap
+        data_bkg = data_ref_bkg_remap
+        data_bkg_std = data_ref_bkg_std_remap
+        data_mask = data_ref_mask_remap
     else:
         data = data_wcs
     
     # fix pixels using [fixpix] function which requires data (remapped
     # image in case of reference image), mask and background
-    if (imtype=='new' and os.path.isfile(fits_mask)) or \
-       (imtype=='ref' and os.path.isfile(fits_mask_remap)):
+    if data_mask is not None:
         data = fixpix (data, data_mask, data_bkg, log, satlevel=satlevel)
         
     if timing: t2 = time.time()
@@ -2265,7 +2308,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log, remap=None):
         fftdata_bkg_std[nsub][index_fft] = data_bkg_std[index_fftdata]
 
     if timing: log.info('wall-time spent filling fftdata cubes ' + str(time.time()-t2))
-        
+
     if make_plots:
 
         # in case optimal flux block above was skipped, the SExtractor
@@ -2690,8 +2733,8 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
 
         # previously this was a loop; now turned to a function to
         # try pool.map multithreading below
-        def get_median_std (nsub):
-        # for nsub in range(nsubs):
+        #def get_median_std (nsub):
+        for nsub in range(nsubs):
             subcut = cuts_ima[nsub]
             data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
             mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
@@ -2717,13 +2760,12 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             mesh_median[nsub] = median
             mesh_std[nsub] = std
 
-
-        if timing: t1 = time.time()
-        pool = ThreadPool(1)
-        pool.map(get_median_std, range(nsubs))
-        pool.close()
-        pool.join()
-        if timing: log.info('wall-time spent in get_back pool ' + str(time.time() - t1))
+        #if timing: t1 = time.time()
+        #pool = ThreadPool(1)
+        #pool.map(get_median_std, range(nsubs))
+        #pool.close()
+        #pool.join()
+        #if timing: log.info('wall-time spent in get_back pool ' + str(time.time() - t1))
 
         # reshape and transpose
         mesh_median = mesh_median.reshape((nxsubs, nysubs)).transpose()
@@ -2765,8 +2807,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
         log.info('peak memory (in GB) used in get_back {}'.
                  format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
-    return background, background_std
-    
+    return background.astype(np.float32), background_std.astype(np.float16)
 
 ################################################################################
 
@@ -2811,9 +2852,6 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
     #
     # If the PSFEx output file is already present with the same
     # [psf_size_config] as currently required, then skip [run_psfex].
-    # Note that [psfexcat], the ASCII file with some measurements
-    # of the PSF stars, is not used anymore below, so is not required
-    # and does not need to be saved for the reference image.
     skip_psfex = False
     psfex_bintable = image.replace('_wcs.fits', '.psf')    
     if os.path.isfile(psfex_bintable) and not redo:
@@ -3073,14 +3111,14 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
         # read SExtractor fits table
         with fits.open(sexcat) as hdulist:
             data = hdulist[1].data
-            ra_sex = data['ALPHAWIN_J2000']
-            dec_sex = data['DELTAWIN_J2000']
+        ra_sex = data['ALPHAWIN_J2000']
+        dec_sex = data['DELTAWIN_J2000']
         # loop numbers and record in ra, dec
         ra = []
         dec = []
         for n in number:
             ra.append(ra_sex[n-1])
-            dec.append(dec_sex[n-1])      
+            dec.append(dec_sex[n-1])
         return np.array(ra), np.array(dec)
     
     # get ra, dec corresponding to x, y
@@ -3428,8 +3466,8 @@ def ldac2fits (cat_ldac, cat_fits, log):
 ################################################################################
     
 def run_remap(image_new, image_ref, image_out, image_out_size,
-              gain, log, config=None, resampling_type='LANCZOS3',
-              projection_err=0.001, mask=None):
+              gain, log, config=None, resample='Y', resampling_type='LANCZOS3',
+              projection_err=0.001, mask=None, header_only='N'):
         
     """Function that remaps [image_ref] onto the coordinate grid of
        [image_new] and saves the resulting image in [image_out] with
@@ -3461,6 +3499,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     size_str = str(image_out_size[1]) + ',' + str(image_out_size[0]) 
     cmd = ['swarp', image_ref, '-c', config, '-IMAGEOUT_NAME', image_out, 
            '-IMAGE_SIZE', size_str, '-GAIN_DEFAULT', str(gain),
+           '-RESAMPLE', resample,
            '-RESAMPLING_TYPE', resampling_type,
            '-PROJECTION_ERR', str(projection_err)]
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -3770,7 +3809,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
         # read in input image
         with fits.open(image) as hdulist:
-            data = hdulist[0].data
+            data = hdulist[0].data.astype(np.float32)
 
         # construct background image using [get_back]; in the case of
         # the reference image these data need to refer to the image
@@ -3780,7 +3819,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
         # similar as above, but now photutils' Background2D is used
         # inside [get_back]
-        if bkg_method==3:
+        elif bkg_method==3:
             data_bkg, data_bkg_std = get_back(data, data_objmask, log,
                                               use_photutils=True)
 
@@ -4188,6 +4227,8 @@ def main():
     parser.add_argument('--verbose', default=None, help='verbose')
     args = parser.parse_args()
     global_pars(args.telescope)
+    #global C
+    #C = importlib.import_module('Utils.Constants_'+telescope)
     if args.verbose is not None:
         verbose = args.verbose
     optimal_subtraction(args.new_fits, args.ref_fits, args.ref_fits_remap, args.sub, args.log, args.subpipe)
