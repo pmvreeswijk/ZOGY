@@ -998,9 +998,10 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
                                   disp=formats[key][2], array=data[key][:,i_ap])
                 columns.append(col)
         else:
-            col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
-                              disp=formats[key][2], array=data[key])
-            columns.append(col)
+            if key in data.names:
+                col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
+                                  disp=formats[key][2], array=data[key])
+                columns.append(col)
         
     # add [thumbnails]
     if thumbnail_data is not None and thumbnail_keys is not None:
@@ -2124,13 +2125,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
         data = data_ref_remap
         data_bkg = data_ref_bkg_remap
         data_bkg_std = data_ref_bkg_std_remap
-        data_mask = data_ref_mask_remap
+        if fits_mask is not None:
+            data_mask = data_ref_mask_remap
     else:
         data = data_wcs
     
     # fix pixels using [fixpix] function which requires data (remapped
     # image in case of reference image), mask and background
-    if data_mask is not None:
+    if fits_mask is not None:
         data = fixpix (data, data_mask, data_bkg, log, satlevel=satlevel)
         
     if C.timing: t2 = time.time()
@@ -3331,7 +3333,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         header_out[key] = header_ref[key]
     # delete some others
     for key in ['WCSAXES', 'NAXIS1', 'NAXIS2']:
-        del header_out[key]
+        if key in header_out: del header_out[key]
     # write to .head file
     with open(image_out.replace('.fits','.head'),'w') as newrefhdr:
         for card in header_out.cards:
