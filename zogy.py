@@ -93,7 +93,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             filehandler = logging.FileHandler('log', 'w+') #create log file
         filehandler.setFormatter(formatter) #add format to log file
         log.addHandler(filehandler) #link log file to logger
-        if C.verbose is True:
+        if C.verbose:
             streamhandler = logging.StreamHandler() #create print to screen logging
             streamhandler.setFormatter(formatter) #add format to screen logging
             log.addHandler(streamhandler) #link logger to screen logging
@@ -130,7 +130,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
     # in function [get_psf]
     if not new: base_new = base_ref
     if not ref: base_ref = base_new
-                
+    if new and ref: base_newref = base_new+'_'+base_ref
+    
     keywords = ['NAXIS2', 'NAXIS1', C.key_gain, C.key_ron, C.key_satlevel,
                 C.key_ra, C.key_dec, C.key_pixscale]
     if new:
@@ -203,7 +204,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         if not os.path.isfile(new_fits_wcs) or C.redo:
             if not C.skip_wcs:
                 result = run_wcs(new_fits, new_fits_wcs, ra_new, dec_new,
-                                 pixscale_new, xsize_new, ysize_new, log, 'new')
+                                 pixscale_new, xsize_new, ysize_new, log)
             else:
                 # just copy original image to _wcs.fits image
                 cmd = ['cp', new_fits, new_fits_wcs]
@@ -225,7 +226,15 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             result = run_sextractor(base_ref+'.fits', sexcat_ref, C.sex_cfg, C.sex_par_ref,
                                     pixscale_ref, log, fit_psf=False, return_fwhm=False,
                                     fraction=1.0, fwhm=fwhm_ref, save_bkg=True,
-                                    update_vignet=True, mask=ref_fits_mask)
+                                    update_vignet=False, mask=ref_fits_mask)
+            # N.B.: the update_vignet=False will lead to the VIGNET
+            # size to be as defined in the parameter file
+            # [C.sex_par_ref], which by default is set to the large
+            # value: (99,99). Instead of scaling it to the FWHM and
+            # [C.psf_radius]. This is to be able to compare different
+            # new images with different FWHMs to the same reference
+            # image without needing to run SExtractor and possibly
+            # also PSFEx again for the reference image.
             ldac2fits (sexcat_ref, sexcat_ref.replace('_ldac',''), log)
 
         # determine WCS solution of ref_fits
@@ -233,7 +242,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         if not os.path.isfile(ref_fits_wcs) or C.redo:
             if not C.skip_wcs:
                 result = run_wcs(ref_fits, ref_fits_wcs, ra_ref, dec_ref,
-                                 pixscale_ref, xsize_ref, ysize_ref, log, 'ref')
+                                 pixscale_ref, xsize_ref, ysize_ref, log)
             else:
                 # just copy original image to _wcs.fits image
                 cmd = ['cp', ref_fits, ref_fits_wcs]
@@ -275,12 +284,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
 
-        # these PSF images could be made for either [new_fits] or
-        # [ref_fits], but is a bit of a hassle, so don't bother for now
-        if C.display:
-            if new: data_psf_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-            if ref: data_psf_ref_full = np.ndarray((ysize_ref, xsize_ref), dtype='float32')
-        
+
     # determine cutouts
     if new:
         xsize = xsize_new
@@ -374,23 +378,23 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
                 plt.close()
 
             plot (x_fratio, y_fratio, (0,xsize_new,0,ysize_new), 'x (pixels)', 'y (pixels)',
-                  'xy.pdf', annotate=False)
+                  base_newref+'_xy.pdf', annotate=False)
             plot (dx, dy, (-1,1,-1,1), 'dx (pixels)', 'dy (pixels)',
-                  'dxdy.pdf')
+                  base_newref+'_dxdy.pdf')
             plot (x_fratio, dr, (0,xsize_new,0,1), 'x (pixels)', 'dr (pixels)',
-                  'drx.pdf', annotate=False)
+                  base_newref+'_drx.pdf', annotate=False)
             plot (y_fratio, dr, (0,ysize_new,0,1), 'y (pixels)', 'dr (pixels)',
-                  'dry.pdf', annotate=False)
+                  base_newref+'_dry.pdf', annotate=False)
             plot (x_fratio, dx, (0,xsize_new,-1,1), 'x (pixels)', 'dx (pixels)',
-                  'dxx.pdf')
+                  base_newref+'_dxx.pdf')
             plot (y_fratio, dy, (0,ysize_new,-1,1), 'y (pixels)', 'dy (pixels)',
-                  'dyy.pdf')
+                  base_newref+'_dyy.pdf')
             # plot dr as function of distance from the image center
             xcenter = xsize_new/2
             ycenter = ysize_new/2
             dist = np.sqrt((x_fratio-xcenter)**2 + (y_fratio-ycenter)**2)
-            plot (dist, dr, (0,np.amax(dist),0,1), 'distance from image center (pixels)', 'dr (pixels)', 
-                  'drdist.pdf')
+            plot (dist, dr, (0,np.amax(dist),0,1), 'distance from image center (pixels)',
+                  'dr (pixels)', base_newref+'_drdist.pdf')
 
         # initialize fakestar flux arrays if fake star(s) are being added
         # - this is to make a comparison plot of the input and output flux
@@ -638,16 +642,6 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
                                        bkg_ref[index_extract]) #/ gain_ref
 
-        if C.display:
-            # blow up psf_orig images to the size of the subimage, so
-            # they can be shown in detail across the full image
-            psf_new_temp = ndimage.zoom(psf_orig_new[nsub],
-                                        1.*xsize_fft/np.shape(psf_orig_new[nsub])[0])
-            psf_ref_temp = ndimage.zoom(psf_orig_ref[nsub],
-                                        1.*xsize_fft/np.shape(psf_orig_ref[nsub])[0])            
-            data_psf_new_full[index_subcut] = psf_new_temp[index_extract]
-            data_psf_ref_full[index_subcut] = psf_ref_temp[index_extract]
-            
         if C.display and (nsub==0 or nsub==nysubs-1 or nsub==nsubs/2 or
                         nsub==nsubs-nysubs or nsub==nsubs-1):
 
@@ -703,45 +697,43 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         
         # compute statistics on full Scorr image and show histogram
         if C.verbose:
-            mean_Scorr, std_Scorr, median_Scorr = clipped_stats(data_Scorr_full, clip_zeros=False,
-                                                                make_hist=C.make_plots,
-                                                                name_hist='Scorr_hist.pdf', log=log)
+            mean_Scorr, std_Scorr, median_Scorr = clipped_stats (data_Scorr_full, clip_zeros=False,
+                                                                 make_hist=C.make_plots,
+                                                                 name_hist=base_newref+'_Scorr_hist.pdf',
+                                                                 log=log)
             log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' +
                      str(median_Scorr) + ', ' + str(std_Scorr))
     
-        # write full new, ref, D and S images to fits
-        fits.writeto('new.fits', data_new_full, header_new_wcs, overwrite=True)
-        fits.writeto('ref.fits', data_ref_full, header_ref_wcs, overwrite=True)
-
+        # write full images to fits
         header_new.add_comment('Propagated header from new image (including WCS solution)')
-        fits.writeto('D.fits', data_D_full, header_new_wcs, overwrite=True)
-        fits.writeto('S.fits', data_S_full, header_new_wcs, overwrite=True)
-        fits.writeto('Scorr.fits', data_Scorr_full, header_new_wcs, overwrite=True)
-        fits.writeto('Scorr_neg.fits', np.negative(data_Scorr_full), header_new_wcs, overwrite=True)
-        fits.writeto('Fpsf.fits', data_Fpsf_full, header_new_wcs, overwrite=True)
-        fits.writeto('Fpsferr.fits', data_Fpsferr_full, header_new_wcs, overwrite=True)
-        if C.display:
-            fits.writeto('psf_new.fits', data_psf_new_full, overwrite=True)
-            fits.writeto('psf_ref.fits', data_psf_ref_full, overwrite=True)
+        fits.writeto(base_newref+'_D.fits', data_D_full, header_new_wcs, overwrite=True)
+        fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_new_wcs, overwrite=True)
+        fits.writeto(base_newref+'_Scorr_neg.fits', np.negative(data_Scorr_full), header_new_wcs, overwrite=True)
+        fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_new_wcs, overwrite=True)
+        fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_new_wcs, overwrite=True)
 
-        fits_mask_comb = base_new+'_'+base_ref+'_mask.fits'
+        if C.display:
+            fits.writeto('new.fits', data_new_full, header_new_wcs, overwrite=True)
+            fits.writeto('ref.fits', data_ref_full, header_ref_wcs, overwrite=True)
+            fits.writeto(base_newref+'_S.fits', data_S_full, header_new_wcs, overwrite=True)
+
+        fits_mask_comb = base_newref+'_mask.fits'
         if not os.path.isfile(fits_mask_comb):
             fits_mask_comb = None
         
         # find transients using function [find_transients]
-        transcat_pos = base_new+'_'+base_ref+'.transcat_pos'
-        result = get_trans ('Scorr.fits', transcat_pos, pixscale_new, 'green', log,
+        transcat_pos = base_newref+'.transcat_pos'
+        result = get_trans (base_newref+'_Scorr.fits', transcat_pos, pixscale_new, 'green', log,
                             mask=fits_mask_comb)
         # add PSF fluxes and errors 
         result = get_trans_flux (transcat_pos, data_Fpsf_full, data_Fpsferr_full)
 
-        transcat_neg = base_new+'_'+base_ref+'.transcat_neg'
-        result = get_trans ('Scorr_neg.fits', transcat_neg, pixscale_new, 'pink', log,
+        transcat_neg = base_newref+'.transcat_neg'
+        result = get_trans (base_newref+'_Scorr_neg.fits', transcat_neg, pixscale_new, 'pink', log,
                             mask=fits_mask_comb)
         result = get_trans_flux (transcat_neg, data_Fpsf_full, data_Fpsferr_full)
 
-    #if telescope=='meerlicht' or telescope=='blackgem':
-    if True:
+    if args.telescope=='meerlicht' or args.telescope=='blackgem':
         # using the function [format_cat], write the new, ref and
         # transient output catalogues with the desired format, where the
         # thumbnail images (new, ref, D and Scorr) around each transient
@@ -749,18 +741,22 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         # new catalogue
         if new:
             cat_new = base_new+'_wcs.sexcat_fluxopt'
-            result = format_cat (cat_new, cat_new+'_format', log, cat_type='new',
+            cat_new_out = base_new+'_wcs.cat'
+            result = format_cat (cat_new, cat_new_out, log, cat_type='new',
                                  header_toadd=header_new)
         # ref catalogue
         if ref:
             cat_ref = base_ref+'_wcs.sexcat_fluxopt'
-            result = format_cat (cat_ref, cat_ref+'_format', log, cat_type='ref',
+            cat_ref_out = base_ref+'_wcs.cat'
+            result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
                                  header_toadd=header_ref)
         # trans catalogue
         if new and ref:
+            cat_trans = base_newref+'.transcat_pos'
+            cat_trans_out = base_newref+'.cat_trans'
             thumbnail_data = [data_new_full, data_ref_full, data_D_full, data_Scorr_full]
             thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 'THUMBNAIL_SCORR']
-            result = format_cat (transcat_pos, transcat_pos+'_format', log, cat_type='trans',
+            result = format_cat (cat_trans, cat_trans_out, log, cat_type='trans',
                                  thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
                                  thumbnail_size=32, header_toadd=header_new)
 
@@ -792,7 +788,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             plt.xlabel('subimage number')
             plt.ylabel('true flux (e-)')
             plt.title('fake stars true input flux')
-            plt.savefig('fakestar_flux_input.pdf')
+            plt.savefig(base_newref+'_fakestar_flux_input.pdf')
             if C.show_plots: plt.show()
             plt.close()
 
@@ -804,7 +800,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             plt.xlabel('subimage number')
             plt.ylabel('(true flux - ZOGY flux) / true flux')
             plt.title('fake stars true input flux vs. ZOGY Fpsf output flux')
-            plt.savefig('fakestar_flux_input_vs_ZOGYoutput.pdf')
+            plt.savefig(base_newref+'_fakestar_flux_input_vs_ZOGYoutput.pdf')
             if C.show_plots: plt.show()
             plt.close()
 
@@ -814,7 +810,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             plt.xlabel('subimage number')
             plt.ylabel('S/N from Scorr')
             plt.title('signal-to-noise ratio from Scorr')
-            plt.savefig('fakestar_S2N_ZOGYoutput.pdf')
+            plt.savefig(base_newref+'_fakestar_S2N_ZOGYoutput.pdf')
             if C.show_plots: plt.show()
             plt.close()
         
@@ -2097,11 +2093,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
 
         data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
                                  [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
+        data_sex = drop_fields(data_sex, 'VIGNET')
 
         if os.path.isfile(C.cal_cat):
             data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
                                      [mag_opt, magerr_opt], usemask=False, asrecarray=True)
-            data_sex = drop_fields(data_sex, 'VIGNET')
 
         # write updated catalog to file
         fits.writeto(newcat, data_sex, overwrite=True)
@@ -2195,7 +2191,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
         limits = (1,2*np.amax(s2n_auto),-0.3,0.3)
         plot_scatter (s2n_auto, flux_diff, limits, class_star,
                       xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_AUTO) / FLUX_AUTO', 
-                      filename='fluxopt_vs_fluxauto_'+imtype+'.pdf',
+                      filename=base+'_fluxopt_vs_fluxauto.pdf',
                       title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
         if mypsffit:
@@ -2203,25 +2199,25 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
             flux_diff = (flux_mypsf - flux_auto) / flux_auto
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_MYPSF - FLUX_AUTO) / FLUX_AUTO', 
-                          filename='fluxmypsf_vs_fluxauto_'+imtype+'.pdf',
+                          filename=base+'_fluxmypsf_vs_fluxauto.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
         
             # compare flux_opt with flux_mypsf
             flux_diff = (flux_opt - flux_mypsf) / flux_mypsf
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_MYPSF) / FLUX_MYPSF', 
-                          filename='fluxopt_vs_fluxmypsf_'+imtype+'.pdf',
+                          filename=base+'_fluxopt_vs_fluxmypsf.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             # compare x_win and y_win with x_psf and y_psf
             dist_win_psf = np.sqrt((x_win-x_psf)**2+(y_win-y_psf)**2)
             plot_scatter (s2n_auto, dist_win_psf, (1,2*np.amax(s2n_auto),-2.,2.), class_star, 
                           xlabel='S/N (AUTO)', ylabel='distance XY_WIN vs. XY_MYPSF', 
-                          filename='xyposition_win_vs_mypsf_class_'+imtype+'.pdf',
+                          filename=base+'_xyposition_win_vs_mypsf_class.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
             plot_scatter (s2n_auto, dist_win_psf, (1,2*np.amax(s2n_auto),-2.,2.), fwhm_image, 
                           xlabel='S/N (AUTO)', ylabel='distance XY_WIN vs. XY_MYPSF', 
-                          filename='xyposition_win_vs_mypsf_fwhm_'+imtype+'.pdf',
+                          filename=base+'_xyposition_win_vs_mypsf_fwhm.pdf',
                           title='rainbow color coding follows FWHM_IMAGE')
             
         # compare flux_opt with flux_aper 2xFWHM
@@ -2233,20 +2229,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
             flux_diff = (flux_opt - flux_aper) / flux_aper
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
-                          filename='fluxopt_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
+                          filename=base+'_fluxopt_vs_fluxaper'+aper_str+'xFWHM.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             flux_diff = (flux_auto - flux_aper) / flux_aper
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_AUTO - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
-                          filename='fluxauto_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
+                          filename=base+'_fluxauto_vs_fluxaper'+aper_str+'xFWHM.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             if mypsffit:
                 flux_diff = (flux_mypsf - flux_aper) / flux_aper
                 plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel='S/N (AUTO)', ylabel='(FLUX_MYPSF - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
-                              filename='fluxmypsf_vs_fluxaper'+aper_str+'xFWHM_'+imtype+'.pdf',
+                              filename=base+'_fluxmypsf_vs_fluxaper'+aper_str+'xFWHM.pdf',
                               title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
             
 
@@ -2264,7 +2260,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
             flux_diff = (flux_sexpsf - flux_opt) / flux_opt
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_OPT) / FLUX_OPT', 
-                          filename='fluxsexpsf_vs_fluxopt_'+imtype+'.pdf',
+                          filename=base+'_fluxsexpsf_vs_fluxopt.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             if mypsffit:
@@ -2272,14 +2268,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, log,
                 flux_diff = (flux_sexpsf - flux_mypsf) / flux_mypsf
                 plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_MYPSF) / FLUX_MYPSF', 
-                              filename='fluxsexpsf_vs_fluxmypsf_'+imtype+'.pdf',
+                              filename=base+'_fluxsexpsf_vs_fluxmypsf.pdf',
                               title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
             
             # and compare auto with SExtractor psf
             flux_diff = (flux_sexpsf - flux_auto) / flux_auto
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_AUTO) / FLUX_AUTO', 
-                          filename='fluxsexpsf_vs_fluxauto_'+imtype+'.pdf',
+                          filename=base+'_fluxsexpsf_vs_fluxauto.pdf',
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
         
@@ -2343,13 +2339,16 @@ def get_apply_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
                 log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}'.
                          format(ra_cal[i], dec_cal[i], mag_cal[i], zp_array[mask_match]))
 
-            
-    
+    if imtype=='new':
+        base = base_new
+    else:
+        base = base_ref
+                
     # determine median zeropoint
     # use values with nonzero values and where flux_opt>0
     mask_nonzero = ((zp_array>0) & (mask_pos))
     zp_mean, zp_std, zp_median = clipped_stats(zp_array[mask_nonzero], make_hist=C.make_plots,
-                                               name_hist='zp_hist_'+imtype+'.pdf', log=log)
+                                               name_hist=base+'_zp_hist.pdf', log=log)
     if C.verbose:
         log.info('number of useful calibration stars in the field: {}'.
                  format(np.sum(mask_nonzero)))
@@ -2734,7 +2733,7 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
         #result = run_psfex(sexcat_ldac_zeroflags, C.psfex_cfg, psfexcat, log, fwhm, imtype)
         # something goes wrong when feeding the above zeroflags catalog to PSFEx
         # not sure what - too restrictive? For now, just supply the full ldac catalog.
-        result = run_psfex(sexcat_ldac, C.psfex_cfg, psfexcat, log)
+        result = run_psfex(sexcat_ldac, C.psfex_cfg, psfexcat, imtype, log)
 
 
     # If [C.dosex_psffit] parameter is set, then again run SExtractor,
@@ -2892,12 +2891,16 @@ def get_psf(image, ima_header, nsubs, imtype, fwhm, pixscale, log):
 
         if C.display and (nsub==0 or nsub==nysubs-1 or nsub==nsubs/2 or
                         nsub==nsubs-nysubs or nsub==nsubs-1):
-            fits.writeto('psf_ima_config_'+imtype+'_sub'+str(nsub)+'.fits', psf_ima_config, overwrite=True)
-            fits.writeto('psf_ima_resized_norm_'+imtype+'_sub'+str(nsub)+'.fits',
+            if imtype=='new':
+                base = base_new
+            else:
+                base = base_ref
+            fits.writeto(base+'_psf_ima_config_sub'+str(nsub)+'.fits', psf_ima_config, overwrite=True)
+            fits.writeto(base+'_psf_ima_resized_norm_sub'+str(nsub)+'.fits',
                          psf_ima_resized_norm.astype(np.float32), overwrite=True)
-            fits.writeto('psf_ima_center_'+imtype+'_sub'+str(nsub)+'.fits',
+            fits.writeto(base+'_psf_ima_center_sub'+str(nsub)+'.fits',
                          psf_ima_center[nsub].astype(np.float32), overwrite=True)            
-            fits.writeto('psf_ima_shift_'+imtype+'_sub'+str(nsub)+'.fits',
+            fits.writeto(base+'_psf_ima_shift_sub'+str(nsub)+'.fits',
                          psf_ima_shift[nsub].astype(np.float32), overwrite=True)            
 
 
@@ -3092,7 +3095,7 @@ def ds9_arrays(regions=None, **kwargs):
     
 ################################################################################
 
-def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, log, imtype):
+def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, log):
 
     if C.timing: t = time.time()
     log.info('Executing run_wcs ...')
@@ -3468,7 +3471,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elongation=False):
             plt.axis((0,20,y2,y1))
             plt.xlabel('ELONGATION (A/B)')
             plt.ylabel('MAG_AUTO')
-            plt.savefig('elongation.pdf')
+            plt.savefig(cat_ldac+'_elongation.pdf')
             if C.show_plots: plt.show()
             plt.close()
             
@@ -3490,9 +3493,7 @@ def update_vignet_size (sex_par_in, sex_par_out, log):
     # in case [C.psf_sampling] is set to zero, scale the size of the
     # VIGNET output in the output catalog with 2*[C.psf_radius]*[fwhm]
     # where fwhm is taken to be the largest of global parameters
-    # [fwhm_new] and [fwhm_ref] - this is to ensure that the size of
-    # the PSF stamp images produced are of the same size, avoiding an
-    # artificial ring around bright stars
+    # [fwhm_new] and [fwhm_ref]
     if C.psf_sampling == 0.:
         fwhm_vignet = np.amax([fwhm_new, fwhm_ref])
         size_vignet = np.int(np.ceil(2.*C.psf_radius*fwhm_vignet))
@@ -3687,14 +3688,14 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, log):
+def run_psfex(cat_in, file_config, cat_out, imtype, log):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
        [file_config]"""
 
     if C.timing: t = time.time()
-
+        
     # use function [get_samp_PSF_config_size] to determine [psf_samp]
     # and [psf_size_config] required to run PSFEx
     psf_samp, psf_size_config = get_samp_PSF_config_size()
@@ -3713,17 +3714,36 @@ def run_psfex(cat_in, file_config, cat_out, log):
     #maxellip = (elongation+3.*elongation_std-1)/(elongation+3.*elongation_std+1)
     #maxellip_str= str(np.amin([maxellip, 1.]))
     #print 'maxellip_str', maxellip_str
+
+    # Need to check whether the VIGNET size from the SExtractor run is
+    # sufficient large compared to [psf_samp] and [psf_size_config].
     
     # run psfex from the unix command line
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp)]
     #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
+
+    if C.make_plots:
+
+        if imtype=='new':
+            base = base_new
+        else:
+            base = base_ref
+            
+        cmd += ['-CHECKPLOT_DEV', 'PDF',
+                '-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, CHI2, RESIDUALS',
+                '-CHECKPLOT_NAME', base+'_psfex_fwhm,'+base+'_psfex_ellip,'+base+'_psfex_counts,'+
+                base+'_psfex_countfrac,'+base+'_psfex_chi2,'+base+'_psfex_resi']
+        cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,BASIS',
+                '-CHECKIMAGE_NAME', base+'_chi,'+base+'_psfex_proto,'+base+'_psfex_samp,'+
+                base+'_psfex_resi,'+base+'_psfex_snap,'+base+'_psfex_basis']
+
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
-    log.info(stdoutstr) 
-    log.info(stderrstr)  
+    log.info(stdoutstr)
+    log.info(stderrstr)
 
     if C.timing:
         log.info('wall-time spent in run_psfex ' + str(time.time()-t))
@@ -4068,18 +4088,21 @@ def main():
     parser.add_argument('--telescope', default=None, help='telescope')
     parser.add_argument('--log', default=None, help='help')
     parser.add_argument('--verbose', default=None, help='verbose')
-    args = parser.parse_args()
-
+    
     #global_pars(args.telescope)
     # replaced [global_pars] function with importing
     # Utils/Constants_[telescope} file as C; all former global
     # parameters are now referred to as C.[parameter name]
-    global C
+    global C, args
+    args = parser.parse_args()
+
     if args.telescope is not None:
         C = importlib.import_module('Utils.Constants_'+args.telescope)
     else:
         C = importlib.import_module('Utils.Constants')
 
+    # if verbosity is provided through args.verbose, it will overwrite
+    # the corresponding setting in Constants (C.verbose)
     if args.verbose is not None:
         C.verbose = args.verbose
 

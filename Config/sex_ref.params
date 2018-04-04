@@ -30,3 +30,4 @@ FLUX_PETRO             #   Flux within a Petrosian-like elliptical aperture  [co
 FLUXERR_PETRO          #   RMS error for PETROsian flux                      [count]
 PETRO_RADIUS           #   Petrosian apertures in units of A or B           
 SNR_WIN                # * Signal-to-noise ratio in a Gaussian window        
+VIGNET(99,99)
