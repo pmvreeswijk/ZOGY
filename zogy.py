@@ -147,6 +147,21 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             header_ref = hdulist[0].header
         ysize_ref, xsize_ref, gain_ref, readnoise_ref, satlevel_ref, ra_ref, dec_ref, pixscale_ref = read_header(header_ref, keywords, log)
 
+
+    # function to run SExtractor on fraction of the image, applied
+    # below to new and/or ref image
+    def sex_fraction (base, sexcat, pixscale, imtype, header, log):
+        fwhm, fwhm_std = run_sextractor(base+'.fits', sexcat, C.sex_cfg, C.sex_par,
+                                        pixscale, log, fit_psf=False, return_fwhm=True,
+                                        fraction=C.fwhm_imafrac, fwhm=5.0, save_bkg=False,
+                                        update_vignet=False)
+        log.info('fwhm_{}: {:.3f} +- {:.3f}'.format(imtype, fwhm, fwhm_std))
+        # if SEEING keyword exists, report its value in the log
+        if 'SEEING' in header:
+            log.info('fwhm from header: ' + str(header['SEEING']))
+
+        return fwhm, fwhm_std
+            
     # if [new_fits] is not defined, [fwhm_new]=None ensures that code
     # does not crash in function [update_vignet_size] which uses both
     # [fwhm_new] and [fwhm_max]
@@ -157,104 +172,86 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         # continuing, as both [fwhm_new] and [fwhm_ref] are required
         # to determine the VIGNET size set in the full SExtractor run
         sexcat_new = base_new+'.sexcat_ldac'
-        fwhm_new, fwhm_std_new = run_sextractor(base_new+'.fits', sexcat_new, C.sex_cfg, C.sex_par,
-                                                pixscale_new, log, fit_psf=False, return_fwhm=True,
-                                                fraction=C.fwhm_imafrac, fwhm=5.0, save_bkg=False,
-                                                update_vignet=False)
-        log.info('fwhm_new: {:.3f} +- {:.3f}'.format(fwhm_new, fwhm_std_new))
-        # if SEEING keyword exists, report its value in the log
-        if 'SEEING' in header_new:
-            log.info('fwhm from header: ' + str(header_new['SEEING']))
+        fwhm_new, fwhm_std_new = sex_fraction(base_new, sexcat_new, pixscale_new, 'new',
+                                              header_new, log)
 
     fwhm_ref = None
     if ref:
         # do the same for the reference image
         sexcat_ref = base_ref+'.sexcat_ldac'
-        fwhm_ref, fwhm_std_ref = run_sextractor(base_ref+'.fits', sexcat_ref, C.sex_cfg, C.sex_par,
-                                                pixscale_ref, log, fit_psf=False, return_fwhm=True,
-                                                fraction=C.fwhm_imafrac, fwhm=5.0, save_bkg=False,
-                                                update_vignet=False)
-        log.info('fwhm_ref: {:.3f} +- {:.3f}'.format(fwhm_ref, fwhm_std_ref))
-        # if SEEING keyword exists, report its value in the log
-        if 'SEEING' in header_ref:
-            log.info('fwhm from header: ' + str(header_ref['SEEING']))
+        fwhm_ref, fwhm_std_ref = sex_fraction(base_ref, sexcat_ref, pixscale_ref, 'ref',
+                                              header_ref, log)
 
-            
+    # function to run SExtractor on full image, followed by Astrometry.net
+    # to find the WCS solution, applied below to new and/or ref image
+    def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet,
+                 fits_mask, ra, dec, xsize, ysize, log):
+
+        # run SExtractor on full image
+        if not os.path.isfile(sexcat) or C.redo:
+            result = run_sextractor(base+'.fits', sexcat, C.sex_cfg, sex_params,
+                                    pixscale, log, fit_psf=False, return_fwhm=False,
+                                    fraction=1.0, fwhm=fwhm, save_bkg=True,
+                                    update_vignet=update_vignet, mask=fits_mask)
+            # copy the LDAC binary fits table output from SExtractor (with
+            # '_ldac' in the name) to a normal binary fits table;
+            # Astrometry.net needs the latter, but PSFEx needs the former,
+            # so keep both
+            ldac2fits (sexcat, sexcat.replace('_ldac',''), log)
+
+        # determine WCS solution of new_fits
+        fits_wcs = base+'_wcs.fits'
+        if not os.path.isfile(fits_wcs) or C.redo:
+            if not C.skip_wcs:
+                result = run_wcs(base+'.fits', fits_wcs, ra, dec, pixscale, xsize, ysize, log)
+            else:
+                # just copy original image to _wcs.fits image
+                cmd = ['cp', base+'.fits', fits_wcs]
+                result = subprocess.call(cmd)               
+                # same for the SExtractor catalog
+                cmd = ['cp', base+'.sexcat', base+'_wcs.sexcat']
+                result = subprocess.call(cmd)                
+
+        # read the header including WCS info
+        with fits.open(fits_wcs) as hdulist:
+            header_wcs = hdulist[0].header
+        # if .wcs header file does not exist (e.g. if
+        # [C.skip_wcs]==True), then create it here as it is used in
+        # various places
+        wcsfile = base+'.wcs'
+        if not os.path.isfile(wcsfile):
+            hdu = fits.PrimaryHDU(header=header_wcs)
+            hdu.writeto(wcsfile)
+
+        return header_wcs
+
     if new:
         # now run SExtractor on the full image with the above seeing
         # estimate, saving the background images
         # if mask is present, provide it to SExtractor as the flag image
         new_fits_mask = base_new+'_mask.fits'
         if not os.path.isfile(new_fits_mask): new_fits_mask = None
-
-        if not os.path.isfile(sexcat_new) or C.redo:
-
-            result = run_sextractor(base_new+'.fits', sexcat_new, C.sex_cfg, C.sex_par,
-                                    pixscale_new, log, fit_psf=False, return_fwhm=False,
-                                    fraction=1.0, fwhm=fwhm_new, save_bkg=True,
-                                    update_vignet=True, mask=new_fits_mask)
-            # copy the LDAC binary fits table output from SExtractor (with
-            # '_ldac' in the name) to a normal binary fits table;
-            # Astrometry.net needs the latter, but PSFEx needs the former,
-            # so keep both
-            ldac2fits (sexcat_new, sexcat_new.replace('_ldac',''), log)
-
-        # determine WCS solution of new_fits
-        new_fits_wcs = base_new+'_wcs.fits'
-        if not os.path.isfile(new_fits_wcs) or C.redo:
-            if not C.skip_wcs:
-                result = run_wcs(new_fits, new_fits_wcs, ra_new, dec_new,
-                                 pixscale_new, xsize_new, ysize_new, log)
-            else:
-                # just copy original image to _wcs.fits image
-                cmd = ['cp', new_fits, new_fits_wcs]
-                result = subprocess.call(cmd)               
-                # same for the SExtractor catalog
-                cmd = ['cp', base_new+'.sexcat', base_new+'_wcs.sexcat']
-                result = subprocess.call(cmd)                
-
-        # read the header including WCS info
-        with fits.open(new_fits_wcs) as hdulist:
-            header_new_wcs = hdulist[0].header
+        header_new_wcs = sex_wcs(base_new, sexcat_new, C.sex_par, pixscale_new, fwhm_new, True,
+                                 new_fits_mask, ra_new, dec_new, xsize_new, ysize_new, log)
 
     if ref:
         # same steps for the reference image
         ref_fits_mask = base_ref+'_mask.fits'
         if not os.path.isfile(ref_fits_mask): ref_fits_mask = None   
+        header_ref_wcs = sex_wcs(base_ref, sexcat_ref, C.sex_par_ref, pixscale_ref, fwhm_ref, False,
+                                 ref_fits_mask, ra_ref, dec_ref, xsize_ref, ysize_ref, log)
+        # N.B.: two differences with new image: SExtractor parameter
+        # file (new: C.sex_ar, ref: C.sex_par_ref) and update_vignet
+        # boolean (new: True, ref: False). For the ref image, this
+        # will lead to the VIGNET size to be as defined in the
+        # parameter file [C.sex_par_ref], which by default is set to
+        # the large value: (99,99). Instead of scaling it to the FWHM
+        # and [C.psf_radius]. This is to be able to compare different
+        # new images with different FWHMs to the same reference image
+        # without needing to run SExtractor and possibly also PSFEx
+        # again for the reference image.
 
-        if not os.path.isfile(sexcat_ref) or C.redo:
-            result = run_sextractor(base_ref+'.fits', sexcat_ref, C.sex_cfg, C.sex_par_ref,
-                                    pixscale_ref, log, fit_psf=False, return_fwhm=False,
-                                    fraction=1.0, fwhm=fwhm_ref, save_bkg=True,
-                                    update_vignet=False, mask=ref_fits_mask)
-            # N.B.: the update_vignet=False will lead to the VIGNET
-            # size to be as defined in the parameter file
-            # [C.sex_par_ref], which by default is set to the large
-            # value: (99,99). Instead of scaling it to the FWHM and
-            # [C.psf_radius]. This is to be able to compare different
-            # new images with different FWHMs to the same reference
-            # image without needing to run SExtractor and possibly
-            # also PSFEx again for the reference image.
-            ldac2fits (sexcat_ref, sexcat_ref.replace('_ldac',''), log)
-
-        # determine WCS solution of ref_fits
-        ref_fits_wcs = base_ref+'_wcs.fits'
-        if not os.path.isfile(ref_fits_wcs) or C.redo:
-            if not C.skip_wcs:
-                result = run_wcs(ref_fits, ref_fits_wcs, ra_ref, dec_ref,
-                                 pixscale_ref, xsize_ref, ysize_ref, log)
-            else:
-                # just copy original image to _wcs.fits image
-                cmd = ['cp', ref_fits, ref_fits_wcs]
-                result = subprocess.call(cmd)                
-                # same for the SExtractor catalog
-                cmd = ['cp', base_ref+'.sexcat', base_ref+'_wcs.sexcat']
-                result = subprocess.call(cmd)                
-
-        # read the header including WCS info
-        with fits.open(ref_fits_wcs) as hdulist:
-            header_ref_wcs = hdulist[0].header
-
+            
     # initialise [ref_fits_remap] here to None; this is used below in
     # call to [prep_image_subtraction] if either [new_fits] or
     # [ref_fits] are not defined
