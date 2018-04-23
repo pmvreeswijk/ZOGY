@@ -24,8 +24,8 @@ dxdy_local = False       # determine dx and dy from subimage (T) or full frame (
 transient_nsigma = 6     # required significance in Scorr for transient detection
 
 # optional fake stars
-nfakestars = 1           # number of fake stars to be added to each subimage
-                         # if 1: star will be at the center, if > 1: randomly distributed
+nfakestars = 1           # number of fake stars to be added to each subimage; first star
+                         # is at the center, the rest (if any) is randomly distributed
 fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars    
 
 # switch on/off different functions
@@ -89,9 +89,9 @@ psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
 astronet_tweak_order = 3
 
 # Photometric calibration
-obs_lat = -32.38722      # degrees (North)
-obs_long = 20.81667      # degrees (East)
-obs_height = 1798.       # meters above sealevel
+obs_lat = -32.38722      # observatory latitude in degrees (North)
+obs_long = 20.81667      # observatory longitude in degrees (East)
+obs_height = 1798.       # observatory height in meters above sealevel
 # these [ext_coeff] are mean extinction estimates for Sutherland in
 # the MeerLICHT filters:
 ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}

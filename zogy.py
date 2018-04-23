@@ -402,10 +402,13 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         # initialize fakestar flux arrays if fake star(s) are being added
         # - this is to make a comparison plot of the input and output flux
         if C.nfakestars>0:
-            fakestar_flux_input = np.ndarray(nsubs)
-            fakestar_flux_output = np.ndarray(nsubs)
-            fakestar_fluxerr_output = np.ndarray(nsubs)        
-            fakestar_s2n_output = np.ndarray(nsubs)
+            nfake = nsubs * C.nfakestars
+            fakestar_xpos = np.ndarray(nfake, dtype=int)
+            fakestar_ypos = np.ndarray(nfake, dtype=int)
+            fakestar_flux_input = np.ndarray(nfake)
+            fakestar_flux_output = np.ndarray(nfake)
+            fakestar_fluxerr_output = np.ndarray(nfake)        
+            fakestar_s2n_output = np.ndarray(nfake)
         
         start_time2 = os.times()
             
@@ -452,77 +455,15 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
         # alternative:
         #var_new = data_new[nsub] - bkg_new + std_new**2
         #var_ref = data_ref[nsub] - bkg_ref + std_ref**2
-        
-        if C.nfakestars>0:
-            # add fake star(s) to new image
-            if C.nfakestars==1:
-                # place it at the center of the new subimage
-                xpos = xsize_fft/2
-                ypos = ysize_fft/2
-                psf_hsize = psf_size_new/2
-                index_temp = [slice(ypos-psf_hsize, ypos+psf_hsize+1),
-                              slice(xpos-psf_hsize, xpos+psf_hsize+1)]
-                # Use function [flux_optimal_s2n] to estimate flux
-                # needed for star with S/N of [C.fakestar_s2n].  This
-                # S/N estimate includes the Poisson noise from any
-                # object that happens to be present in the image at
-                # the fakestar position.  If this should be just the
-                # background instead, replace data_new[nsub] with
-                # bkg_new.
-                fakestar_flux = flux_optimal_s2n (psf_orig_new[nsub], data_new[nsub][index_temp],
-                                                  readnoise_new, C.fakestar_s2n, fwhm=fwhm_new)
-                if C.verbose:
-                    log.info('fakestar_flux: {} e-'.format(fakestar_flux))
-                # multiply psf_orig_new to contain fakestar_flux
-                psf_fakestar = psf_orig_new[nsub] * fakestar_flux
-                # add fake star to new image
-                data_new[nsub][index_temp] += psf_fakestar
-                # and variance image
-                var_new[index_temp] += psf_fakestar
-                
-                if C.verbose:
-                    fakestar_data = psf_fakestar + bkg_new[index_temp]
-                    log.info('fakestar_flux: {} e-'.format(fakestar_flux))
-                    flux, fluxerr, mask = flux_optimal(psf_orig_new[nsub],
-                                                       fakestar_data, bkg_new[index_temp],
-                                                       std_new[index_temp], readnoise_new, log=log)
-                    log.info('recovered flux: {}, fluxerr: {}, S/N: {}'.format(flux, fluxerr, flux/fluxerr))
-                
-                    # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
-                    s2n = get_s2n_ZO(psf_orig_new[nsub], fakestar_data, bkg_new[index_temp], readnoise_new)
-                    log.info('S/N check (Eq. 51 Zackay & Ofek 2017): {}'.format(s2n))
-                    
-                    # check S/N with Eqs. from Naylor (1998)
-                    flux, fluxerr = get_optflux_Naylor(psf_orig_new[nsub], fakestar_data,
-                                                       bkg_new[index_temp],
-                                                       fakestar_data+readnoise_new**2)
-                    log.info('Naylor recovered flux: {}, fluxerr: {}, S/N: {}'.format(flux, fluxerr, flux/fluxerr))
-            
 
-            else:
-                # place stars in random positions across the subimage,
-                # keeping C.subimage_border + psf_size_new/2 pixels off
-                # each edge
-                edge = C.subimage_border + psf_size_new/2 + 1
-                xpos_rand = np.random.rand(C.nfakestars)*(xsize_fft-2*edge) + edge
-                ypos_rand = np.random.rand(C.nfakestars)*(ysize_fft-2*edge) + edge
-                for nstar in range(C.nfakestars):
-                    xpos = np.int(xpos_rand[nstar])
-                    ypos = np.int(ypos_rand[nstar])
-                    psf_hsize = psf_size_new/2
-                    index_temp = [slice(ypos-psf_hsize, ypos+psf_hsize+1),
-                                  slice(xpos-psf_hsize, xpos+psf_hsize+1)]
-                    # calculate flux needed on top of image itself:
-                    fakestar_flux = flux_optimal_s2n (psf_orig_new[nsub], data_new[nsub][index_temp],
-                                                      readnoise_new, C.fakestar_s2n, fwhm=fwhm_new)
-                    psf_fakestar = psf_orig_new[nsub] * fakestar_flux
-                    data_new[nsub][index_temp] += psf_fakestar                
-                    var_new[index_temp] += psf_fakestar
-                
-            # for plot of input vs. output flux; in case C.nfakestars >
-            # 1, only the flux from the last one is recorded
-            fakestar_flux_input[nsub] = fakestar_flux
-                    
+        if C.nfakestars>0:
+            index_fake = [slice(nsub*C.nfakestars, (nsub+1)*C.nfakestars)]
+            fakestar_xpos[index_fake], fakestar_ypos[index_fake], fakestar_flux_input[index_fake]=(
+                add_fakestars (psf=psf_orig_new[nsub], data=data_new[nsub], var=var_new,
+                               bkg=bkg_new, std=std_new, readnoise=readnoise_new, fwhm=fwhm_new,
+                               log=log)
+            )
+            
         # subtract the background
         data_new[nsub] -= bkg_new
         data_ref[nsub] -= bkg_ref
@@ -624,16 +565,18 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             mean_S, std_S, median_S = clipped_stats(data_S, clip_zeros=False, log=log)
             log.info('mean_S, median_S, std_S: ' + str(mean_S) + ', ' + str(median_S) + ', ' + str(std_S))
             
-        # if fake star(s) was (were) added to the subimages, compare
-        # the input flux (the same for the entire subimage) with the
-        # PSF flux determined by run_ZOGY. If multiple stars were
-        # added, then this comparison is done for the last of them.
+        # if one or more fake stars were added to the subimages,
+        # compare the input flux with the PSF flux determined by
+        # run_ZOGY.
         if C.nfakestars>0:
-            fakestar_flux_output[nsub] = data_Fpsf[xpos, ypos]
-            fakestar_fluxerr_output[nsub] = data_Fpsferr[xpos, ypos]
+            index_fake = [slice(nsub*C.nfakestars, (nsub+1)*C.nfakestars)]
+            xpos_fake = fakestar_xpos[index_fake]
+            ypos_fake = fakestar_ypos[index_fake]
+            fakestar_flux_output[index_fake] = data_Fpsf[ypos_fake, xpos_fake]
+            fakestar_fluxerr_output[index_fake] = data_Fpsferr[ypos_fake, xpos_fake]
             # and S/N from Scorr
-            fakestar_s2n_output[nsub] = data_Scorr[xpos, ypos]
-            
+            fakestar_s2n_output[index_fake] = data_Scorr[ypos_fake, xpos_fake]
+                
         # put sub images without the borders into output frames
         #subcut = cuts_ima[nsub]
         index_subcut = [slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])]
@@ -707,11 +650,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
     # call above function [zogy_subloop] with pool.map
     # only if both [new_fits] and [ref_fits] are defined
     if new and ref:
-        pool = ThreadPool(1)
-        lock = Lock()
-        pool.map(zogy_subloop, range(nsubs))
-        pool.close()
-        pool.join()
+        if True:
+            pool = ThreadPool(1)
+            lock = Lock()
+            pool.map(zogy_subloop, range(nsubs))
+            pool.close()
+            pool.join()
         
         # compute statistics on full Scorr image and show histogram
         if C.verbose:
@@ -807,40 +751,48 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
     log.info("Elapsed wall time in {0}:  {1:.3f} sec".format("total", dt_wall))
 
     if new and ref:
-        # make comparison plot of flux input and output
-        if C.make_plots and C.nfakestars>0:
-        
-            x = np.arange(nsubs)+1
-            y = fakestar_flux_input
-            plt.plot(x, y, 'ko')
-            plt.xlabel('subimage number')
-            plt.ylabel('true flux (e-)')
-            plt.title('fake stars true input flux')
-            plt.savefig(base_newref+'_fakestar_flux_input.pdf')
-            if C.show_plots: plt.show()
-            plt.close()
+        if C.nfakestars>0:
 
-            #plt.axis((0,nsubs,0,2))
-            x = np.arange(nsubs)+1
-            y = (fakestar_flux_input - fakestar_flux_output) / fakestar_flux_input
-            yerr = fakestar_fluxerr_output / fakestar_flux_input
-            plt.errorbar(x, y, yerr=yerr, fmt='ko')
-            plt.xlabel('subimage number')
-            plt.ylabel('(true flux - ZOGY flux) / true flux')
-            plt.title('fake stars true input flux vs. ZOGY Fpsf output flux')
-            plt.savefig(base_newref+'_fakestar_flux_input_vs_ZOGYoutput.pdf')
-            if C.show_plots: plt.show()
-            plt.close()
+            # compare input and output flux
+            fluxdiff = (fakestar_flux_input - fakestar_flux_output) / fakestar_flux_input
+            fluxdiff_err = fakestar_fluxerr_output / fakestar_flux_input
+            fd_mean, fd_std, fd_median = (clipped_stats(fluxdiff, clip_zeros=False, log=log))
+            log.info('fluxdiff mean: {}, std: {}, median: {}'.format(fd_mean, fd_std, fd_median))
+            fderr_mean, fderr_std, fderr_median = (clipped_stats(fluxdiff_err, clip_zeros=False, log=log))
+            log.info('fluxdiff error mean: {}, median: {}'.format(fderr_mean, fderr_median)) 
 
-            # same for S/N as determined by Scorr
-            y = fakestar_s2n_output
-            plt.plot(x, y, 'ko')
-            plt.xlabel('subimage number')
-            plt.ylabel('S/N from Scorr')
-            plt.title('signal-to-noise ratio from Scorr')
-            plt.savefig(base_newref+'_fakestar_S2N_ZOGYoutput.pdf')
-            if C.show_plots: plt.show()
-            plt.close()
+            # make comparison plot of flux input and output
+            if C.make_plots:
+            
+                x = np.arange(nsubs*C.nfakestars)+1
+                y = fakestar_flux_input
+                plt.plot(x, y, 'ko')
+                plt.xlabel('fakestar number (total: nsubs x C.nfakestars)')
+                plt.ylabel('true flux (e-)')
+                plt.title('fake stars true input flux')
+                plt.savefig(base_newref+'_fakestar_flux_input.pdf')
+                if C.show_plots: plt.show()
+                plt.close()
+
+                #plt.axis((0,nsubs,0,2))
+                plt.errorbar(x, fluxdiff, yerr=fluxdiff_err, fmt='ko')
+                plt.xlabel('fakestar number (total: nsubs x C.nfakestars)')
+                plt.ylabel('(true flux - ZOGY flux) / true flux')
+                plt.title('true flux vs. ZOGY Fpsf; mean:{:.3f}, std:{:.3f}, data err:{:.3f}'
+                          .format(fd_mean, fd_std, fderr_mean))
+                plt.savefig(base_newref+'_fakestar_flux_input_vs_ZOGYoutput.pdf')
+                if C.show_plots: plt.show()
+                plt.close()
+
+                # same for S/N as determined by Scorr
+                y = fakestar_s2n_output
+                plt.plot(x, y, 'ko')
+                plt.xlabel('fakestar number (total: nsubs x C.nfakestars)')
+                plt.ylabel('S/N from Scorr')
+                plt.title('fakestars signal-to-noise ratio from Scorr')
+                plt.savefig(base_newref+'_fakestar_S2N_ZOGYoutput.pdf')
+                if C.show_plots: plt.show()
+                plt.close()
         
         # and display
         if C.display:
@@ -858,6 +810,83 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
             result = subprocess.call(cmd)
 
 
+################################################################################
+
+def add_fakestars (psf, data, var, bkg, std, readnoise, fwhm, log):
+
+    """Function to add fakestars to the [data] and [var] images (these two
+    arrays are updated in place) with the PSF image as defined in
+    [psf]. The number of stars added is set by [C.nfakestars]; the
+    first star is added at the center of the (sub)images [data] and
+    [var], while any additional stars are randomly distributed across
+    the images. The S/N is determined by [C.fakestar_s2n] and
+    [readnoise]; the inputs [bkg], [std] and [fwhm] are only used to
+    double-check the S/N calculation performed by function
+    [flux_optimal_s2n] with two different functions [get_s2n_ZO] and
+    [get_optflux_Naylor]. The size of the image regions that are
+    updated is half that of the global parameter [psf_size_new].
+
+    The function returns lists that contain: 1) the x coordinates, 2)
+    the y coordinates and 3) the fluxes of the fake stars that were
+    added.
+
+    """
+
+    ysize_fft = C.subimage_size + 2*C.subimage_border
+    xsize_fft = C.subimage_size + 2*C.subimage_border
+    psf_hsize = psf_size_new/2
+    
+    # place stars in random positions across the image,
+    # keeping C.subimage_border + psf_size_new/2 pixels off
+    # each edge
+    edge = C.subimage_border + psf_size_new/2 + 1
+    xpos = (np.random.rand(C.nfakestars)*(xsize_fft-2*edge) + edge).astype(int)
+    ypos = (np.random.rand(C.nfakestars)*(ysize_fft-2*edge) + edge).astype(int)
+    # place first star at the center of the image
+    xpos[0] = xsize_fft/2
+    ypos[0] = ysize_fft/2
+    flux_fakestar = np.zeros(C.nfakestars)
+    
+    for nstar in range(C.nfakestars):
+            
+        index_temp = [slice(ypos[nstar]-psf_hsize, ypos[nstar]+psf_hsize+1),
+                      slice(xpos[nstar]-psf_hsize, xpos[nstar]+psf_hsize+1)]
+
+        # Use function [flux_optimal_s2n] to estimate flux
+        # needed for star with S/N of [C.fakestar_s2n].  This
+        # S/N estimate includes the Poisson noise from any
+        # object that happens to be present in the image at
+        # the fakestar position.  If this should be just the
+        # background instead, replace data_new[nsub] with
+        # bkg_new.
+        flux_fakestar[nstar] = flux_optimal_s2n (psf, data[index_temp], readnoise,
+                                                 C.fakestar_s2n, fwhm=fwhm)
+        # multiply psf_orig_new to contain fakestar_flux
+        psf_fakestar = psf * flux_fakestar[nstar]
+        # add fake star to new image
+        data[index_temp] += psf_fakestar
+        # and variance image
+        var[index_temp] += psf_fakestar
+
+        if C.verbose:
+            data_fakestar = psf_fakestar + bkg[index_temp]
+            log.info('fakestar flux: {} e-'.format(flux_fakestar[nstar]))
+            flux, fluxerr, mask = flux_optimal(psf, data_fakestar, bkg[index_temp],
+                                               std[index_temp], readnoise, log=log)
+            log.info('recovered flux: {}, fluxerr: {}, S/N: {}'.format(flux, fluxerr, flux/fluxerr))
+            
+            # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
+            s2n = get_s2n_ZO(psf, data_fakestar, bkg[index_temp], readnoise)
+            log.info('S/N check (Eq. 51 Zackay & Ofek 2017): {}'.format(s2n))
+            
+            # check S/N with Eqs. from Naylor (1998)
+            flux, fluxerr = get_optflux_Naylor(psf, data_fakestar, bkg[index_temp],
+                                               data_fakestar+readnoise**2)
+            log.info('Naylor recovered flux: {}, fluxerr: {}, S/N: {}'.format(flux, fluxerr, flux/fluxerr))
+
+    return xpos, ypos, flux_fakestar
+            
+            
 ################################################################################
 
 def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None):
