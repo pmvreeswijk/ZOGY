@@ -52,7 +52,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 ################################################################################
 
 #@profile
-def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
+def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, verbose=None):
 
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -78,6 +78,18 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
     integration into pipeline for MeerLICHT (ptrker004@myuct.ac.za).
 
     """
+
+    global C
+
+    if telescope is not None:
+        C = importlib.import_module('Utils.Constants_'+telescope)
+    else:
+        C = importlib.import_module('Utils.Constants')
+
+    # if verbosity is provided through args.verbose, it will overwrite
+    # the corresponding setting in Constants (C.verbose)
+    if verbose is not None:
+        C.verbose = verbose
 
     start_time1 = os.times()
     
@@ -739,7 +751,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
                             mask=fits_mask_comb)
         result = get_trans_flux (transcat_neg, data_Fpsf_full, data_Fpsferr_full)
 
-    if args.telescope=='meerlicht' or args.telescope=='blackgem':
+    if telescope=='meerlicht' or telescope=='blackgem':
         # using the function [format_cat], write the new, ref and
         # transient output catalogues with the desired format, where the
         # thumbnail images (new, ref, D and Scorr) around each transient
@@ -4178,7 +4190,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         # try setting edge pixels to zero to avoid source detections
         # on the edge; this should really be done in BGreduce instead
         # where this extra read and write can probably be avoided
-        if args.telescope=='meerlicht' or args.telescope=='blackgem':
+        if telescope=='meerlicht' or telescope=='blackgem':
             # replace edge pixel values with zero
             data, header = read_hdulist (image, ext_data=0, ext_header=0)
             data_mask = read_hdulist (mask, ext_data=0)
@@ -4675,20 +4687,9 @@ def main():
     # replaced [global_pars] function with importing
     # Utils/Constants_[telescope} file as C; all former global
     # parameters are now referred to as C.[parameter name]
-    global C, args
     args = parser.parse_args()
 
-    if args.telescope is not None:
-        C = importlib.import_module('Utils.Constants_'+args.telescope)
-    else:
-        C = importlib.import_module('Utils.Constants')
-
-    # if verbosity is provided through args.verbose, it will overwrite
-    # the corresponding setting in Constants (C.verbose)
-    if args.verbose is not None:
-        C.verbose = args.verbose
-
-    optimal_subtraction(args.new_fits, args.ref_fits, args.log)
+    optimal_subtraction(args.new_fits, args.ref_fits, args.telescope, args.log, args.verbose)
 
 if __name__ == "__main__":
     main()
