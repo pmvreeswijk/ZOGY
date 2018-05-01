@@ -52,7 +52,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 ################################################################################
 
 #@profile
-def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
+def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, verbose=None):
 
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -78,6 +78,18 @@ def optimal_subtraction(new_fits=None, ref_fits=None, log=None):
     integration into pipeline for MeerLICHT (ptrker004@myuct.ac.za).
 
     """
+
+    global C
+
+    if telescope is not None:
+        C = importlib.import_module('Utils.Constants_'+telescope)
+    else:
+        C = importlib.import_module('Utils.Constants')
+
+    # if verbosity is provided through args.verbose, it will overwrite
+    # the corresponding setting in Constants (C.verbose)
+    if verbose is not None:
+        C.verbose = verbose
 
     start_time1 = os.times()
     
@@ -4572,20 +4584,9 @@ def main():
     # replaced [global_pars] function with importing
     # Utils/Constants_[telescope} file as C; all former global
     # parameters are now referred to as C.[parameter name]
-    global C, args
     args = parser.parse_args()
 
-    if args.telescope is not None:
-        C = importlib.import_module('Utils.Constants_'+args.telescope)
-    else:
-        C = importlib.import_module('Utils.Constants')
-
-    # if verbosity is provided through args.verbose, it will overwrite
-    # the corresponding setting in Constants (C.verbose)
-    if args.verbose is not None:
-        C.verbose = args.verbose
-
-    optimal_subtraction(args.new_fits, args.ref_fits, args.log)
+    optimal_subtraction(args.new_fits, args.ref_fits, args.telescope, args.log, args.verbose)
 
 if __name__ == "__main__":
     main()
