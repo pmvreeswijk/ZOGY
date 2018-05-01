@@ -219,7 +219,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
                                         update_vignet=update_vignet, mask=fits_mask)
             except Exception as e:
                 SE_processed = False
-                log.error('exception was raised during [run_extractor]: {}'.format(e))  
+                log.error('exception was raised during [run_sextractor]: {}'.format(e))  
             else:
                 SE_processed = True
                 
@@ -4190,13 +4190,13 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         # try setting edge pixels to zero to avoid source detections
         # on the edge; this should really be done in BGreduce instead
         # where this extra read and write can probably be avoided
-        if telescope=='meerlicht' or telescope=='blackgem':
-            # replace edge pixel values with zero
-            data, header = read_hdulist (image, ext_data=0, ext_header=0)
-            data_mask = read_hdulist (mask, ext_data=0)
-            # replace
-            data[data_mask==2] = 0.
-            fits.writeto(image, data, header, overwrite=True)            
+        #if telescope=='meerlicht' or telescope=='blackgem':
+        #    # replace edge pixel values with zero
+        #    data, header = read_hdulist (image, ext_data=0, ext_header=0)
+        #    data_mask = read_hdulist (mask, ext_data=0)
+        #    # replace
+        #    data[data_mask==2] = 0.
+        #    fits.writeto(image, data, header, overwrite=True)            
                     
     # run sextractor from the unix command line
     cmd = ['sex', image, '-c', file_config, '-CATALOG_NAME', cat_out, 
