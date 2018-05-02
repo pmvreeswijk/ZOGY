@@ -144,7 +144,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
     # in function [get_psf]
     if not new: base_new = base_ref
     if not ref: base_ref = base_new
-    if new and ref: base_newref = base_new+'_'+base_ref
+    if new and ref: base_newref = base_new
 
     # the elements in [keywords] should be defined as strings, but do
     # not refer to the actual keyword names; the latter are
@@ -179,9 +179,9 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
 
         # add header keyword(s):
         header['S-FWHM'] = (fwhm, '[pix] SExtractor FWHM estimate')
-        header['S-FWSTD'] = (fwhm_std, '[pix] SExtractor FWHM sigma (STD)')
+        header['S-FWSTD'] = (fwhm_std, '[pix] sigma (STD) SExtractor FWHM')
         header['S-SEEING'] = (fwhm*pixscale, '[arcsec] SExtractor seeing estimate')
-        header['S-SEESTD'] = (fwhm_std*pixscale, '[arcsec] SExtractor seeing sigma (STD)')
+        header['S-SEESTD'] = (fwhm_std*pixscale, '[arcsec] sigma (STD) SExtractor seeing')
         
         return fwhm, fwhm_std
             
@@ -247,10 +247,10 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
                 else:
                     # just copy original image to _wcs.fits image
                     cmd = ['cp', base+'.fits', fits_wcs]
-                    result = subprocess.call(cmd)               
+                    result = subprocess.call(cmd)
                     # same for the SExtractor catalog
                     cmd = ['cp', base+'.sexcat', base+'_wcs.sexcat']
-                    result = subprocess.call(cmd)                
+                    result = subprocess.call(cmd)
             except Exception as e:
                 WCS_processed = False
                 log.error('exception was raised during [run_wcs]: {}'.format(e))  
@@ -296,12 +296,15 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         # without needing to run SExtractor and possibly also PSFEx
         # again for the reference image.
 
-            
     # initialise [ref_fits_remap] here to None; this is used below in
     # call to [prep_image_subtraction] if either [new_fits] or
     # [ref_fits] are not defined
-    ref_fits_remap = None        
+    ref_fits_remap = None
     if new and ref:
+        # initialize header to be recorded for keywords related to the
+        # comparison of new and ref
+        header_zogy = fits.Header()
+
         # remap ref to new
         ref_fits_remap = base_ref+'_wcs_remap.fits'
         if not os.path.isfile(ref_fits_remap) or C.redo:
@@ -311,12 +314,19 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
             # SWarp User's Guide). However, despite these artefacts,
             # the Scorr image still appears to be better with LANCZOS3
             # than when BILINEAR is used.
-            resampling_type='LANCZOS3' 
+            resampling_type='LANCZOS3'
             # if fwhm_ref <= 2: resampling_type='BILINEAR'
-            result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
-                               [ysize_new, xsize_new], gain=gain_new, log=log, config=C.swarp_cfg,
-                               resampling_type=resampling_type, resample='Y')
-
+            try:
+                result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
+                                   [ysize_new, xsize_new], gain=gain_new, log=log, config=C.swarp_cfg,
+                                   resampling_type=resampling_type, resample='Y') 
+            except Exception as e:
+                remap_processed = False
+                log.error('exception was raised during [run_remap]: {}'.format(e))  
+            else:
+                remap_processed = True
+            header_zogy['SWARP-P'] = (remap_processed, 'reference image successfully SWarped?')
+           
         # initialize full output images
         data_D_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_S_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
@@ -387,7 +397,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         fratio *= gain_new / gain_ref
     
         dr = np.sqrt(dx**2 + dy**2)
-        if C.verbose: log.info('standard deviation dr over full frame [pixels]: ' +str(np.std(dr)) )
+        if C.verbose: log.info('sigma (STD) dr over full frame [pixels]: {}'.format(np.std(dr)))
         dr_full = np.sqrt(np.median(dr)**2 + np.std(dr)**2)
         dx_full = np.sqrt(np.median(dx)**2 + np.std(dx)**2)
         dy_full = np.sqrt(np.median(dy)**2 + np.std(dy)**2)
@@ -395,22 +405,27 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         #dx_full = np.std(dx)
         #dy_full = np.sdata_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_stdtd(dy)
         if C.verbose:
-            log.info('np.median(dr), np.std(dr) [pixels]: ' + str(np.median(dr)) + ', ' + str(np.std(dr)))
-            log.info('np.median(dx), np.std(dx) [pixels]: ' + str(np.median(dx)) + ', ' + str(np.std(dx)))
-            log.info('np.median(dy), np.std(dy) [pixels]: ' + str(np.median(dy)) + ', ' + str(np.std(dy)))
-            log.info('dr_full, dx_full, dy_full [pixels]: ' + str(dr_full) + ', ' + str(dx_full) + ', ' + str(dy_full))
+            log.info('median dr: {:.3f} +- {:.3f} pixels'.format(np.median(dr), np.std(dr)))
+            log.info('median dx: {:.3f} +- {:.3f} pixels'.format(np.median(dx), np.std(dx)))
+            log.info('median dy: {:.3f} +- {:.3f} pixels'.format(np.median(dy), np.std(dy)))
+            log.info('full-frame dr: {:.3f}, dx: {:.3f}, dy: {:.3f}'
+                     .format(dr_full, dx_full, dy_full))
 
         #fratio_median, fratio_std = np.median(fratio), np.std(fratio)
-        fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2, log=log)
+        fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio, nsigma=2,
+                                                                              log=log)
         if C.verbose:
-            log.info('fratio_mean_full, fratio_std_full, fratio_median_full: ' + str(fratio_mean_full) + ', ' + str(fratio_std_full) + ', ' + str(fratio_median_full))
+            log.info('full-frame fratio mean: {:.3f}, std: {:.3f}, median: {:.3f}'
+                     .format(fratio_mean_full, fratio_std_full, fratio_median_full))
 
         # add header keyword(s):
-        header_new['DR-STD'] = (dr_full*pixscale_new, '[arcsec] dr sigma (STD) WCS solution')
-        header_new['DX-STD'] = (dx_full*pixscale_new, '[arcsec] dx sigma (STD) WCS solution')
-        header_new['DY-STD'] = (dy_full*pixscale_new, '[arcsec] dy sigma (STD) WCS solution')
-        header_new['FNFR'] = (fratio_median_full, 'median flux ratio (Fnew/Fref) across frame')
-        header_new['FNFR-STD'] = (fratio_std_full, 'flux ratio (Fnew/Fref) sigma (STD) across frame')
+        header_zogy['Z-DXYLOC'] = (C.dxdy_local, 'star position offsets determined per subimage?')
+        header_zogy['Z-DRSTD'] = (dr_full*pixscale_new, '[arcsec] dr sigma (STD) offsets full image')
+        header_zogy['Z-DXSTD'] = (dx_full*pixscale_new, '[arcsec] dx sigma (STD) offsets full image')
+        header_zogy['Z-DYSTD'] = (dy_full*pixscale_new, '[arcsec] dy sigma (STD) offsets full image')
+        header_zogy['Z-FNRLOC'] = (C.fratio_local, 'flux ratios (Fnew/Fref) determined per subimage?')
+        header_zogy['Z-FNR'] = (fratio_median_full, 'median flux ratio (Fnew/Fref) full image')
+        header_zogy['Z-FNRSTD'] = (fratio_std_full, 'sigma (STD) flux ratio (Fnew/Fref) full image')
         
         if C.make_plots:
                 
@@ -698,35 +713,45 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
     # call above function [zogy_subloop] with pool.map
     # only if both [new_fits] and [ref_fits] are defined
     if new and ref:
-        if True:
-            pool = ThreadPool(1)
-            lock = Lock()
+        pool = ThreadPool(1)
+        lock = Lock()
+        try:
             pool.map(zogy_subloop, range(nsubs))
-            pool.close()
-            pool.join()
-        
-        # compute statistics on full Scorr image and show histogram
-        if C.verbose:
-            mean_Scorr, std_Scorr, median_Scorr = clipped_stats (data_Scorr_full, clip_zeros=False,
-                                                                 make_hist=C.make_plots,
-                                                                 name_hist=base_newref+'_Scorr_hist.pdf',
-                                                                 hist_xlabel='value in Scorr image',
-                                                                 log=log)
-            log.info('mean_Scorr, median_Scorr, std_Scorr: ' + str(mean_Scorr) + ', ' +
-                     str(median_Scorr) + ', ' + str(std_Scorr))
-    
-        # write full images to fits
-        header_new.add_comment('Propagated header from new image (including WCS solution)')
-        fits.writeto(base_newref+'_D.fits', data_D_full, header_new, overwrite=True)
-        fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_new, overwrite=True)
-        fits.writeto(base_newref+'_Scorr_neg.fits', np.negative(data_Scorr_full), header_new, overwrite=True)
-        fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_new, overwrite=True)
-        fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_new, overwrite=True)
+        except Exception as e:
+            zogy_processed = False
+            log.error('exception was raised during [zogy_subloop]: {}'.format(e))  
+        else:
+            zogy_processed = True
+        pool.close()
+        pool.join()
 
-        if C.display:
-            fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
-            fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
-            fits.writeto(base_newref+'_S.fits', data_S_full, header_new, overwrite=True)
+        # compute statistics on full Scorr image and show histogram
+        mean_Scorr, std_Scorr, median_Scorr = (
+            clipped_stats (data_Scorr_full, clip_zeros=False, make_hist=C.make_plots,
+                           name_hist=base_newref+'_Scorr_hist.pdf',
+                           hist_xlabel='value in Scorr image', log=log))
+        if C.verbose:
+            log.info('Scorr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
+                     .format(mean_Scorr, median_Scorr, std_Scorr))
+            
+        # compute statistics on Fpsferr image using pixels with Scorr values < 1
+        mask_Scorr_1sigma = (np.abs(data_Scorr_full) < 1.)
+        mean_Fpsferr, std_Fpsferr, median_Fpsferr = (
+            clipped_stats (data_Fpsferr_full[mask_Scorr_1sigma], make_hist=C.make_plots,
+                           name_hist=base_newref+'_Fpsferr_hist.pdf',
+                           hist_xlabel='value in Fpsferr image', log=log))
+        if C.verbose:
+            log.info('Fpsferr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
+                     .format(mean_Fpsferr, median_Fpsferr, std_Fpsferr))
+
+        # add header keyword(s):
+        header_zogy['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
+        header_zogy['Z-SIZE'] = (C.subimage_size, '[pix] size of (square) ZOGY subimages')
+        header_zogy['Z-BSIZE'] = (C.subimage_border, '[pix] size of ZOGY subimage borders')
+        header_zogy['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
+        header_zogy['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
+        header_zogy['Z-FPEMED'] = (median_Fpsferr, '[e-] median Fpsferr full image')
+        header_zogy['Z-FPESTD'] = (std_Fpsferr, '[e-] sigma (STD) Fpsferr full image')
 
         fits_mask_comb = base_newref+'_mask.fits'
         if not os.path.isfile(fits_mask_comb):
@@ -735,8 +760,33 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         # find transients using function [get_trans_alt], which
         # applies threshold cuts directly on Scorr for the transient
         # detection, rather than running SExtractor (see below)
-        result = get_trans_alt (data_new_full, data_ref_full, data_D_full, data_Scorr_full,
+        ntrans = get_trans_alt (data_new_full, data_ref_full, data_D_full, data_Scorr_full,
                                 data_Fpsf_full, data_Fpsferr_full, log, fits_mask=fits_mask_comb)
+
+        # add header keyword(s):
+        header_zogy['T-NSIGMA'] = (C.transient_nsigma, '[sigma] transient detection threshold')
+        header_zogy['T-LFLUX3'] = (3.*median_Fpsferr, '[e-] full-frame transient 3-sigma limiting flux')
+        header_zogy['T-LFLUX5'] = (5.*median_Fpsferr, '[e-] full-frame transient 5-sigma limiting flux')
+        header_zogy['T-LFLUX'] = (C.transient_nsigma*median_Fpsferr,
+                                  '[e-] full-frame transient {}-sigma limiting flux'
+                                  .format(C.transient_nsigma))
+        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)'
+                                   .format(C.transient_nsigma))
+        
+        # write full images to fits
+        header_newzogy = header_new + header_zogy
+        header_newzogy.add_comment('Propagated header from new image (including WCS solution)')
+        fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, overwrite=True)
+        fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, overwrite=True)
+        fits.writeto(base_newref+'_Scorr_neg.fits', np.negative(data_Scorr_full), header_newzogy,
+                     overwrite=True)
+        fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, overwrite=True)
+        fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_newzogy, overwrite=True)
+
+        if C.display:
+            fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
+            fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
+            fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
 
         # find transients using function [get_trans], which uses
         # SExtractor for the transient detection
@@ -759,26 +809,26 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         # new catalogue
         if new:
             cat_new = base_new+'_wcs.sexcat_fluxopt'
-            cat_new_out = base_new+'_wcs.cat'
+            cat_new_out = base_new+'_cat.fits'
             result = format_cat (cat_new, cat_new_out, log, cat_type='new',
                                  header_toadd=header_new)
         # ref catalogue
         if ref:
             cat_ref = base_ref+'_wcs.sexcat_fluxopt'
-            cat_ref_out = base_ref+'_wcs.cat'
+            cat_ref_out = base_ref+'_cat.fits'
             result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
                                  header_toadd=header_ref)
         # trans catalogue
         if new and ref:
             cat_trans = base_newref+'.transcat_pos'
-            cat_trans_out = base_newref+'.cat_trans'
+            cat_trans_out = base_newref+'_trans.fits'
             thumbnail_data = [data_new_full, data_ref_full, data_D_full, data_Scorr_full]
             thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 'THUMBNAIL_SCORR']
             # skip for the moment; need to take care of objects closer
             # than 32/2 pixels to the edge in creation of thumbnails
             result = format_cat (cat_trans, cat_trans_out, log, cat_type='trans',
                                  thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
-                                 thumbnail_size=32, header_toadd=header_new)
+                                 thumbnail_size=32, header_toadd=header_newzogy)
 
     end_time = os.times()
     if new and ref:
@@ -1393,7 +1443,6 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
         #     and Fpsferr, which should be possible as the PSF is
         #     better sampled than the image pixels
         
-
         
         # append to output lists
         npixels_array[i] = npixels
@@ -1441,7 +1490,9 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
         log.info('peak memory (in GB) used in get_trans {}'.
                  format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
 
-        
+    return ntrans
+
+
 ################################################################################
 
 def trans_measure(I, x_index, y_index, var_bkg=0.):
@@ -2530,8 +2581,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         limflux_5sigma = get_limflux (5.)
 
         # add header keyword(s):
-        header['LIMFLUX3'] = (limflux_3sigma, '[e-] image 3-sigma limiting flux')
-        header['LIMFLUX5'] = (limflux_5sigma, '[e-] image 5-sigma limiting flux')
+        header['LIMFLUX3'] = (limflux_3sigma, '[e-] full-frame 3-sigma limiting flux')
+        header['LIMFLUX5'] = (limflux_5sigma, '[e-] full-frame 5-sigma limiting flux')
         
         if C.timing:
             log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
@@ -2595,15 +2646,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # add header keyword(s):
             header['PC-P'] = (True, 'successfully processed by photometric calibration?')
             calname = C.cal_cat.split('/')[-1]
-            header['PC-NAME'] = (calname, 'name calibration catalogue') 
+            header['PC-NAME'] = (calname, 'name calibration catalog') 
             caldate = time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(C.cal_cat)))
-            header['PC-DATE'] = (caldate, 'date saved calibration catalogue') 
-            header['PC-NCAL'] = (ncalstars, 'number of matching stars in calibration catalogue')
-            header['PC-ZP'] = (zp, 'zeropoint=m_AB+2.5*log10(flux[e-/s])+airmass*k')
-            header['PC-ZPSTD'] = (zp_std, 'zeropoint sigma (STD)')
-            header['PC-EXTCO'] = (C.ext_coeff[filt], 'filter extinction coefficient k used for ZP')
-            header['LIMMAG3'] = (float(limmag_3sigma), '[mag] image 3-sigma limiting magnitude')
-            header['LIMMAG5'] = (float(limmag_5sigma), '[mag] image 5-sigma limiting magnitude')
+            header['PC-DATE'] = (caldate, 'date saved calibration catalog') 
+            header['PC-NCAL'] = (ncalstars, 'number of matching stars in calibration catalog')
+            header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+airmass*k')
+            header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
+            header['PC-EXTCO'] = (C.ext_coeff[filt], '[mag] filter extinction coefficient (k)')
+            header['LIMMAG3'] = (float(limmag_3sigma), '[mag] full-frame 3-sigma limiting magnitude')
+            header['LIMMAG5'] = (float(limmag_5sigma), '[mag] full-frame 5-sigma limiting magnitude')
 
         else:
             header['PC-P'] = (False, 'successfully processed by photometric calibration?')
@@ -3395,9 +3446,9 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     # number of header keywords
     if PSFEx_processed:
         header['PSF-P'] = (PSFEx_processed, 'successfully processed by PSFEx?')   
-        header['PSF-RAD'] = (C.psf_radius, '[xFWHM] radius in units of FWHM to build PSF')
+        header['PSF-RAD'] = (C.psf_radius, '[FWHM] radius in units of FWHM to build PSF')
         header['PSF-SIZE'] = (psf_size, '[pix] size PSF image')
-        header['PSF-FRAC'] = (C.psf_samp_fwhmfrac, '[xFWHM] PSF sampling step in units of FWHM')
+        header['PSF-FRAC'] = (C.psf_samp_fwhmfrac, '[FWHM] PSF sampling step in units of FWHM')
         header['PSF-SAMP'] = (psf_samp_update, '[pix] PSF sampling step (~ PSF-FRAC x FWHM)')
         header['PSF-CFGS'] = (psf_size_config, 'size PSF config. image (= PSF-SIZE / PSF-SAMP)')
         header['PSF-NOBJ'] = (psf_nstars, 'number of accepted PSF stars')
@@ -3751,7 +3802,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     header_wcs['A-INDEX'] = (anet_index, 'name of index file WCS solution')
     # and pixelscale
     anet_pixscale = np.average(np.abs(data_match['CD'][0][1:3]))*3600.
-    header_wcs['A-PSCALE'] = (anet_pixscale, '[arcsec/pix] pixel scale of WCS solution')
+    header_wcs['A-PSCALE'] = (anet_pixscale, '[arcsec/pix] pixel scale WCS solution')
     
     # convert SIP header keywords from Astrometry.net to PV keywords
     # that swarp, scamp (and sextractor) understand using this module
