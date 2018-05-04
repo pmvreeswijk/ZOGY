@@ -1,8 +1,9 @@
 
-#subimage_size =  740     # size of subimages
-#subimage_border = 10     # border around subimage to avoid edge effects
-subimage_size = 2960     # size of subimages
-subimage_border =  0     # border around subimage to avoid edge effects
+subimage_size = 960      # size of subimages
+subimage_border = 32     # border around subimage to avoid edge effects
+#trimmed MeerLICHT images:
+#subimage_size = 950      # size of subimages
+#subimage_border = 37     # border around subimage to avoid edge effects
 
 # background estimation: these are the optional methods to estimate the
 # backbround and its standard deviation (STD):
@@ -12,9 +13,9 @@ subimage_border =  0     # border around subimage to avoid edge effects
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                          # clipped; used in methods 1, 3 and 4
-bkg_boxsize = 592        # size of region used to determine
+bkg_boxsize = 240        # size of region used to determine
                          # background in methods 2, 3 and 4
-bkg_filtersize = 3       # size of filter used for smoothing the above
+bkg_filtersize = 5       # size of filter used for smoothing the above
                          # regions for method 2, 3 and 4
 
 # ZOGY parameters
@@ -23,23 +24,34 @@ dxdy_local = False       # determine dx and dy from subimage (T) or full frame (
 transient_nsigma = 6     # required significance in Scorr for transient detection
 
 # optional fake stars
-nfakestars = 0           # number of fake stars to be added to each subimage
-                         # if 1: star will be at the center, if > 1: randomly distributed
+nfakestars = 1           # number of fake stars to be added to each subimage; first star
+                         # is at the center, the rest (if any) is randomly distributed
 fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars    
 
 # switch on/off different functions
-dosex = False            # do extra SExtractor run (already done inside Astrometry.net)
 dosex_psffit = False     # do extra SExtractor run with PSF fitting
 
-# header keywords from which certain values are taken; these should be
-# present in the header, but the names can be changed here
+# Definition of some required variables, or alternatively, their
+# corresponding keyword names in the fits header of the input
+# image(s). If it is defined, the variable value is adopted. If it is
+# not defined, the header is checked for the keyword defined, and if
+# it exists, the keyword value is adopted. If neither variable nor
+# header keyword exists, an error is raised. Note that this checking
+# of the fits header only goes for these specific variables; this is
+# not done for other variables defined in this file/module.
+key_naxis1 = 'NAXIS1'
+key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
+gain = 1.0
 key_ron = 'RDNOISE'
 key_satlevel = 'SATURATE'
-key_ra = 'SW_RA'
-key_dec = 'SW_DEC'
-key_pixscale = 'PIXSCALE'
+key_ra = 'RA'
+key_dec = 'DEC'
+#key_pixscale = 'PIXSCALE'
+pixscale = 0.56
 key_exptime = 'EXPTIME'
+key_filter = 'FILTNAME'
+key_obsdate = 'DATE-OBS'
 
 
 # for seeing estimate
@@ -52,7 +64,7 @@ fwhm_frac = 0.25         # fraction of objects, sorted in brightness
                          # or class_star, used for fwhm estimate
 
 # WCS
-skip_wcs = True          # skip Astrometry.net step if image already
+skip_wcs = False         # skip Astrometry.net step if image already
                          # contains a reliable WCS solution
                          
 # PSF parameters
@@ -77,12 +89,15 @@ psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
 astronet_tweak_order = 3
 
 # Photometric calibration
-obs_lat = -32.38722      # degrees (North)
-obs_long = 20.81667      # degrees (East)
-obs_height = 1798.       # meters above sealevel
-# these [ext_coeff] are very rough extinction estimates for SAAO; update!
-ext_coeff = {'u':0.4, 'g':0.2, 'q':0.15, 'r':0.1, 'i':0.1, 'z':0.1}
-cal_cat = ''
+obs_lat = -32.38722      # observatory latitude in degrees (North)
+obs_long = 20.81667      # observatory longitude in degrees (East)
+obs_height = 1798.       # observatory height in meters above sealevel
+# these [ext_coeff] are mean extinction estimates for Sutherland in
+# the MeerLICHT filters:
+ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
+# and the same for La Silla in the BlackGEM filters:
+#ext_coeff = {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}
+cal_cat = '/home/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1.fits'
 
 # path and names of configuration files
 cfg_dir = './Config/'
@@ -100,9 +115,16 @@ apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
                               # used for aperture photometry
                               # in SExtractor general
 
-redo = True              # execute functions even if output file exist
+
+# if a mask image is provided (i.e. same name as input images but
+# ending in '_mask.fits'), the mask values can be associated to the
+# type of masked pixel with this dictionary:
+mask_value = {'bad': 1, 'cosmic': 2, 'saturated': 4, 'saturated_connected': 8,
+              'satellite': 16, 'edge': 32}
+
+redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+make_plots = False       # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
