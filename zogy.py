@@ -135,16 +135,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         global base_new, fwhm_new
         # define the base names of input fits files as global so they
         # can be used in any function in this module
-        base_new = new_fits.split('.fits')[0]
-        if telescope=='meerlicht' or telescope=='blackgem':
-            base_new = base_new.replace('_red','')
+        base_new = new_fits.split('.fits')[0].replace('_red','')
     if ref:
         global base_ref, fwhm_ref
         # define the base names of input fits files as global so they
         # can be used in any function in this module
-        base_ref = ref_fits.split('.fits')[0]
-        if telescope=='meerlicht' or telescope=='blackgem':
-            base_ref = base_ref.replace('_red','')
+        base_ref = ref_fits.split('.fits')[0].replace('_red','')
 
     # if either one of [base_new] or [base_ref] is not defined, set it
     # to the value of their counterpart as they're used below, a.o.
