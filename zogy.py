@@ -2721,8 +2721,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             flux_opt = data_sex['FLUX_OPT']
             fluxerr_opt = data_sex['FLUXERR_OPT']
             # and corresponding calibrated magnitudes
-            mag_opt = data_sex['MAG_OPT']
-            magerr_opt = data_sex['MAGERR_OPT']
+            if os.path.isfile(C.cal_cat):
+                mag_opt = data_sex['MAG_OPT']
+                magerr_opt = data_sex['MAGERR_OPT']
             if mypsffit:
                 flux_mypsf = data_sex['FLUX_PSF']
                 fluxerr_mypsf = data_sex['FLUXERR_PSF']
@@ -2744,8 +2745,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         s2n_auto = flux_auto / fluxerr_auto
         flux_opt = flux_opt[index]
         fluxerr_opt = fluxerr_opt[index]
-        mag_opt = mag_opt[index]
-        magerr_opt = magerr_opt[index]
+        if os.path.isfile(C.cal_cat):
+            mag_opt = mag_opt[index]
+            magerr_opt = magerr_opt[index]
         x_win = data_sex['XWIN_IMAGE'][index]
         y_win = data_sex['YWIN_IMAGE'][index]
         fwhm_image = data_sex['FWHM_IMAGE'][index]
@@ -2755,21 +2757,22 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             x_psf = x_psf[index]
             y_psf = y_psf[index]
             
-        # histogram of all 'good' objects as a function of magnitude
-        bins = np.arange(12, 22, 0.2)
-        plt.hist(np.ravel(mag_opt), bins, color='green')
-        x1,x2,y1,y2 = plt.axis()
-        title = 'filter: {}, exptime: {:.0f}s'.format(filt, exptime)
-        if 'limmag_5sigma' in locals():
-            limmag = np.float(limmag_5sigma)
-            plt.plot([limmag, limmag], [y1,y2], color='black', linestyle='--')
-            title += ', lim. mag (5$\sigma$; dashed line): {:.2f}'.format(limmag)
-        plt.title(title)
-        plt.xlabel(filt+' magnitude')
-        plt.ylabel('number')
-        plt.savefig(base+'_magopt.pdf')
-        if C.show_plots: plt.show()
-        plt.close()
+        if os.path.isfile(C.cal_cat):
+            # histogram of all 'good' objects as a function of magnitude
+            bins = np.arange(12, 22, 0.2)
+            plt.hist(np.ravel(mag_opt), bins, color='green')
+            x1,x2,y1,y2 = plt.axis()
+            title = 'filter: {}, exptime: {:.0f}s'.format(filt, exptime)
+            if 'limmag_5sigma' in locals():
+                limmag = np.float(limmag_5sigma)
+                plt.plot([limmag, limmag], [y1,y2], color='black', linestyle='--')
+                title += ', lim. mag (5$\sigma$; dashed line): {:.2f}'.format(limmag)
+            plt.title(title)
+            plt.xlabel(filt+' magnitude')
+            plt.ylabel('number')
+            plt.savefig(base+'_magopt.pdf')
+            if C.show_plots: plt.show()
+            plt.close()
 
         # compare flux_opt with flux_auto
         flux_diff = (flux_opt - flux_auto) / flux_auto
