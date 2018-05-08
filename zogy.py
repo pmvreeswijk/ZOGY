@@ -28,8 +28,8 @@ from photutils import Background2D, MedianBackground
 from lmfit import minimize, Minimizer, Parameters, Parameter, report_fit
 
 # see https://github.com/stargaser/sip_tpv (version June 2017):
-# download from GitHub and "python install setup.py --user" for local
-# install or "sudo python install setup.py" for system install
+# download from GitHub and "python setup.py install --user" for local
+# install or "sudo python setup.py install" for system install
 from sip_tpv import sip_to_pv
 
 import resource
@@ -135,19 +135,21 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         global base_new, fwhm_new
         # define the base names of input fits files as global so they
         # can be used in any function in this module
-        base_new = new_fits.split('.fits')[0].replace('_red','')
+        base_new = new_fits.split('.fits')[0]
     if ref:
         global base_ref, fwhm_ref
         # define the base names of input fits files as global so they
         # can be used in any function in this module
-        base_ref = ref_fits.split('.fits')[0].replace('_red','')
+        base_ref = ref_fits.split('.fits')[0]
 
     # if either one of [base_new] or [base_ref] is not defined, set it
     # to the value of their counterpart as they're used below, a.o.
     # in function [get_psf]
     if not new: base_new = base_ref
     if not ref: base_ref = base_new
-    if new and ref: base_newref = base_new
+    if new and ref:
+        global base_newref
+        base_newref = base_new
 
     # the elements in [keywords] should be defined as strings, but do
     # not refer to the actual keyword names; the latter are
@@ -706,9 +708,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
             result = subprocess.call(cmd)
 
         if C.timing:
-            log.info('wall-time spent in nsub loop ' +str(time.time()-tloop))
-            log.info('peak memory (in GB) used in nsub loop {}'.
-                     format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+            log_timing_memory (t0=tloop, label='nsub loop', log=log)
 
     # call above function [zogy_subloop] with pool.map
     # only if both [new_fits] and [ref_fits] are defined
@@ -1070,9 +1070,7 @@ def xy_index_ref (ysize, xsize, wcs_new, wcs_ref, log):
     #del xx_ref, yy_ref
     
     if C.timing:
-        log.info('wall-time spent in xy_index_ref ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in xy_index_ref {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='xy_index_ref', log=log)
 
     return mask_new, mask_ref
         
@@ -1234,11 +1232,10 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
     hdu.writeto(cat_out, overwrite=True)
     
     if C.timing:
-        log.info('wall-time spent in format_cat ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in format_cat {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='format_cat', log=log)
 
-        
+    return
+
 
 ################################################################################
 
@@ -1486,10 +1483,8 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
     #       record separate chi2 for each fit).
         
     if C.timing:
-        log.info('wall-time spent in get_trans ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in get_trans {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
-
+        log_timing_memory (t0=t, label='get_trans', log=log)
+        
     return ntrans
 
 
@@ -1768,9 +1763,6 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
 
     # define psf_hsize
     psf_hsize = psf_size/2
-    
-    if C.timing: log.info('wall-time spent in get_psfoptflux_xycoords before the loop {}'
-                          .format(time.time()-t))
 
     # previously this was a loop; now turned to a function to
     # try pool.map multithreading below
@@ -1984,12 +1976,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
     if C.verbose: log.info('ncoords: {}'.format(ncoords))
 
     if C.timing:
-        log.info('wall-time spent in loop_psfoptflux_xycoords pool {}'.format(time.time()-t))
+        log_timing_memory (t0=t, label='get_psfoptflux_xycoords', log=log)
 
-        log.info('wall-time spent in get_psfoptflux_xycoords {}'.format(time.time()-t))
-        log.info('peak memory (in GB) used in get_psfoptflux_xycoords {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
-    
     if psffit:
         x_psf = xcoords + xshift_psf
         y_psf = ycoords + yshift_psf
@@ -2280,19 +2268,22 @@ def flux_optimal_s2n (P, S, RON, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
 
 ################################################################################
 
-def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=False,
+def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0,
                   clip_zeros=True, get_median=True, get_mode=False, mode_binsize=0.1,
                   verbose=False, make_hist=False, name_hist=None, hist_xlabel=None,
                   log=None):
 
-    
+    if verbose and C.timing:
+        log.info('Executing clipped_stats ...')
+        t = time.time()
+
     # remove zeros
     if clip_zeros:
         array = array[array.nonzero()]
         
-    if clip_upper10:
-        index_upper = int(0.9*array.size+0.5)
-        array = np.sort(array.flatten())[:index_upper]
+    if clip_upper_frac != 0:
+        index_upper = int((1.-clip_upper_frac)*array.size+0.5)
+        array = np.sort(array.flatten(), kind='quicksort')[:index_upper]
 
     mean_old = float('inf')
     for i in range(max_iters):
@@ -2303,15 +2294,14 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
             break
         mean_old = mean
         index = ((array>(mean-nsigma*std)) & (array<(mean+nsigma*std)))
-        array = np.copy(array[index])
-        
+        array = array[index]
+
     # add median
     if get_median:
         median = np.median(array)
         if abs(median-mean)/mean>0.1:
             log.info('Warning: mean and median in clipped_stats differ by more than 10%')
-            log.info('mean: ' + str(mean))
-            log.info('median: ' + str(median))
+            log.info('mean: {:.3f}, median: {:.3f}'.format(mean, median))
             
     # and mode
     if get_mode:
@@ -2345,7 +2335,10 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper10=Fals
             plt.savefig(name_hist)
         if C.show_plots: plt.show()
         plt.close()
-            
+
+    if verbose and C.timing:
+        log_timing_memory (t0=t, label='clipped_stats', log=log)
+        
     if get_mode:
         if get_median:
             return mean, std, median, mode
@@ -2585,9 +2578,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['LIMFLUX5'] = (limflux_5sigma, '[e-] full-frame 5-sigma limiting flux')
         
         if C.timing:
-            log.info('wall-time spent deriving optimal fluxes ' + str(time.time()-t1))
-            log.info('peak memory (in GB) used deriving optimal fluxes {}'.
-                     format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+            log_timing_memory (t0=t1, label='deriving optimal fluxes', log=log)
 
         if C.timing: t2 = time.time()
 
@@ -2670,9 +2661,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # write updated catalog to file
         fits.writeto(newcat, data_sex, overwrite=True)
                         
-        if C.timing: log.info('wall-time spent creating binary fits table including fluxopt '
-                            + str(time.time()-t2))
-    
+        if C.timing:
+            log_timing_memory (t0=t2, label='creating binary fits table including fluxopt', log=log)
 
     # split full image into subimages to be used in run_ZOGY - this
     # needs to be done after determination of optimal fluxes as
@@ -2714,7 +2704,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         fftdata_bkg[nsub][index_fft] = data_bkg[index_fftdata]
         fftdata_bkg_std[nsub][index_fft] = data_bkg_std[index_fftdata]
 
-    if C.timing: log.info('wall-time spent filling fftdata cubes ' + str(time.time()-t2))
+    if C.timing:
+        log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
 
     if C.make_plots:
 
@@ -2873,9 +2864,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         
     if C.timing:
-        log.info('wall-time spent in prep_optimal_subtraction ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in prep_optimal_subtraction {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='prep_optimal_subtraction', log=log)
 
     #if C.verbose:
     #    log.info('fftdata.dtype {}'.format(fftdata.dtype))
@@ -2965,9 +2954,7 @@ def get_apply_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
     # could add error in zeropoint determination
         
     if C.timing:
-        log.info('wall-time spent in get_apply_zp ' + str(time.time() - t))
-        log.info('peak memory (in GB) used in get_apply_zp {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='get_apply_zp', log=log)
 
     return mag_sex, magerr_sex, zp_median, zp_std
 
@@ -2996,11 +2983,10 @@ def find_stars (data, ra, dec, radec_range, log):
     index_data[index_calc] = ((dsigma_ra<=radec_range) & (dsigma_dec<=radec_range))
 
     if C.timing:
-        log.info('wall-time spent in find_stars ' + str(time.time() - t))
-        log.info('peak memory (in GB) used in find_stars {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='find_stars', log=log)
 
     return index_data
+
 
 ################################################################################
         
@@ -3033,9 +3019,7 @@ def get_airmass (ra, dec, obsdate, log):
     coords_altaz = coords.transform_to(AltAz(obstime=Time(obsdate), location=location))
 
     if C.timing:
-        log.info('wall-time spent in get_airmass ' + str(time.time() - t))
-        log.info('peak memory (in GB) used in get_airmass {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='get_airmass', log=log)
 
     return coords_altaz.secz
 
@@ -3088,23 +3072,24 @@ def fixpix (data, data_mask, data_bkg, log, satlevel=60000.):
     #                                  kernel_sigma=2, method='localmean')
 
     if C.timing:
-        log.info('wall-time spent in fixpix ' + str(time.time() - t))
-        log.info('peak memory (in GB) used in fixpix {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='fix_pix', log=log)
 
     return
 
         
 ################################################################################
 
-def get_back (data, data_objmask, log, use_photutils=False, clip=True):
+def get_back (data, objmask, log, use_photutils=False, clip=True):
     
     """Function that returns the background of the image [data].  If
     use_photutils is True then apply the photutils' Background2D,
     while otherwise a clipped median is determined for each subimage
-    which is masked using SExtractor's '-OBJECTS' image provided in
-    [data_objmask]. The subimages (with size: [C.bkg_boxsize]) are then
-    median filtered and resized to the size of the input image."""
+    which is masked using the object mask (created from SExtractor's
+    '-OBJECTS' image, where objects have zero values). The subimages
+    (with size: [C.bkg_boxsize]) are then median filtered and resized
+    to the size of the input image.
+
+    """
 
     if C.timing: t = time.time()
     log.info('Executing get_back ...')
@@ -3119,7 +3104,7 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
 
     # mask all pixels with zeros in [data_objmask] or that have
     # non-positive pixel values in [data]
-    mask_reject = ((data_objmask==0) | (data<=0))
+    mask_reject = (objmask | (data<=0))
 
     if use_photutils:
         t1 = time.time()
@@ -3140,17 +3125,24 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
         # mask to use (opposite of mask_zero)
         mask_use = ~mask_reject
         
+        #if C.timing:
+        #    log_timing_memory (t0=t, label='get_back -2', log=log)
+
         # determine clipped median and RMS/std in data with objects
         # masked
         if clip:
             # get clipped_stats mean, std and median 
             mean_full, std_full, median_full = clipped_stats(data[mask_use],
-                                                             nsigma=C.bkg_nsigma, log=log)
+                                                             nsigma=C.bkg_nsigma,
+                                                             log=log)
+            #if C.timing:
+            #    log_timing_memory (t0=t, label='get_back -1', log=log)
         else:
             median_full = np.median(data[mask_use])
             std_full = np.std(data[mask_use])
         if C.verbose:
-            log.info('Background median and std/RMS in object-masked image: ' + str(median_full) + ', ' + str(std_full))
+            log.info('Background median in object-masked image: {:.3f} +- {:.3f}'
+                     .format(median_full, std_full))
 
         # loop through subimages the size of C.bkg_boxsize, and
         # determine median from the masked data
@@ -3171,17 +3163,21 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
 
         mask_minsize = 0.5*C.bkg_boxsize**2
 
+        #if C.timing:
+        #    log_timing_memory (t0=t, label='get_back 0', log=log)
+
+        #for nsub in range(nsubs):
         # previously this was a loop; now turned to a function to
         # try pool.map multithreading below
-        #def get_median_std (nsub):
-        for nsub in range(nsubs):
+        def get_median_std (nsub):
             subcut = cuts_ima[nsub]
             data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
             mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
             if np.sum(mask_sub) > mask_minsize:
                 if clip:
                     # get clipped_stats mean, std and median 
-                    mean, std, median = clipped_stats(data_sub[mask_sub], clip_upper10=True,
+                    mean, std, median = clipped_stats(data_sub[mask_sub],
+                                                      clip_upper_frac=0,
                                                       nsigma=C.bkg_nsigma, log=log)
                 else:
                     median = np.median(data_sub[mask_sub])
@@ -3201,20 +3197,28 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             mesh_std[nsub] = std
 
         #if C.timing: t1 = time.time()
-        #pool = ThreadPool(1)
-        #pool.map(get_median_std, range(nsubs))
-        #pool.close()
-        #pool.join()
-        #if C.timing: log.info('wall-time spent in get_back pool ' + str(time.time() - t1))
+        pool = ThreadPool(1)
+        pool.map(get_median_std, range(nsubs))
+        pool.close()
+        pool.join()
 
+        #if C.timing:
+        #    log_timing_memory (t0=t, label='get_back 1', log=log)
+        
         # reshape and transpose
         mesh_median = mesh_median.reshape((nxsubs, nysubs)).transpose()
         mesh_std = mesh_std.reshape((nxsubs, nysubs)).transpose()
+
+        #if C.timing:
+        #    log_timing_memory (t0=t, label='get_back 2', log=log)
 
         # median filter the meshes with filter of size [C.bkg_filtersize]
         shape_filter = (C.bkg_filtersize, C.bkg_filtersize)
         mesh_median_filt = ndimage.filters.median_filter(mesh_median, shape_filter)
         mesh_std_filt = ndimage.filters.median_filter(mesh_std, shape_filter)
+
+        #if C.timing:
+        #    log_timing_memory (t0=t, label='get_back 3', log=log)
 
         # resize low-resolution meshes
         background = ndimage.zoom(mesh_median_filt, C.bkg_boxsize)
@@ -3224,6 +3228,9 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
         #           mesh_median_filt=mesh_median_filt,
         #           background=background, background_std=background_std)
         
+        #if C.timing:
+        #    log_timing_memory (t0=t, label='get_back 4', log=log)
+
         # if shape of the background is not equal to input [data]
         # then pad the background images
         if data.shape != background.shape:
@@ -3241,13 +3248,11 @@ def get_back (data, data_objmask, log, use_photutils=False, clip=True):
             #                                                                   get_remainder=True)
             # these now include the remaining patches
                         
-            
     if C.timing:
-        log.info('wall-time spent in get_back ' + str(time.time() - t))
-        log.info('peak memory (in GB) used in get_back {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='get_back', log=log)
 
-    return background.astype('float32'), background_std.astype('float16')
+    return background, background_std
+
 
 ################################################################################
 
@@ -3540,10 +3545,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     pool.close()
     pool.join()
     if C.timing:
-        log.info('wall-time spent in loop_psf_sub pool ' + str(time.time() - t1))
-        log.info('wall-time spent in get_psf ' + str(time.time() - t))
-        log.info('peak memory (in GB) used in get_psf {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t1, label='loop_psf_sub pool', log=log)
+        log_timing_memory (t0=t, label='get_psf', log=log)
 
     return psf_ima_shift.astype('float16'), psf_ima.astype('float16')
 
@@ -3565,8 +3568,16 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
-        # mask of entries with FLAGS_PSF=0
-        mask_zero = (table['FLAGS_PSF']==0)
+        # In PSFEx version 3.17.1 (last stable version), only stars
+        # with zero flags are recorded in the output catalog. However,
+        # in PSFEx version 3.18.2 all objects from the SExtractor
+        # catalog are recorded, and in that case the entries with
+        # FLAGS_PSF=0 need to be selected to speed up this function
+        # significantly in case SExtractor detects many sources.
+        if 'FLAGS_PSF' in table.colnames:
+            mask_zero = (table['FLAGS_PSF']==0)
+        else:
+            mask_zero = np.ones(len(table), dtype=bool)
         number = table['SOURCE_NUMBER'][mask_zero]
         x = table['X_IMAGE'][mask_zero]
         y = table['Y_IMAGE'][mask_zero]
@@ -3632,12 +3643,11 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
         log.info('fraction of PSF stars that match: ' + str(float(nmatch)/len(x_new)))
             
     if C.timing:
-        log.info('wall-time spent in get_fratio_radec ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in get_fratio_radec {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='get_fratio_radec', log=log)
 
     return (np.array(x_new_match), np.array(y_new_match), np.array(fratio),
             np.array(dra_match), np.array(ddec_match))
+
 
 ################################################################################
 
@@ -3864,10 +3874,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     fits.writeto(base+'_cat.fits', data_sexcat, overwrite=True)
         
     if C.timing:
-        #log.info('extra time for creating LDAC fits table ' + str(time.time()-t2))
-        log.info('wall-time spent in run_wcs ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in run_wcs {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='run_wcs', log=log)
 
     return
         
@@ -3949,9 +3956,9 @@ def ldac2fits (cat_ldac, cat_fits, log):
         hdulist_new.close()
         
     if C.timing:
-        log.info('wall-time spent in ldac2fits ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in ldac2fits {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='ldac2fits', log=log)
+
+    return
 
     
 ################################################################################
@@ -4002,13 +4009,13 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     log.info(stdoutstr)
     log.info(stderrstr)
     if status != 0:
-        log.error('Swarp failed with exit code '+str(status)+'.')
+        log.error('Swarp failed with exit code {}'.format(status))
         return 'error'
     
     if C.timing:
-        log.info('wall-time spent in run_remap ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in run_remap {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='run_remap', log=log)
+
+    return
 
     
 ################################################################################
@@ -4123,9 +4130,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elongation=False):
             plt.close()
             
     if C.timing:
-        log.info('wall-time spent in get_fwhm {:.3f}'.format(time.time()-t))
-        log.info('peak memory (in GB) used in get_fwhm {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='get_fwhm', log=log)
 
     if get_elongation:
         return fwhm_median, fwhm_std, elongation_median, elongation_std
@@ -4272,11 +4277,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     # detected set to zero (-OBJECTS). These are used to build an
     # improved background map. 
     if save_bkg:
-        bkg = base+'_bkg.fits'
-        bkg_std = base+'_bkg_std.fits'
-        objmask = base+'_objmask.fits'
+        fits_bkg = base+'_bkg.fits'
+        fits_bkg_std = base+'_bkg_std.fits'
+        fits_objmask = base+'_objmask.fits'
         cmd += ['-CHECKIMAGE_TYPE', 'BACKGROUND,BACKGROUND_RMS,-OBJECTS',
-                '-CHECKIMAGE_NAME', bkg+','+bkg_std+','+objmask]
+                '-CHECKIMAGE_NAME', fits_bkg+','+fits_bkg_std+','+fits_objmask]
     
     # in case of fraction being less than 1: only care about higher S/N detections
     if fraction < 1.: cmd += ['-DETECT_THRESH', str(C.fwhm_detect_thresh)]
@@ -4297,16 +4302,18 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     log.info(stdoutstr)
     log.info(stderrstr)
 
-    log.info('peak memory (in GB) used in run_sextractor before get_back {}'.
-             format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+    if C.timing:
+        log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)
 
     # improve background estimate if [C.bkg_method] not set to 1 (= use
     # background determined by SExtractor)
     if save_bkg and C.bkg_method != 1:
 
         # read in SExtractor's object mask created above
-        data_objmask = read_hdulist (objmask, ext_data=0, dtype='float16')
-
+        data_objmask = read_hdulist (fits_objmask, ext_data=0)
+        objmask = (data_objmask==0)
+        del data_objmask
+        
         # read in input image
         data = read_hdulist (image, ext_data=0, dtype='float32')
 
@@ -4314,18 +4321,18 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         # the reference image these data need to refer to the image
         # before remapping
         if C.bkg_method==2:
-            data_bkg, data_bkg_std = get_back(data, data_objmask, log)
+            data_bkg, data_bkg_std = get_back(data, objmask, log)
 
         # similar as above, but now photutils' Background2D is used
         # inside [get_back]
         elif C.bkg_method==3:
-            data_bkg, data_bkg_std = get_back(data, data_objmask, log,
+            data_bkg, data_bkg_std = get_back(data, objmask, log,
                                               use_photutils=True)
-
+            
         # write the improved background and standard deviation to fits
         # overwriting the fits images produced by SExtractor
-        fits.writeto(bkg, data_bkg.astype('float32'), overwrite=True)
-        fits.writeto(bkg_std, data_bkg_std.astype('float32'), overwrite=True)
+        fits.writeto(fits_bkg, data_bkg, overwrite=True)
+        fits.writeto(fits_bkg_std, data_bkg_std, overwrite=True)
     
     if return_fwhm:
         # get estimate of seeing from output catalog
@@ -4333,13 +4340,12 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     else:
         fwhm = 0.
         fwhm_std = 0.
-                
+
     if C.timing:
-        log.info('wall-time spent in run_sextractor ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in run_sextractor {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='run_sextractor', log=log)
 
     return fwhm, fwhm_std
+
 
 ################################################################################
 
@@ -4406,9 +4412,9 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     result = subprocess.call(cmd)
     
     if C.timing:
-        log.info('wall-time spent in run_psfex ' + str(time.time()-t))
-        log.info('peak memory (in GB) used in run_psfex {}'.
-                 format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6))
+        log_timing_memory (t0=t, label='run_psfex', log=log)
+
+    return
 
         
 ################################################################################
@@ -4591,7 +4597,7 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy,log):
         log.info('fD: ' +str(fD))
     
     if C.display:
-        base = base_new+'_'+base_ref
+        base = base_newref
         fits.writeto(base+'_Pn_hat.fits', np.real(Pn_hat).astype('float32'), overwrite=True)
         fits.writeto(base+'_Pr_hat.fits', np.real(Pr_hat).astype('float32'), overwrite=True)
         fits.writeto(base+'_kr.fits', np.real(kr).astype('float32'), overwrite=True)
