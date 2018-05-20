@@ -48,6 +48,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
+__version__ = '1.0'
 
 ################################################################################
 
@@ -127,20 +128,23 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
     new = set_bool (new_fits)
     ref = set_bool (ref_fits)
     if not new and not ref:
-        log.error('no valid input image(s) provided')
-        raise SystemExit
+        log.critical('no valid input image(s) provided')
+        if log:
+            return 'critical', 'No valiid input image - please check filenames/paths.'
+        else:
+            raise SystemExit
 
     # global parameters
     if new:
         global base_new, fwhm_new
         # define the base names of input fits files as global so they
         # can be used in any function in this module
-        base_new = new_fits.split('.fits')[0].replace('_red','')
+        base_new = new_fits.split('.fits')[0]
     if ref:
         global base_ref, fwhm_ref
         # define the base names of input fits files as global so they
         # can be used in any function in this module
-        base_ref = ref_fits.split('.fits')[0].replace('_red','')
+        base_ref = ref_fits.split('.fits')[0]
 
     # if either one of [base_new] or [base_ref] is not defined, set it
     # to the value of their counterpart as they're used below, a.o.
@@ -904,6 +908,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
             if os.path.isfile(transcat_neg+'_ds9regions'):
                 cmd += ['-regions', transcat_neg+'_ds9regions']
             result = subprocess.call(cmd)
+    return 'info', 'Successfully ran ZOGY on image.'
 
 
 ################################################################################
@@ -2389,15 +2394,21 @@ def get_keyvalue (key, header, log):
         try:
             key_name = eval('C.key_'+key)
         except:
-            log.error('either [{}] or [{}] need to be defined in [settings_file]'.
+            log.critical('either [{}] or [{}] need to be defined in [settings_file]'.
                       format(key, 'key_'+key))
-            raise SystemExit
+            if log:
+                return 'critical', key+' not define in setting file.'
+            else:
+                raise SystemExit
         else:
             if key_name in header:
                 value = header[key_name]
             else:
-                log.error('Error: keyword {} not present in header'.format(key_name))
-                raise SystemExit
+                log.critical('Error: keyword {} not present in header'.format(key_name))
+                if log:
+                    return 'critical', key_name+' not in header.'
+                else:
+                    raise SystemExit
 
     if C.verbose:
         log.info('keyword: {}, adopted value: {}'.format(key, value))
@@ -3566,11 +3577,11 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
         # mask of entries with FLAGS_PSF=0
-        mask_zero = (table['FLAGS_PSF']==0)
-        number = table['SOURCE_NUMBER'][mask_zero]
-        x = table['X_IMAGE'][mask_zero]
-        y = table['Y_IMAGE'][mask_zero]
-        norm = table['NORM_PSF'][mask_zero]
+        # mask_zero = (table['FLAGS_PSF']==0)
+        number = table['SOURCE_NUMBER']#[mask_zero]
+        x = table['X_IMAGE']#[mask_zero]
+        y = table['Y_IMAGE']#[mask_zero]
+        norm = table['NORM_PSF']#[mask_zero]
         return number, x, y, norm
         
     # read psfcat_new
