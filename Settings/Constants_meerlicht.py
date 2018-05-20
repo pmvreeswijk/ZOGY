@@ -19,7 +19,7 @@ bkg_filtersize = 5       # size of filter used for smoothing the above
                          # regions for method 2, 3 and 4
 
 # ZOGY parameters
-fratio_local = True      # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
 
@@ -44,13 +44,14 @@ key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
 gain = 1.0
 key_ron = 'RDNOISE'
+ron = 10.
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
 #key_pixscale = 'PIXSCALE'
 pixscale = 0.56
 key_exptime = 'EXPTIME'
-key_filter = 'FILTNAME'
+key_filter = 'FILTER'
 key_obsdate = 'DATE-OBS'
 
 
@@ -116,9 +117,8 @@ apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
                               # in SExtractor general
 
 
-# if a mask image is provided (i.e. same name as input images but
-# ending in '_mask.fits'), the mask values can be associated to the
-# type of masked pixel with this dictionary:
+# if a mask image is provided, the mask values can be associated to
+# the type of masked pixel with this dictionary:
 mask_value = {'bad': 1, 'cosmic': 2, 'saturated': 4, 'saturated_connected': 8,
               'satellite': 16, 'edge': 32}
 
@@ -126,5 +126,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = False       # make diagnostic plots and save them as pdf
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots

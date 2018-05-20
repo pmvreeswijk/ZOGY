@@ -4,6 +4,7 @@ import astropy.io.fits as fits
 from astropy.io import ascii
 #from astropy.stats import sigma_clipped_stats
 from astropy.wcs import WCS
+from astropy.table import Table
 import numpy as np
 #import numpy.fft as fft
 import matplotlib.pyplot as plt
@@ -36,7 +37,7 @@ import resource
 from skimage import restoration, measure
 #import inpaint
 import logging
-import sys
+import sys, traceback, linecache
 
 #from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool
@@ -52,7 +53,8 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 ################################################################################
 
 #@profile
-def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, verbose=None):
+def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
+                        ref_fits_mask=None, telescope=None, log=None, verbose=None):
     
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -224,6 +226,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
                                         update_vignet=update_vignet, mask=fits_mask)
             except Exception as e:
                 SE_processed = False
+                print_exception(log)
                 log.error('exception was raised during [run_sextractor]: {}'.format(e))  
             else:
                 SE_processed = True
@@ -255,6 +258,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
                     result = subprocess.call(cmd)
             except Exception as e:
                 WCS_processed = False
+                print_exception(log)
                 log.error('exception was raised during [run_wcs]: {}'.format(e))  
             else:
                 WCS_processed = True
@@ -273,22 +277,16 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         return
 
     if new:
-        # now run SExtractor on the full image with the above seeing
-        # estimate, saving the background images
-        # if mask is present, provide it to SExtractor as the flag image
-        new_fits_mask = base_new+'_mask.fits'
-        if not os.path.isfile(new_fits_mask): new_fits_mask = None
+        # now run above function [sex_wcs] on new image
         sex_wcs(base_new, sexcat_new, C.sex_par, pixscale_new, fwhm_new, True,
                 new_fits_mask, ra_new, dec_new, xsize_new, ysize_new, header_new, log)
 
     if ref:
-        # same steps for the reference image
-        ref_fits_mask = base_ref+'_mask.fits'
-        if not os.path.isfile(ref_fits_mask): ref_fits_mask = None   
+        # and reference image
         sex_wcs(base_ref, sexcat_ref, C.sex_par_ref, pixscale_ref, fwhm_ref, False,
                 ref_fits_mask, ra_ref, dec_ref, xsize_ref, ysize_ref, header_ref, log)
         # N.B.: two differences with new image: SExtractor parameter
-        # file (new: C.sex_ar, ref: C.sex_par_ref) and update_vignet
+        # file (new: C.sex_par, ref: C.sex_par_ref) and update_vignet
         # boolean (new: True, ref: False). For the ref image, this
         # will lead to the VIGNET size to be as defined in the
         # parameter file [C.sex_par_ref], which by default is set to
@@ -324,6 +322,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
                                    resampling_type=resampling_type, resample='Y') 
             except Exception as e:
                 remap_processed = False
+                print_exception(log)
                 log.error('exception was raised during [run_remap]: {}'.format(e))  
             else:
                 remap_processed = True
@@ -337,7 +336,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         data_Fpsferr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-
+        data_new_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
+        data_ref_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
 
     # determine cutouts
     if new:
@@ -365,7 +365,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # ref, psf and background images
     if new:
-        data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std = (
+        data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std, data_new_mask = (
             prep_optimal_subtraction(base_new+'_wcs.fits', nsubs, 'new', fwhm_new, header_new,
                                      log, fits_mask=new_fits_mask)
         )
@@ -373,7 +373,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
     # same for [ref_fits]; if either [new_fits] was not defined,
     # [ref_fits_remap] will be None
     if ref_fits is not None:
-        data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std = (
+        data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std, data_ref_mask = (
             prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref, header_ref,
                                      log, fits_mask=ref_fits_mask, ref_fits_remap=ref_fits_remap)
         )
@@ -488,18 +488,11 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
             log.info('Nsub: ' +str(nsub+1))
             log.info('----------')
             
-        # refer to background and STD subimage with a shorter
-        # parameter name
-        bkg_new = data_new_bkg[nsub]
-        bkg_ref = data_ref_bkg[nsub]
-        std_new = data_new_bkg_std[nsub]
-        std_ref = data_ref_bkg_std[nsub]
-
         # replace infinite values and nans with the background
         mask_infnan = ~np.isfinite(data_new[nsub])
-        data_new[nsub][mask_infnan] = bkg_new[mask_infnan]
+        data_new[nsub][mask_infnan] = data_new_bkg[nsub][mask_infnan]
         mask_infnan = ~np.isfinite(data_ref[nsub])
-        data_ref[nsub][mask_infnan] = bkg_ref[mask_infnan]
+        data_ref[nsub][mask_infnan] = data_ref_bkg[nsub][mask_infnan]
 
         # pixels with zero values in ref need to be set to zero in new
         # as well, to avoid subtracting non-overlapping image part
@@ -508,38 +501,31 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         
         # replace values <= 0 with the background
         mask_nonpos = (data_new[nsub] <= 0.)
-        data_new[nsub][mask_nonpos] = bkg_new[mask_nonpos]
+        data_new[nsub][mask_nonpos] = data_new_bkg[nsub][mask_nonpos]
         mask_nonpos = (data_ref[nsub] <= 0.)
-        data_ref[nsub][mask_nonpos] = bkg_ref[mask_nonpos]
+        data_ref[nsub][mask_nonpos] = data_ref_bkg[nsub][mask_nonpos]
 
         # good place to make the corresponding variance images
         # N.B.: these are single images (i.e. not a cube) the size of
         # a subimage, so does not need the [nsub] index
         var_new = data_new[nsub] + readnoise_new**2 
         var_ref = data_ref[nsub] + readnoise_ref**2
-        # alternative:
-        #var_new = data_new[nsub] - bkg_new + std_new**2
-        #var_ref = data_ref[nsub] - bkg_ref + std_ref**2
 
         if C.nfakestars>0:
             index_fake = [slice(nsub*C.nfakestars, (nsub+1)*C.nfakestars)]
             fakestar_xpos[index_fake], fakestar_ypos[index_fake], fakestar_flux_input[index_fake]=(
                 add_fakestars (psf=psf_orig_new[nsub], data=data_new[nsub], var=var_new,
-                               bkg=bkg_new, std=std_new, readnoise=readnoise_new, fwhm=fwhm_new,
-                               log=log)
+                               bkg=data_new_bkg[nsub], std=data_new_bkg_std[nsub],
+                               readnoise=readnoise_new, fwhm=fwhm_new, log=log)
             )
             
         # subtract the background
-        data_new[nsub] -= bkg_new
-        data_ref[nsub] -= bkg_ref
+        data_new[nsub] -= data_new_bkg[nsub]
+        data_ref[nsub] -= data_ref_bkg[nsub]
 
-        # replace saturated pixel values with zero
-        #data_new[nsub][data_new[nsub] > 0.95*satlevel_new] = 0.
-        #data_ref[nsub][data_ref[nsub] > 0.95*satlevel_ref] = 0.
-
-        # read subcut, which defines the pixel indices [y1 y2 x1 x2]
-        # identifying the corners of the subimage in the entire
-        # input/output image coordinate frame
+        # [subcut] defines the pixel indices [y1 y2 x1 x2] identifying
+        # the corners of the subimage in the entire input/output image
+        # coordinate frame
         subcut = cuts_ima[nsub]
                 
         # start with full-frame values
@@ -611,15 +597,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         #if nthreads > 1: lock.acquire()    
             
         # call Barak's function
-        data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = run_ZOGY(data_ref[nsub],
-                                                                       data_new[nsub], 
-                                                                       psf_ref[nsub],
-                                                                       psf_new[nsub], 
-                                                                       np.median(std_ref),
-                                                                       np.median(std_new), 
-                                                                       f_ref, f_new,
-                                                                       var_ref, var_new,
-                                                                       dx_sub, dy_sub, log)
+        data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = (
+            run_ZOGY(data_ref[nsub], data_new[nsub], psf_ref[nsub], psf_new[nsub], 
+                     np.median(data_ref_bkg_std[nsub]), np.median(data_new_bkg_std[nsub]), 
+                     f_ref, f_new, var_ref, var_new, dx_sub, dy_sub, log)
+        )
+            
         #if nthreads > 1: lock.release()
 
         # check that robust std of Scorr is around unity
@@ -655,10 +638,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         data_Fpsf_full[index_subcut] = data_Fpsf[index_extract]
         data_Fpsferr_full[index_subcut] = data_Fpsferr[index_extract]
         data_new_full[index_subcut] = (data_new[nsub][index_extract] +
-                                       bkg_new[index_extract]) #/ gain_new
+                                       data_new_bkg[nsub][index_extract]) #/ gain_new
         data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
-                                       bkg_ref[index_extract]) #/ gain_ref
-
+                                       data_ref_bkg[nsub][index_extract]) #/ gain_ref
+        data_new_mask_full[index_subcut] = data_new_mask[nsub][index_extract]
+        data_ref_mask_full[index_subcut] = data_ref_mask[nsub][index_extract]
+        
         if C.display and (nsub==0 or nsub==nysubs-1 or nsub==nsubs/2 or
                           nsub==nsubs-nysubs or nsub==nsubs-1):
 
@@ -671,26 +656,31 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         
             # write new and ref subimages to fits
             newname = base_new+'_wcs'+subend
-            #fits.writeto(newname, ((data_new[nsub]+bkg_new)/gain_new).astype('float32'), overwrite=True)
+            #fits.writeto(newname, ((data_new[nsub]+data_new_bkg[nsub])/gain_new).astype('float32'), overwrite=True)
             fits.writeto(newname, data_new[nsub].astype('float32'), overwrite=True)
             refname = base_ref+'_wcs'+subend
-            #fits.writeto(refname, ((data_ref[nsub]+bkg_ref)/gain_ref).astype('float32'), overwrite=True)
+            #fits.writeto(refname, ((data_ref[nsub]+data_ref_bkg[nsub])/gain_ref).astype('float32'), overwrite=True)
             fits.writeto(refname, data_ref[nsub].astype('float32'), overwrite=True)
+
             # variance images
             fits.writeto(base_new+'_Var'+subend, var_new.astype('float32'), overwrite=True)
             fits.writeto(base_ref+'_Var'+subend, var_ref.astype('float32'), overwrite=True)
             # background images
-            fits.writeto(base_new+'_bkg'+subend, bkg_new.astype('float32'), overwrite=True)
-            fits.writeto(base_ref+'_bkg'+subend, bkg_ref.astype('float32'), overwrite=True)
-            fits.writeto(base_new+'_std'+subend, std_new.astype('float32'), overwrite=True)
-            fits.writeto(base_ref+'_std'+subend, std_ref.astype('float32'), overwrite=True)
-
+            fits.writeto(base_new+'_bkg'+subend, data_new_bkg[nsub].astype('float32'), overwrite=True)
+            fits.writeto(base_ref+'_bkg'+subend, data_ref_bkg[nsub].astype('float32'), overwrite=True)
+            fits.writeto(base_new+'_std'+subend, data_new_bkg_std[nsub].astype('float32'), overwrite=True)
+            fits.writeto(base_ref+'_std'+subend, data_ref_bkg_std[nsub].astype('float32'), overwrite=True)
+            # masks
+            fits.writeto(base_new+'_mask'+subend, data_new_mask[nsub].astype('uint8'), overwrite=True)
+            fits.writeto(base_ref+'_mask'+subend, data_ref_mask[nsub].astype('uint8'), overwrite=True)
+            
             # and display
             cmd = ['ds9','-zscale',newname,refname, base_newref+'_D'+subend,
                    base_newref+'_S'+subend, base_newref+'_Scorr'+subend, 
                    base_new+'_Var'+subend, base_ref+'_Var'+subend,
                    base_new+'_bkg'+subend, base_ref+'_bkg'+subend,
                    base_new+'_std'+subend, base_ref+'_std'+subend,
+                   base_new+'_mask'+subend, base_ref+'_mask'+subend,
                    base_newref+'_VSn.fits', base_newref+'_VSr.fits',
                    base_newref+'_VSn_ast.fits', base_newref+'_VSr_ast.fits',
                    base_newref+'_Sn.fits', base_newref+'_Sr.fits',
@@ -719,6 +709,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
             pool.map(zogy_subloop, range(nsubs))
         except Exception as e:
             zogy_processed = False
+            print_exception(log)
             log.error('exception was raised during [zogy_subloop]: {}'.format(e))  
         else:
             zogy_processed = True
@@ -753,15 +744,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         header_zogy['Z-FPEMED'] = (median_Fpsferr, '[e-] median Fpsferr full image')
         header_zogy['Z-FPESTD'] = (std_Fpsferr, '[e-] sigma (STD) Fpsferr full image')
 
-        fits_mask_comb = base_newref+'_mask_comb.fits'
-        if not os.path.isfile(fits_mask_comb):
-            fits_mask_comb = None
-        
         # find transients using function [get_trans_alt], which
         # applies threshold cuts directly on Scorr for the transient
         # detection, rather than running SExtractor (see below)
-        ntrans = get_trans_alt (data_new_full, data_ref_full, data_D_full, data_Scorr_full,
-                                data_Fpsf_full, data_Fpsferr_full, log, fits_mask=fits_mask_comb)
+        ntrans = get_trans (data_new_full, data_ref_full, data_D_full, data_Scorr_full,
+                            data_Fpsf_full, data_Fpsferr_full,
+                            data_new_mask_full, data_ref_mask_full, log)
 
         # add header keyword(s):
         header_zogy['T-NSIGMA'] = (C.transient_nsigma, '[sigma] transient detection threshold')
@@ -778,29 +766,16 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         header_newzogy.add_comment('Propagated header from new image (including WCS solution)')
         fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, overwrite=True)
-        fits.writeto(base_newref+'_Scorr_neg.fits', np.negative(data_Scorr_full), header_newzogy,
-                     overwrite=True)
         fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_newzogy, overwrite=True)
 
         if C.display:
             fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
             fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
+            fits.writeto('new_mask.fits', data_new_mask_full, header_new, overwrite=True)
+            fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref, overwrite=True)
             fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
-
-        # find transients using function [get_trans], which uses
-        # SExtractor for the transient detection
-        transcat_pos = base_newref+'.transcat_pos'
-        result = get_trans (base_newref+'_Scorr.fits', transcat_pos, pixscale_new, 'green', log,
-                            mask=fits_mask_comb)
-        # add PSF fluxes and errors 
-        result = get_trans_flux (transcat_pos, data_Fpsf_full, data_Fpsferr_full)
-
-        transcat_neg = base_newref+'.transcat_neg'
-        result = get_trans (base_newref+'_Scorr_neg.fits', transcat_neg, pixscale_new, 'pink', log,
-                            mask=fits_mask_comb)
-        result = get_trans_flux (transcat_neg, data_Fpsf_full, data_Fpsferr_full)
-
+            
     if telescope=='meerlicht' or telescope=='blackgem':
         # using the function [format_cat], write the new, ref and
         # transient output catalogues with the desired format, where the
@@ -820,7 +795,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
                                  header_toadd=header_ref)
         # trans catalogue
         if new and ref:
-            cat_trans = base_newref+'.transcat_pos'
+            cat_trans = base_newref+'.transcat'
             cat_trans_out = base_newref+'_trans.fits'
             thumbnail_data = [data_new_full, data_ref_full, data_D_full, data_Scorr_full]
             thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 'THUMBNAIL_SCORR']
@@ -893,19 +868,26 @@ def optimal_subtraction(new_fits=None, ref_fits=None, telescope=None, log=None, 
         # and display
         if C.display:
         #if True:
-            if C.nfakestars>0:
-                cmd = ['ds9','-zscale','new.fits','ref.fits',
-                       base_newref+'_D.fits', base_newref+'_Scorr.fits']
-            else:
-                cmd = ['ds9','-zscale',new_fits,ref_fits_remap,
-                       base_newref+'_D.fits', base_newref+'_Scorr.fits']
-            if os.path.isfile(transcat_pos+'_ds9regions'):
-                cmd += ['-regions', transcat_pos+'_ds9regions']
-            if os.path.isfile(transcat_neg+'_ds9regions'):
-                cmd += ['-regions', transcat_neg+'_ds9regions']
+            cmd = ['ds9', '-zscale', 'new.fits', 'new_mask.fits',
+                   'ref.fits', 'ref_mask.fits', 
+                   base_newref+'_D.fits', base_newref+'_Scorr.fits']
+            # add ds9 regions
+            cmd += ['-regions', base_newref+'_ds9regions.txt']
             result = subprocess.call(cmd)
 
 
+################################################################################
+
+def print_exception(log):
+    exc_type, exc_obj, tb = sys.exc_info()
+    f = tb.tb_frame
+    lineno = tb.tb_lineno
+    filename = f.f_code.co_filename
+    linecache.checkcache(filename)
+    line = linecache.getline(filename, lineno, f.f_globals)
+    log.info('exception in ({}, line {}: "{}"): {}'.format(filename, lineno, line.strip(), exc_obj))
+
+    
 ################################################################################
 
 def add_fakestars (psf, data, var, bkg, std, readnoise, fwhm, log):
@@ -932,9 +914,8 @@ def add_fakestars (psf, data, var, bkg, std, readnoise, fwhm, log):
     xsize_fft = C.subimage_size + 2*C.subimage_border
     psf_hsize = psf_size_new/2
     
-    # place stars in random positions across the image,
-    # keeping C.subimage_border + psf_size_new/2 pixels off
-    # each edge
+    # place stars in random positions across the image, keeping
+    # C.subimage_border + psf_size_new/2 pixels off each edge
     edge = C.subimage_border + psf_size_new/2 + 1
     xpos = (np.random.rand(C.nfakestars)*(xsize_fft-2*edge) + edge).astype(int)
     ypos = (np.random.rand(C.nfakestars)*(ysize_fft-2*edge) + edge).astype(int)
@@ -948,13 +929,11 @@ def add_fakestars (psf, data, var, bkg, std, readnoise, fwhm, log):
         index_temp = [slice(ypos[nstar]-psf_hsize, ypos[nstar]+psf_hsize+1),
                       slice(xpos[nstar]-psf_hsize, xpos[nstar]+psf_hsize+1)]
 
-        # Use function [flux_optimal_s2n] to estimate flux
-        # needed for star with S/N of [C.fakestar_s2n].  This
-        # S/N estimate includes the Poisson noise from any
-        # object that happens to be present in the image at
-        # the fakestar position.  If this should be just the
-        # background instead, replace data_new[nsub] with
-        # bkg_new.
+        # Use function [flux_optimal_s2n] to estimate flux needed for
+        # star with S/N of [C.fakestar_s2n].  This S/N estimate
+        # includes the Poisson noise from any object that happens to
+        # be present in the image at the fakestar position.  If this
+        # should be just the background instead, replace data with bkg.
         flux_fakestar[nstar] = flux_optimal_s2n (psf, data[index_temp], readnoise,
                                                  C.fakestar_s2n, fwhm=fwhm)
         # multiply psf_orig_new to contain fakestar_flux
@@ -1138,6 +1117,7 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
         'MAGERR_OPT':     ['E', 'e-/s' , 'flt16' ],
         'FLUX_PSF':       ['E', 'e-/s' , 'flt32' ],
         'FLUXERR_PSF':    ['E', 'e-/s' , 'flt16' ],
+        'S2N':            ['E', ''     , 'flt16' ],
         'THUMBNAIL_RED':  [thumbnail_size2+'E', 'e-/s' , 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_size2+'E', 'e-/s' , 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_size2+'E', 'e-/s' , 'flt16' ],
@@ -1168,8 +1148,7 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
                           'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
-                          'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
-                          'FLUX_MAX', 'FLUX_PSF', 'FLUXERR_PSF']
+                          'S2N', 'FLUX_PSF', 'FLUXERR_PSF']
         
     columns = []
     for key in keys_to_record:
@@ -1290,8 +1269,8 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 
 ################################################################################
 
-def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
-                   data_Fpsf, data_Fpsferr, log, fits_mask=None):
+def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
+               data_new_mask, data_ref_mask, log):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), estimates their approximate position, and fits
@@ -1307,16 +1286,6 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
 
     if C.timing: t = time.time()
 
-    # read fits_mask if not None
-    if fits_mask is not None:
-        # need to check if the following returns the correct integers
-        # - might need to add 0.5 as previously done, because some
-        # values in [fits_mask] were floats just below the integer,
-        # e.g.  0.9999
-        data_mask = read_hdulist(fits_mask, ext_data=0, dtype='uint8')
-        #with fits.open(fits_mask) as hdulist:
-        #    data_mask = (hdulist[0].data+0.5).astype('uint8')
-    
     # mask of pixels with absolute values >= C.transient_sigma
     mask_significant_init = (np.abs(data_Scorr) >= C.transient_nsigma).astype('uint8')
     
@@ -1356,6 +1325,7 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
     region = measure.regionprops(data_Scorr_regions, cache=True)
 
     # initialize arrays
+    mask_keep = np.zeros(nregions, dtype=bool)
     npixels_array = np.zeros(nregions)
     x_array = np.zeros(nregions)
     y_array = np.zeros(nregions)
@@ -1363,6 +1333,9 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
     erry2_array = np.zeros(nregions)
     errxy_array = np.zeros(nregions)
     elongation_array = np.zeros(nregions)
+    Scorr_array = np.zeros(nregions)
+    flux_array = np.zeros(nregions)
+    fluxerr_array = np.zeros(nregions)
     
     t1 = time.time()
     # loop over the regions:
@@ -1393,13 +1366,12 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
         xmin, ymin, xmax, ymax = bbox
         index_bbox = [slice(xmin,xmax),slice(ymin,ymax)]
          
-        # infer a FLAG for each region if it is affected by one or more
-        # pixels in the mask image (if present)
-        # for the moment, discard the region if mask of the region is nonzero
-        # need to update combined mask properly with bitwise OR
-        if fits_mask is not None:
-            if np.sum(data_mask[index_region]) > 0:
-                continue
+        # check if region is affected by one or more flagged pixels in
+        # the input new and ref mask arrays; for the moment, discard
+        # the region if sum of flags in either new or ref mask is
+        # nonzero
+        if np.sum(data_new_mask[index_region]) > 0 or np.sum(data_ref_mask[index_region]):
+            continue
 
         # discard if region area is too small or too big
         npixels = len(coords)
@@ -1416,11 +1388,18 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
         index_peak = np.abs(data_Scorr_region).argmax()
         XPEAK = x_index[index_peak]
         YPEAK = y_index[index_peak]
-        Scorr_peak = data_Scorr_region[index_peak]  
+        Scorr_peak = data_Scorr_region[index_peak]
         log.info('XPEAK: {}, YPEAK: {}, Scorr_peak: {}'.format(XPEAK, YPEAK, Scorr_peak))
+
+        # flux and fluxerr
+        flux_peak = data_Fpsf_region[index_peak]
+        fluxerr_peak = data_Fpsferr_region[index_peak]
+        
+        color_ds9 = 'green'
         if Scorr_peak < 0.:
+            color_ds9 = 'pink'
             data_Scorr_region = -data_Scorr_region
-            
+        
         # using function [trans_measure], obtain a number of
         # quantities, such as central pixel coordinates and
         # elongation, weighted with image [intensity]
@@ -1441,7 +1420,8 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
         #     better sampled than the image pixels
         
         
-        # append to output lists
+        # fill output lists
+        mask_keep[i] = True
         npixels_array[i] = npixels
         x_array[i] = X
         y_array[i] = Y
@@ -1449,6 +1429,9 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
         erry2_array[i] = ERRY2
         errxy_array[i] = ERRXY
         elongation_array[i] = ELONGATION
+        Scorr_array[i] = Scorr_peak
+        flux_array[i] = flux_peak
+        fluxerr_array[i] = fluxerr_peak
         
         if False:
             ds9_arrays(new=data_new[index_bbox],
@@ -1457,18 +1440,33 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
                        Scorr=data_Scorr[index_bbox],
                        Fpsf=data_Fpsf[index_bbox],
                        Fpsferr=data_Fpsferr[index_bbox],
-                       mask=data_mask[index_bbox])
+                       mask_new=data_new_mask[index_bbox],
+                       mask_ref=data_ref_mask[index_bbox])
             
-            
-    mask_keep = (npixels_array > 0)
-    
-    ntrans = np.sum(mask_keep)
-    log.info('ntrans: {}'.format(ntrans))
-
     # loop arrays and discard entries within some number of
     # pixels (3xFWHM?) of each other 
     #for i in range(ntrans):
-        
+
+    ntrans = np.sum(mask_keep)
+    log.info('ntrans: {}'.format(ntrans))
+
+    # create output table:
+    table_all = Table([x_array, y_array, errx2_array, erry2_array, errxy_array,
+                       elongation_array, Scorr_array, flux_array, fluxerr_array],
+                      names=('XWIN_IMAGE', 'YWIN_IMAGE', 'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE',
+                             'ERRXYWIN_IMAGE', 'ELONGATION', 'S2N', 'FLUX_PSF', 'FLUXERR_PSF'))
+    # keep relevant transients
+    table = table_all[mask_keep]
+    # add number
+    table['NUMBER'] = np.arange(ntrans)+1
+    # add RA and DEC
+    wcs = WCS(base_new+'.wcs')
+    ra, dec = wcs.all_pix2world(table['XWIN_IMAGE'], table['YWIN_IMAGE'], 1)
+    table['ALPHAWIN_J2000'] = ra
+    table['DELTAWIN_J2000'] = dec
+    
+    # create output fits catalog
+    table.write(base_newref+'.transcat', format='fits')
 
     # determine output transient catalogue array, containing
     # columns similar to these:
@@ -1482,6 +1480,14 @@ def get_trans_alt (data_new, data_ref, data_D, data_Scorr,
     #       PSF flux and error from D, chi2 (should be similar for all fits; if not,
     #       record separate chi2 for each fit).
         
+    # prepare ds9 region file
+    f = open(base_newref+'_ds9regions.txt', 'w')
+    for i in range(ntrans):
+        f.write('circle({},{},{}) # color={} width=2 text={{{}}} font="times 7"\n'.
+                format(x_array[mask_keep][i], y_array[mask_keep][i], 
+                       2.*fwhm_new, color_ds9, i))
+    f.close()
+
     if C.timing:
         log_timing_memory (t0=t, label='get_trans', log=log)
         
@@ -1583,84 +1589,6 @@ def get_shape_parameters (x2, y2, xy, errx2, erry2, errxy):
     return a, b, theta, erra, errb, errtheta
 
 
-################################################################################
-
-def get_trans(Scorr, transcat, pixscale, color, log, mask=None):
-
-    #if not os.path.isfile(transcat) or C.redo:
-    # just run SExtractor even if output file already exists;
-    # otherwise it's complicated with binary fits table extension
-    # and presence of IMAFLAGS_ISO in catalog
-    result = run_sextractor(Scorr, transcat, C.sex_cfg_trans, C.sex_par_trans,
-                            pixscale, log, fit_psf=False, return_fwhm=False,
-                            fraction=1.0, fwhm=fwhm_new, save_bkg=False,
-                            update_vignet=False, mask=mask)
-        
-    # read catalog
-    with fits.open(transcat) as hdulist:
-        data = hdulist[2].data
-
-        # select objects based on FLUX_MAX, FLAG, CLASS_STAR
-        index = ((data['FLUX_MAX'] >= C.transient_nsigma) &
-                 (data['FLAGS'] == 0))
-
-        # add constraint on IMAFLAGS_ISO which should be present in
-        # SExtractor output in case that a mask image was provided
-        if 'IMAFLAGS_ISO' in data.names:
-            index = ((index) & (data['IMAFLAGS_ISO'] == 0))
-
-        data_trans = data[:][index]
-
-        hdulist[2].data = data_trans
-        hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
-        #hdulist_new.writeto(transcat+'_selected', overwrite=True)
-        hdulist_new.writeto(transcat, overwrite=True)
-        hdulist_new.close()
-
-    # prepare ds9 region file
-    f = open(transcat+'_ds9regions', 'w')
-    ntrans = np.shape(data_trans)[0]
-    log.info('ntrans: {}'.format(ntrans))
-    for i in range(ntrans):
-        f.write('circle({},{},{}) # color={} width=2 text={{{}}} font="times 7"\n'.
-                format(data_trans['XWIN_IMAGE'][i], data_trans['YWIN_IMAGE'][i],
-                       2.*fwhm_new, color, i))
-    f.close()
-
-
-################################################################################
-
-def get_trans_flux (transcat, data_Fpsf, data_Fpsferr):
-    
-    # read catalog
-    data = read_hdulist (transcat, ext_data=1)
-
-    # coordinates to loop
-    xcoords = data['XWIN_IMAGE']
-    ycoords = data['YWIN_IMAGE']
-    ncoords = len(xcoords)
- 
-    # initialise output fluxes
-    flux_psf = np.zeros(ncoords)
-    fluxerr_psf = np.zeros(ncoords)
-        
-    # loop coordinates
-    for i in range(ncoords):
-
-        xpos = int(xcoords[i]-0.5)
-        ypos = int(ycoords[i]-0.5)
-
-        flux_psf[i] = data_Fpsf[ypos, xpos]
-        fluxerr_psf[i] = data_Fpsferr[ypos, xpos]
-    
-    # add PSF fluxes to catalog
-    data = append_fields(data, ['FLUX_PSF','FLUXERR_PSF'],
-                         [flux_psf, fluxerr_psf], usemask=False, asrecarray=True)
-
-    # write updated catalog to file
-    fits.writeto(transcat, data, overwrite=True)
-    
-    
 ################################################################################
 
 def get_psfoptflux_xycoords (psfex_bintable, D, S, S_std, RON, xcoords, ycoords,
@@ -2427,10 +2355,28 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     fits_bkg_std = base+'_bkg_std.fits'
     data_bkg_std = read_hdulist (fits_bkg_std, ext_data=0, dtype='float16')
 
-    # and mask image if not None
+    # function to create a minimal mask of saturated pixels and the
+    # adjacent pixels from input data, in case mask image is not
+    # provided
+    def create_mask (data, satlevel):
+        # saturated pixels
+        data_mask = np.zeros(data.shape, dtype='uint8')
+        mask_sat = (data >= satlevel)
+        data_mask[mask_sat] += C.mask_value['saturated']
+        # pixels connected to saturated pixels
+        mask_sat_adj = ndimage.binary_dilation(mask_sat, structure=np.ones((3,3)).astype('bool'))
+        mask_sat_adj[mask_sat] = False
+        data_mask[mask_sat_adj] += C.mask_value['saturated_connected']
+        return data_mask
+    
+    # and read in mask image
     if fits_mask is not None:
         data_mask = read_hdulist (fits_mask, ext_data=0, dtype='uint8')
-            
+    else:
+        # if mask image is not provided, use function [create_mask] to
+        # create a minimal mask
+        data_mask = create_mask(data_wcs, satlevel)
+
     # if remapped image is provided, read that also
     if ref_fits_remap is not None:
         data_ref_remap = read_hdulist (ref_fits_remap, ext_data=0, dtype='float32')
@@ -2442,46 +2388,36 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # new image: image_new[mask_new] correspond to
         # image_ref[mask_ref]. This mapping needs to be done only
         # once, and can be used for all three remappings.
-        mask_new, mask_ref = xy_index_ref (ysize, xsize,
-                                           base_new+'.wcs', base_ref+'.wcs', log)
+        mask_new, mask_ref = xy_index_ref (ysize, xsize, base_new+'.wcs', base_ref+'.wcs', log)
 
         # this function applies this mapping to an input fits image,
         # and returns the remapped data
-        def get_data_remap (image_fits, mask_new, mask_ref):
+        def get_data_remap (image_fits, mask_new, mask_ref, value_edge=0.):
             data = read_hdulist (image_fits, ext_data=0)
-            # initialise remapped image to zero
+            # initialise remapped image to [value_edge]
             data_remap = np.zeros(data.shape)
             data_remap[mask_new] += data[mask_ref]
+            # region in image_new that does not overlap with image_ref
+            # is set to [value_edge]
+            if value_edge != 0.:
+                data_remap[~mask_new] = value_edge
             return data_remap
                 
-        ref_fits_bkg_std = base_ref+'_bkg_std.fits'
-        ref_fits_bkg = base_ref+'_bkg.fits'
         # remap reference image background
+        ref_fits_bkg = base_ref+'_bkg.fits'
         data_ref_bkg_remap = get_data_remap(ref_fits_bkg, mask_new, mask_ref).astype('float32')
         # remap reference image background std
+        ref_fits_bkg_std = base_ref+'_bkg_std.fits'
         data_ref_bkg_std_remap = get_data_remap(ref_fits_bkg_std, mask_new, mask_ref).astype('float16')
         # remap mask image if it exists
         if fits_mask is not None:
-            data_ref_mask_remap = (get_data_remap(fits_mask, mask_new, mask_ref)+0.5).astype('uint8')
-                
-            # prepare combined mask
-            # first read in mask of new image
-            data_new_mask = None
-            new_fits_mask = base_new+'_mask.fits'
-            if os.path.isfile(new_fits_mask):
-                data_new_mask = read_hdulist (new_fits_mask, ext_data=0, dtype='uint8')
-            else:
-                log.info('Warning: {} does not exist, while {} does'.
-                         format(new_fits_mask, ref_fits_mask))
-            # not sure how to combine; just add for now
-            if data_new_mask is not None:
-                data_mask_comb = (data_new_mask + data_ref_mask_remap).astype('uint8')
-            else:
-                data_mask_comb = data_ref_mask_remap.astype('uint8')
-            # write to fits
-            fits_mask_comb = base_new+'_mask_comb.fits'
-            fits.writeto(fits_mask_comb, data_mask_comb, overwrite=True)
-    
+            data_ref_remap_mask = get_data_remap(fits_mask, mask_new, mask_ref,
+                                                 value_edge=C.mask_value['edge']).astype('uint8')
+        else:
+            # if mask image is not provided, use above function [create_mask] to
+            # create a minimal mask
+            data_ref_remap_mask = create_mask(data_ref_remap, satlevel)
+
     # convert counts to electrons
     satlevel *= gain
     data_wcs *= gain
@@ -2492,7 +2428,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_ref_bkg_remap *= gain
         data_ref_bkg_std_remap *= gain
         
-        # print warning if any pixel value is not finite
+    # print warning if any pixel value is not finite
     if np.any(~np.isfinite(data_wcs)):
         log.info('Warning: not all pixel values are finite')
         log.info('         replacing NANs with zeros and +-inf with large +-numbers')        
@@ -2525,11 +2461,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         sexcat = base+'_cat.fits'
         data_sex = read_hdulist (sexcat, ext_data=1)
 
-        # remove entries close to the edge
-        #if 'IMAFLAGS_ISO' in data_sex.columns.names:
-        #    mask_use = (data_sex['IMAFLAGS_ISO'] != 2)
-        #    data_sex = data_sex[:][mask_use]
-            
         # read in positions and their errors
         xwin = data_sex['XWIN_IMAGE']
         ywin = data_sex['YWIN_IMAGE']
@@ -2635,13 +2566,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             log.info('5-sigma limiting magnitude: {}'.format(limmag_5sigma))
 
             # add header keyword(s):
-            header['PC-P'] = (True, 'successfully processed by photometric calibration?')
+            header['PC-P'] = (True, 'successfully processed by phot. calibration?')
             calname = C.cal_cat.split('/')[-1]
             header['PC-NAME'] = (calname, 'name calibration catalog') 
             caldate = time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(C.cal_cat)))
             header['PC-DATE'] = (caldate, 'date saved calibration catalog') 
             header['PC-NCAL'] = (ncalstars, 'number of matching stars in calibration catalog')
-            header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+airmass*k')
+            header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
             header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
             header['PC-EXTCO'] = (C.ext_coeff[filt], '[mag] filter extinction coefficient (k)')
             header['LIMMAG3'] = (float(limmag_3sigma), '[mag] full-frame 3-sigma limiting magnitude')
@@ -2679,8 +2610,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data = data_ref_remap
         data_bkg = data_ref_bkg_remap
         data_bkg_std = data_ref_bkg_std_remap
-        if fits_mask is not None:
-            data_mask = data_ref_mask_remap
+        data_mask = data_ref_remap_mask
     else:
         data = data_wcs
     
@@ -2695,6 +2625,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_bkg = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_bkg_std = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float16')
+    fftdata_mask = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='uint8')
     for nsub in range(nsubs):
         fftcut = cuts_fft[nsub]
         index_fft = [slice(fftcut[0],fftcut[1]), slice(fftcut[2],fftcut[3])]
@@ -2703,6 +2634,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         fftdata[nsub][index_fft] = data[index_fftdata]
         fftdata_bkg[nsub][index_fft] = data_bkg[index_fftdata]
         fftdata_bkg_std[nsub][index_fft] = data_bkg_std[index_fftdata]
+        fftdata_mask[nsub][index_fft] = data_mask[index_fftdata]
 
     if C.timing:
         log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
@@ -2876,7 +2808,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     #    log.info('fftdata_bkg.dtype {}'.format(fftdata_bkg.dtype))
     #    log.info('fftdata_bkg_std.dtype {}'.format(fftdata_bkg_std.dtype))
     
-    return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
+    return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std, fftdata_mask
     
 
 ################################################################################
@@ -3046,15 +2978,15 @@ def fixpix (data, data_mask, data_bkg, log, satlevel=60000.):
     #mask[data >= satlevel] = 4
 
     # try just replacing the edge pixels with the background
-    mask_replace = (data_mask==2)
-    data[mask_replace] = data_bkg[mask_replace]
+    #mask_replace = (data_mask==2)
+    #data[mask_replace] = data_bkg[mask_replace]
 
     # Replace pixels that correspond to zeros in data with the
     # background; this will ensure that the borders on the sides of
     # the entire image and the parts of the image where the new and
     # ref do not overlap can be handled by run_ZOGY.
-    data[data==0] = data_bkg[data==0]
-
+    #data[data==0] = data_bkg[data==0]
+    
     # using restoration.inpaint_biharmonic
     # replace nonzero pixels with 1
     #mask[mask != 0] = 1
@@ -3073,7 +3005,7 @@ def fixpix (data, data_mask, data_bkg, log, satlevel=60000.):
     #data[mask != 0] = np.nan
     #data_fixed = inpaint.replace_nans(data, max_iter=5, kernel_radius=1,
     #                                  kernel_sigma=2, method='localmean')
-
+    
     if C.timing:
         log_timing_memory (t0=t, label='fix_pix', log=log)
 
@@ -4756,6 +4688,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run optimal_subtraction on images')
     parser.add_argument('--new_fits', default=None, help='filename of new image')
     parser.add_argument('--ref_fits', default=None, help='filename of ref image')
+    parser.add_argument('--new_fits_mask', default=None, help='filename of new image mask')
+    parser.add_argument('--ref_fits_mask', default=None, help='filename of ref image mask')
     parser.add_argument('--telescope', default=None, help='telescope')
     parser.add_argument('--log', default=None, help='help')
     parser.add_argument('--verbose', default=None, help='verbose')
@@ -4765,8 +4699,9 @@ def main():
     # Utils/Constants_[telescope} file as C; all former global
     # parameters are now referred to as C.[parameter name]
     args = parser.parse_args()
-
-    optimal_subtraction(args.new_fits, args.ref_fits, args.telescope, args.log, args.verbose)
+    
+    optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask, args.ref_fits_mask,
+                        args.telescope, args.log, args.verbose)
 
 if __name__ == "__main__":
     main()
