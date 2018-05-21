@@ -49,6 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
+__version__ = '1.0'
 
 ################################################################################
 
@@ -129,8 +130,11 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     new = set_bool (new_fits)
     ref = set_bool (ref_fits)
     if not new and not ref:
-        log.error('no valid input image(s) provided')
-        raise SystemExit
+        log.critical('no valid input image(s) provided')
+        if log:
+            return 'critical', 'No valiid input image - please check filenames/paths.'
+        else:
+            raise SystemExit
 
     # global parameters
     if new:
@@ -874,6 +878,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             # add ds9 regions
             cmd += ['-regions', base_newref+'_ds9regions.txt']
             result = subprocess.call(cmd)
+    return 'info', 'Successfully ran ZOGY on image.'
 
 
 ################################################################################
@@ -2310,15 +2315,21 @@ def get_keyvalue (key, header, log):
         try:
             key_name = eval('C.key_'+key)
         except:
-            log.error('either [{}] or [{}] need to be defined in [settings_file]'.
+            log.critical('either [{}] or [{}] need to be defined in [settings_file]'.
                       format(key, 'key_'+key))
-            raise SystemExit
+            if log:
+                return 'critical', key+' not define in setting file.'
+            else:
+                raise SystemExit
         else:
             if key_name in header:
                 value = header[key_name]
             else:
-                log.error('Error: keyword {} not present in header'.format(key_name))
-                raise SystemExit
+                log.critical('Error: keyword {} not present in header'.format(key_name))
+                if log:
+                    return 'critical', key_name+' not in header.'
+                else:
+                    raise SystemExit
 
     if C.verbose:
         log.info('keyword: {}, adopted value: {}'.format(key, value))
