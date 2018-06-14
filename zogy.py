@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '1.0'
+__version__ = '0.3'
 
 ################################################################################
 
@@ -404,16 +404,18 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     
         dr = np.sqrt(dx**2 + dy**2)
         if C.verbose: log.info('sigma (STD) dr over full frame [pixels]: {}'.format(np.std(dr)))
-        dr_full = np.sqrt(np.median(dr)**2 + np.std(dr)**2)
-        dx_full = np.sqrt(np.median(dx)**2 + np.std(dx)**2)
-        dy_full = np.sqrt(np.median(dy)**2 + np.std(dy)**2)
-        #dr_full = np.std(dr)
-        #dx_full = np.std(dx)
-        #dy_full = np.sdata_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_stdtd(dy)
+
+        dr_mean, dr_std, dr_median = clipped_stats(dr, log=log)
+        dx_mean, dx_std, dx_median = clipped_stats(dx, log=log)
+        dy_mean, dy_std, dy_median = clipped_stats(dy, log=log)
+
+        dr_full = np.sqrt(dr_median**2 + dr_std**2)
+        dx_full = np.sqrt(dx_median**2 + dx_std**2)
+        dy_full = np.sqrt(dy_median**2 + dy_std**2)
         if C.verbose:
-            log.info('median dr: {:.3f} +- {:.3f} pixels'.format(np.median(dr), np.std(dr)))
-            log.info('median dx: {:.3f} +- {:.3f} pixels'.format(np.median(dx), np.std(dx)))
-            log.info('median dy: {:.3f} +- {:.3f} pixels'.format(np.median(dy), np.std(dy)))
+            log.info('median dr: {:.3f} +- {:.3f} pixels'.format(dr_median, dr_std))
+            log.info('median dx: {:.3f} +- {:.3f} pixels'.format(dx_median, dx_std))
+            log.info('median dy: {:.3f} +- {:.3f} pixels'.format(dy_median, dy_std))
             log.info('full-frame dr: {:.3f}, dx: {:.3f}, dy: {:.3f}'
                      .format(dr_full, dx_full, dy_full))
 
@@ -426,9 +428,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
         # add header keyword(s):
         header_zogy['Z-DXYLOC'] = (C.dxdy_local, 'star position offsets determined per subimage?')
-        header_zogy['Z-DRSTD'] = (dr_full*pixscale_new, '[arcsec] dr sigma (STD) offsets full image')
-        header_zogy['Z-DXSTD'] = (dx_full*pixscale_new, '[arcsec] dx sigma (STD) offsets full image')
-        header_zogy['Z-DYSTD'] = (dy_full*pixscale_new, '[arcsec] dy sigma (STD) offsets full image')
+        header_zogy['Z-DR'] = (dr_median*pixscale_new, '[arcsec] dr median offset full image')
+        header_zogy['Z-DX'] = (dx_median*pixscale_new, '[arcsec] dx median offset full image')
+        header_zogy['Z-DY'] = (dy_median*pixscale_new, '[arcsec] dy median offset full image')
+        header_zogy['Z-DRSTD'] = (dr_std*pixscale_new, '[arcsec] dr sigma (STD) offsets full image')
+        header_zogy['Z-DXSTD'] = (dx_std*pixscale_new, '[arcsec] dx sigma (STD) offsets full image')
+        header_zogy['Z-DYSTD'] = (dy_std*pixscale_new, '[arcsec] dy sigma (STD) offsets full image')
         header_zogy['Z-FNRLOC'] = (C.fratio_local, 'flux ratios (Fnew/Fref) determined per subimage?')
         header_zogy['Z-FNR'] = (fratio_median_full, 'median flux ratio (Fnew/Fref) full image')
         header_zogy['Z-FNRSTD'] = (fratio_std_full, 'sigma (STD) flux ratio (Fnew/Fref) full image')
@@ -757,14 +762,30 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
         # add header keyword(s):
         header_zogy['T-NSIGMA'] = (C.transient_nsigma, '[sigma] transient detection threshold')
-        header_zogy['T-LFLUX3'] = (3.*median_Fpsferr, '[e-] full-frame transient 3-sigma limiting flux')
-        header_zogy['T-LFLUX5'] = (5.*median_Fpsferr, '[e-] full-frame transient 5-sigma limiting flux')
-        header_zogy['T-LFLUX'] = (C.transient_nsigma*median_Fpsferr,
-                                  '[e-] full-frame transient {}-sigma limiting flux'
+        lflux3 = 3.*median_Fpsferr
+        lflux5 = 5.*median_Fpsferr
+        lflux = float(C.transient_nsigma)*median_Fpsferr
+        header_zogy['T-LFLUX3'] = (lflux3, '[e-] full-frame transient 3-sigma limiting flux')
+        header_zogy['T-LFLUX5'] = (lflux5, '[e-] full-frame transient 5-sigma limiting flux')
+        header_zogy['T-LFLUX'] = (lflux, '[e-] full-frame transient {}-sigma limiting flux'
                                   .format(C.transient_nsigma))
-        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)'
-                                   .format(C.transient_nsigma))
-        
+        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)')
+
+        # infer limiting magnitudes from corresponding limiting
+        # fluxes using zeropoint and median airmass
+        if 'PC-ZP' in header_new and 'PC-AIRM' in header_new:
+            keywords = ['exptime', 'filter']
+            exptime, filt = read_header(header_new, keywords, log)
+            zeropoint = header_new['PC-ZP']
+            airmass = header_new['PC-AIRM']
+            lmag3 = zeropoint-2.5*np.log10(lflux3/exptime)-airmass*C.ext_coeff[filt]
+            lmag5 = zeropoint-2.5*np.log10(lflux5/exptime)-airmass*C.ext_coeff[filt]
+            lmag  = zeropoint-2.5*np.log10(lflux /exptime)-airmass*C.ext_coeff[filt]
+            header_zogy['T-LMAG3'] = (lmag3, '[mag] full-frame transient 3-sigma limiting mag')
+            header_zogy['T-LMAG5'] = (lmag5, '[mag] full-frame transient 5-sigma limiting mag')
+            header_zogy['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma limiting mag' 
+                                     .format(C.transient_nsigma))
+            
         # write full images to fits
         header_newzogy = header_new + header_zogy
         header_newzogy.add_comment('Propagated header from new image (including WCS solution)')
@@ -1471,7 +1492,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     table['DELTAWIN_J2000'] = dec
     
     # create output fits catalog
-    table.write(base_newref+'.transcat', format='fits')
+    table.write(base_newref+'.transcat', format='fits', overwrite=True)
 
     # determine output transient catalogue array, containing
     # columns similar to these:
@@ -2315,10 +2336,10 @@ def get_keyvalue (key, header, log):
         try:
             key_name = eval('C.key_'+key)
         except:
-            log.critical('either [{}] or [{}] need to be defined in [settings_file]'.
+            log.critical('either [{}] or [{}] needs to be defined in [settings_file]'.
                       format(key, 'key_'+key))
             if log:
-                return 'critical', key+' not define in setting file.'
+                return 'critical', key+' not defined in setting file.'
             else:
                 raise SystemExit
         else:
@@ -2516,6 +2537,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         limflux_5sigma = get_limflux (5.)
 
         # add header keyword(s):
+        mask_neg = (flux_opt < 0.)
+        header['NOBJ-NEG'] = (np.sum(mask_neg), 'number of objects with negative optimal flux')
         header['LIMFLUX3'] = (limflux_3sigma, '[e-] full-frame 3-sigma limiting flux')
         header['LIMFLUX5'] = (limflux_5sigma, '[e-] full-frame 5-sigma limiting flux')
         
@@ -2560,12 +2583,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
             # get airmasses
             airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, log)
-            airmass_sex_median = np.median(airmass_sex)
+            airmass_sex_median = float(np.median(airmass_sex))
             log.info('median airmass: {}'.format(airmass_sex_median))
-            
+
             mag_opt, magerr_opt, zp, zp_std = (
-                get_apply_zp(ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
-                             ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, imtype, log)
+                get_apply_zp(ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
+                             mag_cal, magerr_cal, exptime, filt, imtype, log)
             )
             ncalstars = np.size(mag_opt)
             
@@ -2580,14 +2603,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             header['PC-P'] = (True, 'successfully processed by phot. calibration?')
             calname = C.cal_cat.split('/')[-1]
             header['PC-NAME'] = (calname, 'name calibration catalog') 
-            caldate = time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(C.cal_cat)))
-            header['PC-DATE'] = (caldate, 'date saved calibration catalog') 
+            #caldate = time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(C.cal_cat)))
+            #header['PC-DATE'] = (caldate, 'date saved calibration catalog') 
             header['PC-NCAL'] = (ncalstars, 'number of matching stars in calibration catalog')
             header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
             header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
             header['PC-EXTCO'] = (C.ext_coeff[filt], '[mag] filter extinction coefficient (k)')
-            header['LIMMAG3'] = (float(limmag_3sigma), '[mag] full-frame 3-sigma limiting magnitude')
-            header['LIMMAG5'] = (float(limmag_5sigma), '[mag] full-frame 5-sigma limiting magnitude')
+            header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
+            header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
+            header['LIMMAG5'] = (limmag_5sigma, '[mag] full-frame 5-sigma limiting magnitude')
 
         else:
             header['PC-P'] = (False, 'successfully processed by photometric calibration?')
@@ -2824,8 +2848,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
 ################################################################################
 
-def get_apply_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
-                  ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, imtype, log):
+def get_apply_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
+                  mag_cal, magerr_cal, exptime, filt, imtype, log):
 
     if C.timing: t = time.time()
     log.info('Executing get_apply_zp ...')
@@ -3690,8 +3714,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     if C.timing: t = time.time()
     log.info('Executing run_wcs ...')
     
-    scale_low = 0.99 * pixscale
-    scale_high = 1.01 * pixscale
+    scale_low = (1.-C.pixscale_varyfrac) * pixscale
+    scale_high = (1.+C.pixscale_varyfrac) * pixscale
 
     base = image_in.replace('.fits','')
     sexcat = base+'_cat.fits'

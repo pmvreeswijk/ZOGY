@@ -1,4 +1,6 @@
 
+__version__ = '0.3'
+
 subimage_size = 960      # size of subimages
 subimage_border = 32     # border around subimage to avoid edge effects
 #trimmed MeerLICHT images:
@@ -49,7 +51,7 @@ key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
 #key_pixscale = 'PIXSCALE'
-pixscale = 0.56
+pixscale = 0.563
 key_exptime = 'EXPTIME'
 key_filter = 'FILTER'
 key_obsdate = 'DATE-OBS'
@@ -88,6 +90,8 @@ psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
+pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
+                         # be within this fraction of the assumed pixscale
 
 # Photometric calibration
 obs_lat = -32.38722      # observatory latitude in degrees (North)
@@ -98,19 +102,17 @@ obs_height = 1798.       # observatory height in meters above sealevel
 ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 # and the same for La Silla in the BlackGEM filters:
 #ext_coeff = {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}
-cal_cat = '/home/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1.fits'
+cal_cat = '/home/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1_20180319.fits'
 
 # path and names of configuration files
 cfg_dir = './Config/'
-sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
-sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
-sex_cfg_trans = cfg_dir+'sex_trans.config'   # same for transient detection version
-sex_par = cfg_dir+'sex.params'               # SExtractor output parameters definition file
-sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
-sex_par_ref = cfg_dir+'sex_ref.params'       # same for reference image output version
-sex_par_trans = cfg_dir+'sex_trans.params'   # same for transient output version
-psfex_cfg = cfg_dir+'psfex.config'           # PSFex configuration file
-swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
+sex_cfg = cfg_dir+'sex_20180319.config'               # SExtractor configuration file
+sex_cfg_psffit = cfg_dir+'sex_psffit_20180322.config' # same for PSF-fitting version
+sex_par = cfg_dir+'sex_20180319.params'               # SExtractor output parameters definition file
+sex_par_psffit = cfg_dir+'sex_psffit_20180322.params' # same for PSF-fitting version
+sex_par_ref = cfg_dir+'sex_ref_20180404.params'       # same for reference image output version
+psfex_cfg = cfg_dir+'psfex_20180404.config'           # PSFex configuration file
+swarp_cfg = cfg_dir+'swarp_20180326.config'           # SWarp configuration file
 
 apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
                               # used for aperture photometry
