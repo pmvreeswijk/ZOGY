@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '0.3'
+__version__ = '0.31'
 
 ################################################################################
 
@@ -1139,8 +1139,8 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
         'PETRO_RADIUS':   ['E', 'pix'  , 'flt16' ],
         'FLUX_OPT':       ['E', 'e-/s' , 'flt32' ],
         'FLUXERR_OPT':    ['E', 'e-/s' , 'flt16' ],
-        'MAG_OPT':        ['E', 'e-/s' , 'flt32' ],
-        'MAGERR_OPT':     ['E', 'e-/s' , 'flt16' ],
+        'MAG_OPT':        ['E', 'mag'  , 'flt32' ],
+        'MAGERR_OPT':     ['E', 'mag'  , 'flt16' ],
         'FLUX_PSF':       ['E', 'e-/s' , 'flt32' ],
         'FLUXERR_PSF':    ['E', 'e-/s' , 'flt16' ],
         'S2N':            ['E', ''     , 'flt16' ],
@@ -1505,20 +1505,35 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     #       peak significance and error, peak Fpsf and error, peak Fpsferr and error,
     #       PSF flux and error from D, chi2 (should be similar for all fits; if not,
     #       record separate chi2 for each fit).
-        
-    # prepare ds9 region file
-    f = open(base_newref+'_ds9regions.txt', 'w')
-    for i in range(ntrans):
-        f.write('circle({},{},{}) # color={} width=2 text={{{}}} font="times 7"\n'.
-                format(x_array[mask_keep][i], y_array[mask_keep][i], 
-                       2.*fwhm_new, color_ds9, i))
-    f.close()
+
+    # prepare ds9 region file using function [prep_ds9regions]
+    result = prep_ds9regions(base_newref+'_ds9regions.txt',
+                             x_array[mask_keep], y_array[mask_keep], 
+                             radius=2.*fwhm_new, width=2, color=color_ds9)
 
     if C.timing:
         log_timing_memory (t0=t, label='get_trans', log=log)
         
     return ntrans
 
+
+################################################################################
+
+def prep_ds9regions(filename, x, y, radius=5, width=2, color='green'):
+
+    """Function that creates a text file with the name [filename] that
+    can be used to mark objects at an array of pixel positions (x,y)
+    with a circle when displaying an image with ds9."""
+
+    # prepare ds9 region file
+    f = open(filename, 'w')
+    ncoords = len(x)
+    for i in range(ncoords):
+        f.write('circle({},{},{}) # color={} width={} text={{{}}} font="times 7"\n'.
+                format(x[i], y[i], radius, color, width, i))
+    f.close()
+    return
+    
 
 ################################################################################
 
@@ -2522,7 +2537,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         edge = 100
         xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
         ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
-        def get_limflux (nsigma):
+        def calc_limflux (nsigma):
             # '__' is to disregard the 2nd output array from [get_psfoptflux_xycoords]
             limflux_array, __ = get_psfoptflux_xycoords (psfex_bintable, data_wcs, data_bkg, data_bkg_std,
                                                          readnoise, xlim, ylim, satlevel=satlevel,
@@ -2533,8 +2548,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                          .format(nsigma, limflux_mean, limflux_std, limflux_median))
             return limflux_median
 
-        limflux_3sigma = get_limflux (3.)
-        limflux_5sigma = get_limflux (5.)
+        limflux_3sigma = calc_limflux (3.)
+        limflux_5sigma = calc_limflux (5.)
 
         # add header keyword(s):
         mask_neg = (flux_opt < 0.)
@@ -2566,52 +2581,59 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             dist_deg = np.amax([xsize/2, ysize/2]) * pixscale / 3600.
             mask_field = find_stars(data_cal, ra_center, dec_center, dist_deg, log)
             data_cal = data_cal[:][mask_field]
-                
-            # read a few extra header keywords needed in [get_apply_zp]
-            keywords = ['exptime', 'filter', 'obsdate']
-            exptime, filt, obsdate = read_header(header, keywords, log)
-
-            if C.verbose:
-                log.info('exptime: {}, filter: {}, obsdate: {}'.format(exptime, filt, obsdate))
-            
-            ra_sex = data_sex['ALPHAWIN_J2000']
-            dec_sex = data_sex['DELTAWIN_J2000']
-            ra_cal = data_cal['RA']
-            dec_cal = data_cal['DEC']
-            mag_cal = data_cal[filt]
-            magerr_cal = data_cal['err_'+str(filt)]
-
-            # get airmasses
-            airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, log)
-            airmass_sex_median = float(np.median(airmass_sex))
-            log.info('median airmass: {}'.format(airmass_sex_median))
-
-            mag_opt, magerr_opt, zp, zp_std = (
-                get_apply_zp(ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
-                             mag_cal, magerr_cal, exptime, filt, imtype, log)
-            )
-            ncalstars = np.size(mag_opt)
-            
-            # infer limiting magnitudes from corresponding limiting
-            # fluxes using zeropoint and median airmass
-            limmag_3sigma = zp-2.5*np.log10(limflux_3sigma/exptime)-airmass_sex_median*C.ext_coeff[filt]
-            log.info('3-sigma limiting magnitude: {}'.format(limmag_3sigma))
-            limmag_5sigma = zp-2.5*np.log10(limflux_5sigma/exptime)-airmass_sex_median*C.ext_coeff[filt]
-            log.info('5-sigma limiting magnitude: {}'.format(limmag_5sigma))
+            ncalstars = np.sum(mask_field)
+            log.info('number of calibration stars in FOV: {}'.format(ncalstars))
 
             # add header keyword(s):
-            header['PC-P'] = (True, 'successfully processed by phot. calibration?')
             calname = C.cal_cat.split('/')[-1]
             header['PC-NAME'] = (calname, 'name calibration catalog') 
             #caldate = time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(C.cal_cat)))
-            #header['PC-DATE'] = (caldate, 'date saved calibration catalog') 
-            header['PC-NCAL'] = (ncalstars, 'number of matching stars in calibration catalog')
-            header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
-            header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
-            header['PC-EXTCO'] = (C.ext_coeff[filt], '[mag] filter extinction coefficient (k)')
-            header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
-            header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
-            header['LIMMAG5'] = (limmag_5sigma, '[mag] full-frame 5-sigma limiting magnitude')
+            header['PC-NCAL'] = (ncalstars, 'number of calibration stars in FOV')
+
+            # don't continue with calibration if no calibration stars in the FOV
+            if ncalstars==0:
+                header['PC-P'] = (False, 'successfully processed by phot. calibration?')
+            else:
+                            
+                # read a few extra header keywords needed in [get_apply_zp]
+                keywords = ['exptime', 'filter', 'obsdate']
+                exptime, filt, obsdate = read_header(header, keywords, log)
+
+                if C.verbose:
+                    log.info('exptime: {}, filter: {}, obsdate: {}'.format(exptime, filt, obsdate))
+            
+                ra_sex = data_sex['ALPHAWIN_J2000']
+                dec_sex = data_sex['DELTAWIN_J2000']
+                ra_cal = data_cal['RA']
+                dec_cal = data_cal['DEC']
+                mag_cal = data_cal[filt]
+                magerr_cal = data_cal['err_'+str(filt)]
+
+                # get airmasses
+                airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, log)
+                airmass_sex_median = float(np.median(airmass_sex))
+                log.info('median airmass: {}'.format(airmass_sex_median))
+
+                mag_opt, magerr_opt, zp, zp_std = (
+                    get_apply_zp(ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
+                                 mag_cal, magerr_cal, exptime, filt, imtype, log)
+                )
+            
+                # infer limiting magnitudes from corresponding limiting
+                # fluxes using zeropoint and median airmass
+                limmag_3sigma = zp-2.5*np.log10(limflux_3sigma/exptime)-airmass_sex_median*C.ext_coeff[filt]
+                log.info('3-sigma limiting magnitude: {}'.format(limmag_3sigma))
+                limmag_5sigma = zp-2.5*np.log10(limflux_5sigma/exptime)-airmass_sex_median*C.ext_coeff[filt]
+                log.info('5-sigma limiting magnitude: {}'.format(limmag_5sigma))
+
+                # add header keyword(s):
+                header['PC-P'] = (True, 'successfully processed by phot. calibration?')
+                header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
+                header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
+                header['PC-EXTCO'] = (C.ext_coeff[filt], '[mag] filter extinction coefficient (k)')
+                header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
+                header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
+                header['LIMMAG5'] = (limmag_5sigma, '[mag] full-frame 5-sigma limiting magnitude')
 
         else:
             header['PC-P'] = (False, 'successfully processed by photometric calibration?')
@@ -2620,7 +2642,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                  [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
         data_sex = drop_fields(data_sex, 'VIGNET')
         
-        if os.path.isfile(C.cal_cat):
+        if os.path.isfile(C.cal_cat) & ncalstars!=0:
             data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
                                      [mag_opt, magerr_opt], usemask=False, asrecarray=True)
 
@@ -2688,7 +2710,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             flux_opt = data_sex['FLUX_OPT']
             fluxerr_opt = data_sex['FLUXERR_OPT']
             # and corresponding calibrated magnitudes
-            if os.path.isfile(C.cal_cat):
+            if os.path.isfile(C.cal_cat) & ncalstars!=0:
                 mag_opt = data_sex['MAG_OPT']
                 magerr_opt = data_sex['MAGERR_OPT']
             if mypsffit:
@@ -2712,7 +2734,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         s2n_auto = flux_auto / fluxerr_auto
         flux_opt = flux_opt[index]
         fluxerr_opt = fluxerr_opt[index]
-        if os.path.isfile(C.cal_cat):
+        if os.path.isfile(C.cal_cat) & ncalstars!=0:
             mag_opt = mag_opt[index]
             magerr_opt = magerr_opt[index]
         x_win = data_sex['XWIN_IMAGE'][index]
@@ -2724,7 +2746,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             x_psf = x_psf[index]
             y_psf = y_psf[index]
             
-        if os.path.isfile(C.cal_cat):
+        if os.path.isfile(C.cal_cat) & ncalstars!=0:
             # histogram of all 'good' objects as a function of magnitude
             bins = np.arange(12, 22, 0.2)
             plt.hist(np.ravel(mag_opt), bins, color='green')
@@ -3720,34 +3742,47 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     base = image_in.replace('.fits','')
     sexcat = base+'_cat.fits'
 
-    # feed Astrometry.net only with zero-flag sources
+    # feed Astrometry.net only with brightest sources; N.B.:
+    # keeping only objects with zero FLAGS does not work well in crowded fields
     # read SExtractor catalogue (this is also used further down below in this function)
     data_sexcat = read_hdulist (sexcat, ext_data=1)
-    index = ((data_sexcat['FLAGS']==0))
-    #& (data_sexcat['FLUX_AUTO']>0.) & (data_sexcat['FLUXERR_AUTO']>0.) &
-    # (data_sexcat['FLUX_AUTO']/data_sexcat['FLUXERR_AUTO']>20.)
-    sexcat_zeroflags = base+'_cat_zeroflags.fits'
-    fits.writeto(sexcat_zeroflags, data_sexcat[:][index], overwrite=True)
-    
+    # select non-saturated stars
+    mask_nonsat = (data_sexcat['FLAGS']!=4)
+    # sort in brightness (FLUX_AUTO)
+    index_sort = np.argsort(data_sexcat['FLUX_AUTO'][mask_nonsat])
+    # select the brightest objects
+    sexcat_bright1000 = base+'_cat_bright1000.fits'
+    fits.writeto(sexcat_bright1000, data_sexcat[:][mask_nonsat][index_sort][-1000:], overwrite=True)
+
+    # create ds9 regions text file to show the brightest stars
+    if False:
+        result = prep_ds9regions('cat_bright1000_ds9regions.txt',
+                                 data_sexcat['XWIN_IMAGE'][mask_nonsat][index_sort][-1000:],
+                                 data_sexcat['YWIN_IMAGE'][mask_nonsat][index_sort][-1000:],
+                                 radius=2.*fwhm_new, width=2, color='green')
+        
     #scampcat = image_in.replace('.fits','.scamp')
     cmd = ['solve-field', '--no-plots', #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'XWIN_IMAGE', '--y-column', 'YWIN_IMAGE',
            '--sort-column', 'FLUX_AUTO',
            '--no-remove-lines', '--uniformize', '0',
            # only work on 1000 brightest sources
-           '--objs', '1000',
+           #'--objs', '1000',
            '--width', str(width), '--height', str(height),           
            #'--keep-xylist', sexcat,
            # ignore existing WCS headers in FITS input images
            #'--no-verify', 
+           #'--verbose',
+           #'--verbose',
+           #'--parity', 'neg',
            #'--code-tolerance', str(0.01), 
            #'--quad-size-min', str(0.1),
            # for KMTNet images restrict the max quad size:
-           '--quad-size-max', str(0.1),
+           #'--quad-size-max', str(0.1),
            # number of field objects to look at:
-           #'--depth', str(10),
+           #'--depth', '20',
            #'--scamp', scampcat,
-           sexcat_zeroflags,
+           sexcat_bright1000,
            '--tweak-order', str(C.astronet_tweak_order), '--scale-low', str(scale_low),
            '--scale-high', str(scale_high), '--scale-units', 'app',
            '--ra', str(ra), '--dec', str(dec), '--radius', str(2.),
