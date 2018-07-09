@@ -1,5 +1,5 @@
 
-__version__ = '0.4'
+__version__ = '0.41'
 
 #===============================================================================
 # ZOGY
@@ -135,10 +135,13 @@ obs_height = 1798.       # observatory height in meters above sealevel
 ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 # and the same for La Silla in the BlackGEM filters:
 #ext_coeff = {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}
-# name of the calibration catalog (in binary fits format) with the stars'
-# magnitudes converted to the same filter(s) as the observations (in
-# this case the MeerLICHT/BlackGEM filter set):
+# name of the photometric calibration catalog (in binary fits format)
+# with the stars' magnitudes converted to the same filter(s) as the
+# observations (in this case the MeerLICHT/BlackGEM filter set):
 phot_cat = '/home/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1_20180319.fits'
+# default zeropoints used if no photometric calibration catalog is
+# provided or a particular field does not contain any calibration stars
+zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
 
 #===============================================================================
 # Configuration
