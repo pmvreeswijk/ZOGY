@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '0.41'
+__version__ = '0.42'
 
 ################################################################################
 
@@ -156,6 +156,24 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     if new and ref:
         global base_newref
         base_newref = base_new
+
+    # check if configuration files exist; if not exit
+    def check_files (filelist, log):
+        for filename in filelist:
+            if not os.path.isfile(filename):
+                log.critical('{} does not exist'.format(filename))
+                if log:
+                    return 'critical', filename+' does not exist'
+                else:
+                    raise SystemExit
+
+    check_files([C.sex_cfg, C.psfex_cfg, C.swarp_cfg], log)
+    if new:
+        check_files([C.sex_par], log)
+    if ref:
+        check_files([C.sex_par_ref], log)
+    if C.dosex_psffit:
+        check_files([C.sex_cfg_psffit, C.sex_par_psffit], log)
 
     # the elements in [keywords] should be defined as strings, but do
     # not refer to the actual keyword names; the latter are
@@ -1011,7 +1029,8 @@ def add_fakestars (psf, data, var, bkg, std, readnoise, fwhm, log):
             
 ################################################################################
 
-def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None):
+def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
+                  columns=None):
 
     with fits.open(fits_file, memmap=False) as hdulist:
 
@@ -1026,18 +1045,23 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None):
         if ext_header is not None:
             header = hdulist[ext_header].header
 
-        # return data and header depending on whether [ext_data]
-        # and [ext_header] are defined or not
-        if ext_data is not None:
-            if ext_header is not None:
-                return data, header
-            else:
-                return data
+        if columns is not None:
+            # only return defined columns
+            # no check is done whether they exist or not
+            return [data[col] for col in columns]
         else:
-            if ext_header is not None:
-                return header
+            # return data and header depending on whether [ext_data]
+            # and [ext_header] are defined or not
+            if ext_data is not None:
+                if ext_header is not None:
+                    return data, header
+                else:
+                    return data
             else:
-                return 
+                if ext_header is not None:
+                    return header
+                else:
+                    return 
             
 
 ################################################################################
@@ -1463,7 +1487,10 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         # elongation, weighted with image [intensity]
         X, Y, X2, Y2, XY, ERRX2, ERRY2, ERRXY, A, B, THETA, ERRA, ERRB, ERRTHETA = (
             trans_measure(data_Scorr_region, x_index+1, y_index+1, var_bkg=data_Fpsferr_region))
-        ELONGATION = A/B
+        if B!=0:
+            ELONGATION = A/B
+        else:
+            ELONGATION = 100.
         ELLIPTICITY = 1-B/A
 
         if False:
@@ -1622,20 +1649,26 @@ def get_shape_parameters (x2, y2, xy, errx2, erry2, errxy):
     term2 = np.sqrt(0.25*(x2-y2)**2 + xy**2)
     a = np.sqrt(term1 + term2)
     # Eq. 25 from SExtractor manual:
-    b = np.sqrt(term1 - term2)
+    if term1 >= term2:
+        b = np.sqrt(term1 - term2)
+    else:
+        b = 0.
     # Eq. 21 from SExtractor manual:
     theta = 0.5*np.arctan2( 2*xy, x2-y2 )
     theta *= 180 / np.pi
 
-    elongation = a / b
-    ellipticity = 1 - (b / a)
+    #elongation = a / b
+    #ellipticity = 1 - (b / a)
 
     # Eq. 36 from SExtractor manual:
     term1 = (errx2 + erry2) / 2
     term2 = np.sqrt(0.25*(errx2-erry2)**2 + errxy**2)
     erra = np.sqrt(term1 + term2)
     # Eq. 37 from SExtractor manual:
-    errb = np.sqrt(term1 - term2)
+    if term1 >= term2:
+        errb = np.sqrt(term1 - term2)
+    else:
+        errb = 0.
     # Eq. 38 from SExtractor manual:
     errtheta = 0.5*np.arctan2( 2*errxy, errx2-erry2 )
     errtheta *= 180 / np.pi
@@ -2397,7 +2430,7 @@ def get_keyvalue (key, header, log):
             if key_name in header:
                 value = header[key_name]
             else:
-                log.critical('Error: keyword {} not present in header'.format(key_name))
+                log.critical('keyword {} not present in header'.format(key_name))
                 if log:
                     return 'critical', key_name+' not in header.'
                 else:
@@ -2670,6 +2703,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # get airmasses for SExtractor catalog sources
         ra_sex = data_sex['ALPHAWIN_J2000']
         dec_sex = data_sex['DELTAWIN_J2000']
+        flags_sex = data_sex['FLAGS']
         airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, log)
         airmass_sex_median = float(np.median(airmass_sex))
         log.info('median airmass: {}'.format(airmass_sex_median))
@@ -2688,15 +2722,26 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 wcs = WCS(base_ref+'.wcs')
             ra_center, dec_center = wcs.all_pix2world(xsize/2, ysize/2, 1)
             log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+
+            # determine airmass at image center
+            airmass_center = get_airmass(ra_center, dec_center, obsdate, log)
+            header['PC-AIRMC'] = (float(airmass_center), 'airmass at image center')
             
             # use function [find_stars] to select stars in calibration
             # catalog that are within the current field-of-view
             dist_deg = np.amax([xsize/2, ysize/2]) * pixscale / 3600.
-            mask_field = find_stars(data_cal, ra_center, dec_center, dist_deg, log)
+            mask_field = find_stars(data_cal['ra'], data_cal['dec'], ra_center, dec_center,
+                                    dist_deg, log)
             data_cal = data_cal[:][mask_field]
-            ncalstars = np.sum(mask_field)
+            ncalstars = np.shape(data_cal)[0]
             log.info('number of calibration stars in FOV: {}'.format(ncalstars))
-
+            if ncalstars>C.ncal_max:
+                # pick C.ncal_max brightest in filter:
+                index_bright = np.argsort(data_cal[filt])
+                data_cal = data_cal[:][index_bright][0:C.ncal_max]
+                ncalstars = np.shape(data_cal)[0]
+                log.info('reduced number of calibration stars to: {}'.format(ncalstars))
+            
             # add header keyword(s):
             calname = C.phot_cat.split('/')[-1]
             header['PC-CAT-F'] = (calname, 'photometric catalog')
@@ -2710,9 +2755,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 mag_cal = data_cal[filt]
                 magerr_cal = data_cal['err_'+str(filt)]
                 # infer the zeropoint
-                zp, zp_std = get_zp(ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
+                mask_zp = ((flux_opt>0.) & (flags_sex==0))
+                zp, zp_std = get_zp(ra_sex[mask_zp], dec_sex[mask_zp], airmass_sex[mask_zp],
+                                    flux_opt[mask_zp], fluxerr_opt[mask_zp], ra_cal, dec_cal,
                                     mag_cal, magerr_cal, exptime, filt, imtype, log)
-                
+            del data_cal
         else:
             log.info('Warning: photometric calibration catalog {} not found!'.format(C.phot_cat))
 
@@ -2974,8 +3021,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
 ################################################################################
 
-def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
-            mag_cal, magerr_cal, exptime, filt, imtype, log):
+def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
+            ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, imtype, log):
 
     if C.timing: t = time.time()
     log.info('Executing get_zp ...')
@@ -2997,27 +3044,16 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
     # instrumental magnitudes and errors
     mag_sex_inst = np.zeros(nrows)-1
     magerr_sex_inst = np.zeros(nrows)-1
-    mask_pos = (flux_opt > 0.)
-    mag_sex_inst[mask_pos] = -2.5*np.log10(flux_opt[mask_pos]/exptime)
+    mag_sex_inst = -2.5*np.log10(flux_opt/exptime)
     pogson = 2.5/np.log(10.)
-    magerr_sex_inst[mask_pos] = pogson*fluxerr_opt[mask_pos]/flux_opt[mask_pos]
+    magerr_sex_inst = pogson*fluxerr_opt/flux_opt
 
     ncal = np.shape(ra_cal)[0]
     # loop calibration stars and find a match in SExtractor sources
     for i in range(ncal):
-        
-        # make a big cut in declination in the SExtractor arrays to
-        # speed up distance calculation below
-        mask_cut = (np.abs(dec_sex-dec_cal[i])<=dist_max)
-        ra_sex_temp = ra_sex[mask_cut]
-        dec_sex_temp = dec_sex[mask_cut]
-        
-        # calculate distances using function [haversine]
-        dist = haversine(ra_sex_temp, dec_sex_temp, ra_cal[i], dec_cal[i])
 
-        # prepare match mask the size of SExtractor catalog
-        mask_match = np.zeros(nrows).astype('bool')
-        mask_match[mask_cut] = (dist <= dist_max)
+        mask_match = find_stars(ra_sex, dec_sex, ra_cal[i], dec_cal[i],
+                                dist_max, log, search='circle')
 
         if np.sum(mask_match)==1:
             # there's one match, calculate its zeropoint
@@ -3030,14 +3066,10 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
                          format(ra_cal[i], dec_cal[i], mag_cal[i], zp_array[mask_match]))
 
     # determine median zeropoint
-    # use values with nonzero values and where flux_opt>0
-    mask_nonzero = ((zp_array>0) & (mask_pos))
-    zp_mean, zp_std, zp_median = clipped_stats(zp_array[mask_nonzero], make_hist=C.make_plots,
+    zp_mean, zp_std, zp_median = clipped_stats(zp_array, make_hist=C.make_plots,
                                                name_hist=base+'_zp_hist.pdf',
                                                hist_xlabel=filt+' zeropoint (mag)', log=log)
     if C.verbose:
-        log.info('number of useful calibration stars in the field: {}'.
-                 format(np.sum(mask_nonzero)))
         log.info('zp_mean: {:.3f}, zp_median: {:.3f}, zp_std: {:.3f}'.
                  format(zp_mean, zp_median, zp_std))
 
@@ -3061,7 +3093,7 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
     elements as the input flux."""
     
     if C.timing: t = time.time()
-    log.info('Executing apply_zp ...')
+    #log.info('Executing apply_zp ...')
 
     # make sure input fluxes are numpy arrays
     flux = np.asarray(flux)
@@ -3093,8 +3125,8 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
         # set errors of sources with non-positive fluxes to -1
         magerr[~mask_pos] = -1
         
-    if C.timing:
-        log_timing_memory (t0=t, label='apply_zp', log=log)
+    #if C.timing:
+    #    log_timing_memory (t0=t, label='apply_zp', log=log)
 
     if fluxerr is not None:
         return mag, magerr
@@ -3104,32 +3136,33 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
 
 ################################################################################
 
-def find_stars (data, ra, dec, radec_range, log):
+def find_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
 
     if C.timing: t = time.time()
-    log.info('Executing find_stars ...')
+    #log.info('Executing find_stars ...')
 
-    # find entries in [data] within [radec_range] of [ra] and [dec]
-    index_data = np.zeros(data.shape[0]).astype('bool')
-    # make a big cut in the data array to speed up calculations
-    index_calc = (np.abs(data['DEC']-dec)<=radec_range)
-    ra_cat = data['RA'][index_calc]
-    dec_cat = data['DEC'][index_calc]
+    # find entries in [ra_cat] and [dec_cat] within [dist] of
+    # [ra] and [dec]
+    mask_data = np.zeros(len(ra_cat), dtype='bool')
+    # make a big cut in arrays ra_cat and dec_cat to speed up
+    mask_cut = (np.abs(dec_cat-dec)<=dist)
+    ra_cat_cut = ra_cat[mask_cut]
+    dec_cat_cut = dec_cat[mask_cut]
 
-    # find within circle:
-    #dsigma = haversine(ra_cat, dec_cat, ra, dec)
-    #index_data[index_calc] = (dsigma<=radec_range)
+    if search is 'circle':
+        # find within circle:
+        dsigma = haversine(ra_cat_cut, dec_cat_cut, ra, dec)
+        mask_data[mask_cut] = (dsigma<=dist)
+    else:
+        # find within box:
+        dsigma_ra = haversine(ra_cat_cut, dec_cat_cut, ra, dec_cat_cut)
+        dsigma_dec = np.abs(dec_cat_cut-dec)
+        mask_data[mask_cut] = ((dsigma_ra<=dist) & (dsigma_dec<=dist))
 
-    # find within box:
-    dsigma_ra = haversine(ra_cat, dec_cat, ra, dec_cat)
-    #dsigma_dec = haversine(ra_cat, dec_cat, ra_cat, dec)
-    dsigma_dec = np.abs(dec_cat-dec)
-    index_data[index_calc] = ((dsigma_ra<=radec_range) & (dsigma_dec<=radec_range))
+    #if C.timing:
+    #    log_timing_memory (t0=t, label='find_stars', log=log)
 
-    if C.timing:
-        log_timing_memory (t0=t, label='find_stars', log=log)
-
-    return index_data
+    return mask_data
 
 
 ################################################################################
@@ -4233,14 +4266,17 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
 
         # read calibration catalog
-        data_ast = read_hdulist (C.ast_cat, ext_data=1)
+        [ra_ast, dec_ast, mag_ast] = read_hdulist (C.ast_cat, ext_data=1,
+                                                   columns=['ra', 'dec', C.ast_cat_filter])
         
         # use function [find_stars] to select stars in astrometric
         # catalog that are within the current field-of-view
         dist_deg = np.amax([xsize/2, ysize/2]) * pixscale / 3600.
-        mask_field = find_stars(data_ast, ra_center, dec_center, dist_deg, log)
-        data_ast_field = data_ast[:][mask_field]
-        del data_ast
+        mask_field = find_stars(ra_ast, dec_ast, ra_center, dec_center, dist_deg, log)
+        ra_ast = ra_ast[mask_field]
+        dec_ast = dec_ast[mask_field]
+        mag_ast = mag_ast[mask_field]
+        
         naststars = np.sum(mask_field)
         log.info('number of astrometric stars in FOV: {}'.format(naststars))
 
@@ -4250,18 +4286,17 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         header['A-NAST'] = (naststars, 'number of astrometric stars in FOV')
 
         # Limit to brightest stars ([nbright] is defined above) in the field
-        index_sort_ast = np.argsort(data_ast_field[C.ast_cat_filter])
-        data_ast_field_bright = data_ast_field[index_sort_ast][0:nbright]
+        index_sort_ast = np.argsort(mag_ast)
+        ra_ast_bright = ra_ast[index_sort_ast][0:nbright]
+        dec_ast_bright = dec_ast[index_sort_ast][0:nbright]
         
         # calculate array of offsets between astrometry comparison
         # stars and any non-saturated SExtractor source; no match or
         # multiple matches will return a zero offset for that star.
         newra_bright = newra[mask_use][index_sort][-nbright:]
         newdec_bright = newdec[mask_use][index_sort][-nbright:]        
-        ra_ast = data_ast_field_bright['RA']
-        dec_ast = data_ast_field_bright['DEC']
         dra_array, ddec_array = calc_offsets (newra_bright, newdec_bright,
-                                              ra_ast, dec_ast, log=log)
+                                              ra_ast_bright, dec_ast_bright, log=log)
         # convert to arcseconds
         dra_array *= 3600.
         ddec_array *= 3600.

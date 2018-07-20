@@ -1,5 +1,5 @@
 
-__version__ = '0.41'
+__version__ = '0.42'
 
 #===============================================================================
 # ZOGY
@@ -112,9 +112,9 @@ pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
 # name of the astrometric catalog (in binary fits format) with columns
 # 'RA' and 'DEC' in degrees against which the astrometric solution
 # found by Astrometry.net is compared
-ast_cat = '/home/pmv/Gaia/DR2/MLBG_astcat_GaiaDR2_20180703.fits'
+ast_cat = '/media/data/pmv/Gaia/DR2/MLBG_astcat_GaiaDR2_20180703.fits'
 # magnitude column in [ast_cat] used to sort in brightness
-ast_cat_filter = 'PHOT_G_MEAN_MAG'
+ast_cat_filter = 'phot_g_mean_mag'
 
 #===============================================================================
 # Photometry
@@ -138,7 +138,9 @@ ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 # name of the photometric calibration catalog (in binary fits format)
 # with the stars' magnitudes converted to the same filter(s) as the
 # observations (in this case the MeerLICHT/BlackGEM filter set):
-phot_cat = '/home/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1_20180319.fits'
+phot_cat = '/media/data/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1_20180319.fits'
+# for very crowded fields, limit the number of calibration stars used
+ncal_max = 500
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
 zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
