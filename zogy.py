@@ -37,7 +37,7 @@ import resource
 from skimage import restoration, measure
 #import inpaint
 import logging
-import sys, traceback, linecache
+import sys, traceback
 
 #from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool
@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '0.42'
+__version__ = '0.43'
 
 ################################################################################
 
@@ -248,7 +248,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                                         update_vignet=update_vignet, mask=fits_mask)
             except Exception as e:
                 SE_processed = False
-                print_exception(log)
+                log.info(traceback.format_exc())
                 log.error('exception was raised during [run_sextractor]: {}'.format(e))  
             else:
                 SE_processed = True
@@ -280,7 +280,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                     result = subprocess.call(cmd)
             except Exception as e:
                 WCS_processed = False
-                print_exception(log)
+                log.info(traceback.format_exc())
                 log.error('exception was raised during [run_wcs]: {}'.format(e))  
             else:
                 WCS_processed = True
@@ -344,7 +344,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                                    resampling_type=resampling_type, resample='Y') 
             except Exception as e:
                 remap_processed = False
-                print_exception(log)
+                log.info(traceback.format_exc())
                 log.error('exception was raised during [run_remap]: {}'.format(e))  
             else:
                 remap_processed = True
@@ -732,7 +732,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             pool.map(zogy_subloop, range(nsubs))
         except Exception as e:
             zogy_processed = False
-            print_exception(log)
+            log.info(traceback.format_exc())
             log.error('exception was raised during [zogy_subloop]: {}'.format(e))  
         else:
             zogy_processed = True
@@ -941,18 +941,6 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     return 'info', 'Successfully ran ZOGY on image.'
 
 
-################################################################################
-
-def print_exception(log):
-    exc_type, exc_obj, tb = sys.exc_info()
-    f = tb.tb_frame
-    lineno = tb.tb_lineno
-    filename = f.f_code.co_filename
-    linecache.checkcache(filename)
-    line = linecache.getline(filename, lineno, f.f_globals)
-    log.info('exception in ({}, line {}: "{}"): {}'.format(filename, lineno, line.strip(), exc_obj))
-
-    
 ################################################################################
 
 def add_fakestars (psf, data, var, bkg, std, readnoise, fwhm, log):
@@ -3149,7 +3137,7 @@ def find_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
     ra_cat_cut = ra_cat[mask_cut]
     dec_cat_cut = dec_cat[mask_cut]
 
-    if search is 'circle':
+    if search=='circle':
         # find within circle:
         dsigma = haversine(ra_cat_cut, dec_cat_cut, ra, dec)
         mask_data[mask_cut] = (dsigma<=dist)
@@ -3612,6 +3600,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
             result = run_psfex(sexcat_ldac, C.psfex_cfg, psfexcat, imtype, log)
         except Exception as e:
             PSFEx_processed = False
+            log.info(traceback.format_exc())
             log.error('exception was raised during [run_psfex]: {}'.format(e))  
         else:
             PSFEx_processed = True
