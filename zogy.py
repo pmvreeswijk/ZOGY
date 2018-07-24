@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '0.43'
+__version__ = '0.44'
 
 ################################################################################
 
@@ -1555,9 +1555,10 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     #       record separate chi2 for each fit).
 
     # prepare ds9 region file using function [prep_ds9regions]
-    result = prep_ds9regions(base_newref+'_ds9regions.txt',
-                             x_array[mask_keep], y_array[mask_keep], 
-                             radius=2.*fwhm_new, width=2, color=color_ds9)
+    if False:
+        result = prep_ds9regions(base_newref+'_ds9regions.txt',
+                                 x_array[mask_keep], y_array[mask_keep], 
+                                 radius=5., width=2, color=color_ds9)
 
     if C.timing:
         log_timing_memory (t0=t, label='get_trans', log=log)
@@ -4126,11 +4127,11 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:], overwrite=True)
 
     # create ds9 regions text file to show the brightest stars
-    if True:
+    if False:
         result = prep_ds9regions('cat_bright_ds9regions.txt',
                                  data_sexcat['XWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  data_sexcat['YWIN_IMAGE'][mask_use][index_sort][-nbright:],
-                                 radius=2.*fwhm_new, width=2, color='green')
+                                 radius=5., width=2, color='green')
         
     #scampcat = image_in.replace('.fits','.scamp')
     cmd = ['solve-field', '--no-plots', #'--no-fits2fits', cloud version of astrometry does not have this arg
