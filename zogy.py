@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '0.45'
+__version__ = '0.46'
 
 ################################################################################
 
@@ -422,7 +422,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                                                              base_ref+'_psfex.cat',
                                                              base_new+'_cat.fits',
                                                              base_ref+'_cat.fits',
-                                                             base_new+'.wcs', log)    
+                                                             base_new+'.wcs',
+                                                             base_ref+'.wcs', log)
         # older version:
         #x_fratio, y_fratio, fratio, dra, ddec = get_fratio_radec(base_new+'_psfex.cat',
         #                                                         base_ref+'_psfex.cat',
@@ -946,7 +947,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                    'ref.fits', 'ref_mask.fits', 
                    base_newref+'_D.fits', base_newref+'_Scorr.fits']
             # add ds9 regions
-            cmd += ['-regions', base_newref+'_ds9regions.txt']
+            if C.make_plots:
+                cmd += ['-regions', base_newref+'_ds9regions.txt']
             result = subprocess.call(cmd)
     return 'info', 'Successfully ran ZOGY on image.'
 
@@ -1564,7 +1566,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     #       record separate chi2 for each fit).
 
     # prepare ds9 region file using function [prep_ds9regions]
-    if False:
+    if C.make_plots:
         result = prep_ds9regions(base_newref+'_ds9regions.txt',
                                  x_array[mask_keep], y_array[mask_keep], 
                                  radius=5., width=2, color=color_ds9)
@@ -3590,24 +3592,49 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         sexcat_ldac = base+'_ldac.fits'
         log.info('sexcat_ldac: {}'.format(sexcat_ldac))
         log.info('psfexcat: {}'.format(psfexcat))
-    
-        # feed PSFEx only with zero-flag sources
-        sexcat_ldac_zeroflags = base+'_cat_zeroflags.fits'
-        with fits.open(sexcat_ldac) as hdulist:
-            data_ldac = hdulist[2].data
-            index = ((data_ldac['FLAGS']==0) | (data_ldac['FLAGS']==1))
-            data_ldac['NUMBER'][index] = np.arange(np.sum(index))+1
-            hdulist[2].data = data_ldac[:][index]
-            #& (data_ldac['FLUX_AUTO']>0.) & (data_ldac['FLUXERR_AUTO']>0.) & (data_ldac['FLUX_AUTO']/data_ldac['FLUXERR_AUTO']>20.)
-            hdulist_new = fits.HDUList(hdulist)
-            hdulist_new.writeto(sexcat_ldac_zeroflags, overwrite=True)
-            hdulist_new.close()
+
+        if True:
+            t_temp = time.time()
+            # feed PSFEx only with selected sources, but: N.B.: this
+            # pre-selection is tricky, as the function
+            # [get_fratio_dxdy] relies on the PSFEx output catalogue
+            # to contain the source ID of the original SExtractor
+            # catalogue, while PSFEx reports the source ID with
+            # respect to its input catalogue, so with this
+            # preselection the original source ID gets lost.  Could
+            # rewrite [get_fratio_dxdy] so that it is independent from
+            # this source ID (probably best solution), or provide an
+            # index that has the size of the number of selected
+            # sources here, and contains the source ID in the full
+            # SExtractor catalog.  Or feed [get_fratio_dxdy] with this
+            # selected catalog instead of full one.
+            sexcat_ldac_selected = base+'_ldac_4psfex.fits'
+            with fits.open(sexcat_ldac) as hdulist:
+                data_ldac = hdulist[2].data
+                mask_ok = ((data_ldac['FLAGS']<=1) & (data_ldac['SNR_WIN']>=C.psf_stars_s2n_min))
+                # sort by FLUX_AUTO
+                #index_sort = np.argsort(data_ldac['FLUX_AUTO'][mask_ok])
+                # select the faintest 20,000 above the s2n cut-off
+                data_ldac = data_ldac[:][mask_ok] #[index_sort][0:20000]
+                hdulist[2].data = data_ldac
+                hdulist_new = fits.HDUList(hdulist)
+                hdulist_new.writeto(sexcat_ldac_selected, overwrite=True)
+                hdulist_new.close()
+
+                if C.make_plots:
+                    result = prep_ds9regions(base+'_ds9regions_psfstars.txt',
+                                             data_ldac['XWIN_IMAGE'],
+                                             data_ldac['YWIN_IMAGE'],
+                                             radius=5., width=2, color='red')
+                            
+            log.info('time to create selection of LDAC catalog for PSFEx: {}'
+                     .format(time.time()-t_temp))
             
-        #result = run_psfex(sexcat_ldac_zeroflags, C.psfex_cfg, psfexcat, log, fwhm, imtype)
-        # something goes wrong when feeding the above zeroflags catalog to PSFEx
-        # not sure what - too restrictive? For now, just supply the full ldac catalog.
         try:
-            result = run_psfex(sexcat_ldac, C.psfex_cfg, psfexcat, imtype, log)
+            # selected catalog:
+            result = run_psfex(sexcat_ldac_selected, C.psfex_cfg, psfexcat, imtype, log)
+            # full catalog:
+            #result = run_psfex(sexcat_ldac, C.psfex_cfg, psfexcat, imtype, log)
         except Exception as e:
             PSFEx_processed = False
             log.info(traceback.format_exc())
@@ -3625,7 +3652,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     if (not os.path.isfile(sexcat_ldac_psffit) or C.redo) and C.dosex_psffit:
         result = run_sextractor(image, sexcat_ldac_psffit, C.sex_cfg_psffit,
                                 C.sex_par_psffit, pixscale, log, header,
-                                fit_psf=True, update_vignet=True, fwhm=fwhm)
+                                fit_psf=True, update_vignet=False, fwhm=fwhm)
         
     # If not already done so above, read in PSF output binary table
     # from psfex, containing the polynomial coefficient images
@@ -3820,7 +3847,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
 
 ################################################################################
 
-def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, wcs_new, log):
+def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
+                    wcs_new, wcs_ref, log):
     
     """Function that takes in output catalogs of stars used in the PSFex
     runs on the new and the ref image, and returns the arrays with
@@ -3880,7 +3908,10 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, wcs_new, log
     
     # get reference ra, dec corresponding to x, y
     #ra_new, dec_new = xy2radec(number_new, sexcat_new)
-    ra_ref, dec_ref = xy2radec(number_ref, sexcat_ref)
+    #ra_ref, dec_ref = xy2radec(number_ref, sexcat_ref)
+    # instead use wcs.all_pix2world
+    wcs = WCS(wcs_ref)
+    ra_ref, dec_ref = wcs.all_pix2world(x_ref, y_ref, 1)
 
     # convert the reference RA and DEC to pixels in the new frame
     wcs = WCS(wcs_new)
@@ -4136,7 +4167,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:], overwrite=True)
 
     # create ds9 regions text file to show the brightest stars
-    if False:
+    if C.make_plots:
         result = prep_ds9regions('cat_bright_ds9regions.txt',
                                  data_sexcat['XWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  data_sexcat['YWIN_IMAGE'][mask_use][index_sort][-nbright:],
@@ -4948,18 +4979,19 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     
     # run psfex from the unix command line
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
-           '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp)]
+           '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
+           '-SAMPLE_MINSN', str(C.psf_stars_s2n_min)]
     #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
 
     if C.make_plots:
         cmd += ['-CHECKPLOT_DEV', 'PDF',
                 '-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, CHI2, RESIDUALS',
-                '-CHECKPLOT_NAME', base+'_psfex_fwhm,'+base+'_psfex_ellip,'+base+'_psfex_counts,'+
-                base+'_psfex_countfrac,'+base+'_psfex_chi2,'+base+'_psfex_resi']
+                '-CHECKPLOT_NAME',
+                'psfex_fwhm, psfex_ellip, psfex_counts, psfex_countfrac, psfex_chi2, psfex_resi']
         cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,BASIS',
-                '-CHECKIMAGE_NAME', base+'_chi,'+base+'_psfex_proto,'+base+'_psfex_samp,'+
-                base+'_psfex_resi,'+base+'_psfex_snap,'+base+'_psfex_basis']
+                '-CHECKIMAGE_NAME',
+                'psfex_chi, psfex_proto, psfex_samp, psfex_resi, psfex_snap, psfex_basis']
 
     # log cmd executed
     cmd_str = ' '.join(cmd)
