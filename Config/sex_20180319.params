@@ -1,3 +1,5 @@
+# date modified: 2018-03-19
+#
 # N.B.: fields required by PSFex are marked with an *
 NUMBER                 #   Running object number                            
 XWIN_IMAGE             # * Windowed position estimate along x              [pixel]

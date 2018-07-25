@@ -49,7 +49,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields
 #from memory_profiler import profile
 
-__version__ = '0.44'
+__version__ = '0.45'
 
 ################################################################################
 
@@ -166,6 +166,15 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                     return 'critical', filename+' does not exist'
                 else:
                     raise SystemExit
+            else:
+                # write date modified to log
+                with open(filename) as f:
+                    lines = f.readlines()
+                for line in lines:
+                    if '#' in line and 'date' in line.lower():
+                        log.info('date stamp of {}: {}'
+                                 .format(filename, line.strip().split()[-1]))
+                        break
 
     check_files([C.sex_cfg, C.psfex_cfg, C.swarp_cfg], log)
     if new:
@@ -198,7 +207,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     # below to new and/or ref image
     def sex_fraction (base, sexcat, pixscale, imtype, header, log):
         fwhm, fwhm_std = run_sextractor(base+'.fits', sexcat, C.sex_cfg, C.sex_par,
-                                        pixscale, log, fit_psf=False, return_fwhm=True,
+                                        pixscale, log, header, fit_psf=False, return_fwhm=True,
                                         fraction=C.fwhm_imafrac, fwhm=5.0, save_bkg=False,
                                         update_vignet=False)
         log.info('fwhm_{}: {:.3f} +- {:.3f}'.format(imtype, fwhm, fwhm_std))
@@ -236,16 +245,17 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
     # function to run SExtractor on full image, followed by Astrometry.net
     # to find the WCS solution, applied below to new and/or ref image
-    def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet,
+    def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet, imtype,
                  fits_mask, ra, dec, xsize, ysize, header, log):
 
         # run SExtractor on full image
         if not os.path.isfile(sexcat) or C.redo:
             try:
                 result = run_sextractor(base+'.fits', sexcat, C.sex_cfg, sex_params,
-                                        pixscale, log, fit_psf=False, return_fwhm=False,
-                                        fraction=1.0, fwhm=fwhm, save_bkg=True,
-                                        update_vignet=update_vignet, mask=fits_mask)
+                                        pixscale, log, header, fit_psf=False,
+                                        return_fwhm=False, fraction=1.0, fwhm=fwhm,
+                                        save_bkg=True, update_vignet=update_vignet,
+                                        imtype=imtype, mask=fits_mask)
             except Exception as e:
                 SE_processed = False
                 log.info(traceback.format_exc())
@@ -300,12 +310,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
     if new:
         # now run above function [sex_wcs] on new image
-        sex_wcs(base_new, sexcat_new, C.sex_par, pixscale_new, fwhm_new, True,
+        sex_wcs(base_new, sexcat_new, C.sex_par, pixscale_new, fwhm_new, True, 'new',
                 new_fits_mask, ra_new, dec_new, xsize_new, ysize_new, header_new, log)
 
     if ref:
         # and reference image
-        sex_wcs(base_ref, sexcat_ref, C.sex_par_ref, pixscale_ref, fwhm_ref, False,
+        sex_wcs(base_ref, sexcat_ref, C.sex_par_ref, pixscale_ref, fwhm_ref, True, 'ref',
                 ref_fits_mask, ra_ref, dec_ref, xsize_ref, ysize_ref, header_ref, log)
         # N.B.: two differences with new image: SExtractor parameter
         # file (new: C.sex_par, ref: C.sex_par_ref) and update_vignet
@@ -1274,8 +1284,7 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
             columns.append(col)
 
             
-    coldefs = fits.ColDefs(columns)
-    hdu = fits.BinTableHDU.from_columns(coldefs)
+    hdu = fits.BinTableHDU.from_columns(columns)
     hdu.header += header
     hdu.writeto(cat_out, overwrite=True)
     
@@ -2787,7 +2796,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
                                  [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
-        data_sex = drop_fields(data_sex, 'VIGNET')
+        #data_sex = drop_fields(data_sex, 'VIGNET')
         
         data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
                                  [mag_opt, magerr_opt], usemask=False, asrecarray=True)
@@ -3615,8 +3624,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     sexcat_ldac_psffit = base+'_ldac_psffit.fits'
     if (not os.path.isfile(sexcat_ldac_psffit) or C.redo) and C.dosex_psffit:
         result = run_sextractor(image, sexcat_ldac_psffit, C.sex_cfg_psffit,
-                                C.sex_par_psffit, pixscale, log,
-                                fit_psf=True, fwhm=fwhm)
+                                C.sex_par_psffit, pixscale, log, header,
+                                fit_psf=True, update_vignet=True, fwhm=fwhm)
         
     # If not already done so above, read in PSF output binary table
     # from psfex, containing the polynomial coefficient images
@@ -4162,8 +4171,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            '--out', base
     ]
 
-    # if C.verbose:
-    #     log.info('Astrometry.net command: '+ cmd)
+    # log cmd executed
+    cmd_str = ' '.join(cmd)
+    log.info('Astrometry.net command executed:\n{}'.format(cmd_str))
     
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
@@ -4413,8 +4423,7 @@ def fits2ldac (header4ext2, data4ext3, fits_ldac_out, doSort=True):
     formatstr = str(len(ext2_str))+'A'
     # create table 1
     col1 = fits.Column(name='Field Header Card', array=ext2_data, format=formatstr)
-    cols = fits.ColDefs([col1])
-    ext2 = fits.BinTableHDU.from_columns(cols)
+    ext2 = fits.BinTableHDU.from_columns([col1])
     # make sure these keywords are in the header
     ext2.header['EXTNAME'] = 'LDAC_IMHEAD'
     ext2.header['TDIM1'] = '(80, {0})'.format(len(ext2_str)/80)
@@ -4455,11 +4464,38 @@ def ldac2fits (cat_ldac, cat_fits, log):
     log.info('Executing ldac2fits ...')
 
     # read input table and write out primary header and 2nd extension
+    columns = []
     with fits.open(cat_ldac) as hdulist:
+
+        if False:
+            # to make the fits tables more compact, convert the columns
+            # with double precision datatypes ('D') to float32 ('E')
+            # except for the RA and DEC columns
+            data = hdulist[2].data
+            cols = hdulist[2].columns
+            print hdulist[2].data.dtype
+            for icol, key in enumerate(cols.names):
+                format_new = cols.formats[icol]
+                if '1D' in cols.formats[icol] and 'J2000' not in key:
+                    format_new = '1E'
+                    #data[key] = data[key].astype('float32')
+                col = fits.Column(name=key, format=format_new, unit=cols.units[icol],
+                                  array=data[key])
+                columns.append(col)
+
+            hdulist[2] = fits.BinTableHDU.from_columns(columns)
+            print hdulist[2].data.dtype
+            # overwrite input ldac fits table with double formats
+            # converted to float32
+            #hdulist.writeto(cat_ldac, overwrite=True)
+
+        # delete VIGNET column
+        hdulist[2].data = drop_fields(hdulist[2].data, 'VIGNET')
+        # and write regular fits file
         hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
         hdulist_new.writeto(cat_fits, overwrite=True)
         hdulist_new.close()
-        
+
     if C.timing:
         log_timing_memory (t0=t, label='ldac2fits', log=log)
 
@@ -4508,6 +4544,11 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
            '-RESAMPLE', resample,
            '-RESAMPLING_TYPE', resampling_type,
            '-PROJECTION_ERR', str(projection_err)]
+
+    # log cmd executed
+    cmd_str = ' '.join(cmd)
+    log.info('SWarp command executed:\n{}'.format(cmd_str))
+
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
@@ -4645,27 +4686,34 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elongation=False):
 
 ################################################################################
 
-def update_vignet_size (sex_par_in, sex_par_out, log):
+def update_vignet_size (sex_par_in, sex_par_out, imtype, log):
 
-    # in case [C.psf_sampling] is set to zero, scale the size of the
-    # VIGNET output in the output catalog with 2*[C.psf_radius]*[fwhm]
-    # where fwhm is taken to be the largest of global parameters
-    # [fwhm_new] and [fwhm_ref]
-    if C.psf_sampling == 0.:
-        fwhm_vignet = np.amax([fwhm_new, fwhm_ref])
-        size_vignet = np.int(np.ceil(2.*C.psf_radius*fwhm_vignet))
-        # make sure it's odd
-        if size_vignet % 2 == 0: size_vignet += 1
-        # provide a warning if it's very large
-        if size_vignet > 99:
-            log.info('Warning: VIGNET size is larger than 99 pixels: ' + str(size_vignet))
+    if imtype=="ref":
+        # set vignet size to the value defined in [C.size_vignet_ref]
+        size_vignet = C.size_vignet_ref
     else:
-        # otherwise set it to a reasonably large value
-        size_vignet = 99
+        
+        # in case [C.psf_sampling] is set to zero, scale the size of the
+        # VIGNET output in the output catalog with 2*[C.psf_radius]*[fwhm]
+        # where fwhm is taken to be the largest of global parameters
+        # [fwhm_new] and [fwhm_ref]
+        if C.psf_sampling == 0.:
+            fwhm_vignet = np.amax([fwhm_new, fwhm_ref])
+            size_vignet = np.int(np.ceil(2.*C.psf_radius*fwhm_vignet))
+            # make sure it's odd
+            if size_vignet % 2 == 0: size_vignet += 1
+            # provide a warning if it's larger than the reference image
+            # size
+            if size_vignet > C.size_vignet_ref:
+                log.info('Warning: VIGNET size of {} is larger than ref image value of {}'
+                         .format(size_vignet, C.size_vignet_ref))
+        else:
+            # otherwise set it to the value defined for the ref image
+            size_vignet = C.size_vignet_ref
 
     # append the VIGNET size to the SExtractor parameter file
     # [sex_par_in] and write it to a temporary file [sex_par_out] to
-    # be used later by SExtractor
+    # be used by SExtractor
     size_vignet_str = str((size_vignet, size_vignet))
     with open(sex_par_in, 'rt') as file_in:
         with open(sex_par_out, 'wt') as file_out:
@@ -4675,11 +4723,14 @@ def update_vignet_size (sex_par_in, sex_par_out, log):
         if C.verbose:
             log.info('VIGNET size: ' + str(size_vignet_str))
 
+    return size_vignet
+
+
 ################################################################################
 
-def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
+def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, header,
                    fit_psf=False, return_fwhm=True, fraction=1.0, fwhm=5.0, save_bkg=True,
-                   update_vignet=True, mask=None):
+                   update_vignet=True, imtype=None, mask=None):
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [outcat], using the configuration file [file_config]
@@ -4744,9 +4795,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
     # update size of VIGNET
     if update_vignet:
-        update_vignet_size (file_params, file_params+'_temp', log)
+        size_vignet = update_vignet_size (file_params, file_params+'_temp', imtype, log)
         file_params = file_params+'_temp'
-
+        # write vignet_size to header
+        header['S-VIGNET'] = (size_vignet, '[pix] size square VIGNET used in SExtractor')
+        
     if mask is not None:
         # and add line in parameter file to include IMAFLAG_ISO
         if 'temp' in file_params:
@@ -4799,6 +4852,9 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         log.info('mask: {}'.format(mask))
         cmd += ['-FLAG_IMAGE', mask, '-FLAG_TYPE', 'OR']
         
+    # log cmd executed
+    cmd_str = ' '.join(cmd)
+    log.info('SExtractor command executed:\n{}'.format(cmd_str))
         
     # run command
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -4905,6 +4961,10 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
                 '-CHECKIMAGE_NAME', base+'_chi,'+base+'_psfex_proto,'+base+'_psfex_samp,'+
                 base+'_psfex_resi,'+base+'_psfex_snap,'+base+'_psfex_basis']
 
+    # log cmd executed
+    cmd_str = ' '.join(cmd)
+    log.info('PSFEx command executed:\n{}'.format(cmd_str))
+        
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode

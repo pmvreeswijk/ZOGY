@@ -1,5 +1,5 @@
 
-__version__ = '0.42'
+__version__ = '0.5'
 
 #===============================================================================
 # ZOGY
@@ -53,9 +53,9 @@ bkg_filtersize = 5       # size of filter used for smoothing the above
 key_naxis1 = 'NAXIS1'
 key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
-gain = 1.0
+#gain = 1.0
 key_ron = 'RDNOISE'
-ron = 10.
+#ron = 10.
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
@@ -86,15 +86,20 @@ psf_clean_factor = 0     # pixels with values below (PSF peak * this
 psf_radius = 5           # PSF radius in units of FWHM used to build the PSF
                          # this determines the PSF_SIZE in psfex.config
                          # and size of the VIGNET in sex.params
-
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
                          # new and ref image as:
                          #    psf_sampling = FWHM * [psf_samp_fwhmfrac]
-                         # If non-zero, its value is using for the sampling
+                         # If non-zero, its value is adopted for the sampling
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
+size_vignet_ref = 99     # size of the square VIGNETs saved in the SExtractor
+                         # catalog and used by PSFEx for the reference image.
+                         # For the new image this value is set to
+                         # ~ 2 * [psf_radius] * FWHM. This reference value
+                         # should be set to ~ 2 * [psf_radius] * maximum expected
+                         # FWHM in any of the new images.
                          
 #===============================================================================
 # Astrometry
@@ -150,13 +155,13 @@ zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
 #===============================================================================
 # path and names of configuration files
 cfg_dir = './Config/'
-sex_cfg = cfg_dir+'sex_20180319.config'               # SExtractor configuration file
-sex_cfg_psffit = cfg_dir+'sex_psffit_20180322.config' # same for PSF-fitting version
-sex_par = cfg_dir+'sex_20180319.params'               # SExtractor output parameters definition file
-sex_par_psffit = cfg_dir+'sex_psffit_20180322.params' # same for PSF-fitting version
-sex_par_ref = cfg_dir+'sex_ref_20180404.params'       # same for reference image output version
-psfex_cfg = cfg_dir+'psfex_20180404.config'           # PSFex configuration file
-swarp_cfg = cfg_dir+'swarp_20180326.config'           # SWarp configuration file
+sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
+sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
+sex_par = cfg_dir+'sex.params'               # SExtractor output parameters definition file
+sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
+sex_par_ref = cfg_dir+'sex_ref.params'       # same for reference image output version
+psfex_cfg = cfg_dir+'psfex.config'           # PSFex configuration file
+swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 
 # if a mask image is provided, the mask values can be associated to
 # the type of masked pixel with this dictionary:
@@ -167,6 +172,6 @@ mask_value = {'bad': 1, 'cosmic': 2, 'saturated': 4, 'saturated_connected': 8,
 redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
-display = True           # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+display = False          # show intermediate fits images (centre and 4 corners)
+make_plots = False       # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
