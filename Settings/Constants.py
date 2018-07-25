@@ -1,5 +1,5 @@
 
-__version__ = '0.5'
+__version__ = '0.52'
 
 #===============================================================================
 # ZOGY
@@ -53,9 +53,10 @@ bkg_filtersize = 5       # size of filter used for smoothing the above
 key_naxis1 = 'NAXIS1'
 key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
-#gain = 1.0
+gain = 1.0
 key_ron = 'RDNOISE'
-#ron = 10.
+# temporarily fix read-out noise to 10 as header values not always correct
+ron = 10.          
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
@@ -94,12 +95,15 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet_ref = 99     # size of the square VIGNETs saved in the SExtractor
+size_vignet_ref = 71     # size of the square VIGNETs saved in the SExtractor
                          # catalog and used by PSFEx for the reference image.
                          # For the new image this value is set to
                          # ~ 2 * [psf_radius] * FWHM. This reference value
                          # should be set to ~ 2 * [psf_radius] * maximum expected
                          # FWHM in any of the new images.
+psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
+                         # (don't set this too high as otherwise the PSF
+                         #  will be mainly based on bright stars)
                          
 #===============================================================================
 # Astrometry
