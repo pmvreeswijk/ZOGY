@@ -94,7 +94,7 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet_ref = 99     # size of the square VIGNETs saved in the SExtractor
+size_vignet_ref = 71     # size of the square VIGNETs saved in the SExtractor
                          # catalog and used by PSFEx for the reference image.
                          # For the new image this value is set to
                          # ~ 2 * [psf_radius] * FWHM. This reference value
