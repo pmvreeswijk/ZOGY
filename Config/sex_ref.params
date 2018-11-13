@@ -1,4 +1,4 @@
-# date modified: 2018-03-19
+# date modified: 2018-07-25
 #
 # N.B.: fields required by PSFex are marked with an *
 NUMBER                 #   Running object number                            
@@ -22,5 +22,13 @@ BACKGROUND             #   Background at centroid position                   [co
 FLUX_MAX               #   Peak flux above background                        [count]
 FLUX_AUTO              # * Flux within a Kron-like elliptical aperture       [count]
 FLUXERR_AUTO           # * RMS error for AUTO flux                           [count]
+KRON_RADIUS            #   Kron apertures in units of A or B                
+FLUX_ISO               #   Isophotal flux                                    [count]
+FLUXERR_ISO            #   RMS error for isophotal flux                      [count]
+ISOAREA_IMAGE          #   Isophotal area above Analysis threshold           [pixel**2]
+MU_MAX                 #   Peak surface brightness above background          [mag * arcsec**(-2)]
 FLUX_RADIUS            # * Fraction-of-light radii                           [pixel]
+FLUX_PETRO             #   Flux within a Petrosian-like elliptical aperture  [count]
+FLUXERR_PETRO          #   RMS error for PETROsian flux                      [count]
+PETRO_RADIUS           #   Petrosian apertures in units of A or B           
 SNR_WIN                # * Signal-to-noise ratio in a Gaussian window        

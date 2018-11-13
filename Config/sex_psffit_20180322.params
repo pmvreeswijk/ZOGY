@@ -1,3 +1,5 @@
+# date modified: 2018-03-22
+#
 NUMBER                   # Running object number                                    
 XWIN_IMAGE               # Windowed position estimate along x                        [pixel]
 YWIN_IMAGE               # Windowed position estimate along y                        [pixel]
@@ -21,8 +23,8 @@ FLAGS_WEIGHT             # Weighted extraction flags
 #IMAFLAGS_ISO             # FLAG-image flags ORed over the iso. profile             
 FWHM_IMAGE               # FWHM assuming a gaussian core                             [pixel]
 CLASS_STAR               # S/G classifier output                                    
-FLUX_APER(4)             # Flux vector within fixed circular aperture(s)             [count]
-FLUXERR_APER(4)          # RMS error vector for aperture flux(es)                    [count]
+FLUX_APER(8)             # Flux vector within fixed circular aperture(s)             [count]
+FLUXERR_APER(8)          # RMS error vector for aperture flux(es)                    [count]
 BACKGROUND               # Background at centroid position                           [count]
 FLUX_MAX                 # Peak flux above background                                [count]
 FLUX_AUTO                # Flux within a Kron-like elliptical aperture               [count]
@@ -30,25 +32,25 @@ FLUXERR_AUTO             # RMS error for AUTO flux                              
 FLUX_ISO                 # Isophotal flux                                            [count]
 FLUXERR_ISO              # RMS error for isophotal flux                              [count]
 MU_MAX                   # Peak surface brightness above background                  [mag * arcsec**(-2)]
-FLUX_RADIUS              # Fraction-of-light radii                                   [pixel]
+FLUX_RADIUS(2)           # Fraction-of-light radii                                   [pixel]
 KRON_RADIUS              # Kron apertures in units of A or B                        
 PETRO_RADIUS             # Petrosian apertures in units of A or B                   
 SNR_WIN                  # Signal-to-noise ratio in a Gaussian window
-VIGNET(99,99)            # Pixel data around detection                               [count]
+#VIGNET(51,51)            # Pixel data around detection                               [count]
 #
 # PMV 2017/01/11: in case we include PSF fitting with SExtractor, there
 # are some additional output columns to include
 #
-#XPSF_IMAGE               # X coordinate from PSF-fitting                             [pixel]
-#YPSF_IMAGE               # Y coordinate from PSF-fitting                             [pixel]
-#ALPHAPSF_J2000           # Right ascension of the fitted PSF (J2000)                 [deg]
-#DELTAPSF_J2000           # Declination of the fitted PSF (J2000)                     [deg]
-#FLUX_PSF                 # Flux from PSF-fitting                                     [count]
-#FLUXERR_PSF              # RMS flux error for PSF-fitting                            [count]
-#SPREAD_MODEL             # Spread parameter from model-fitting
-#SPREADERR_MODEL          # Spread parameter error from model-fitting
-#NITER_PSF                # Number of iterations for PSF-fitting                     
-#CHI2_PSF                 # Reduced chi2 from PSF-fitting                            
+XPSF_IMAGE               # X coordinate from PSF-fitting                             [pixel]
+YPSF_IMAGE               # Y coordinate from PSF-fitting                             [pixel]
+ALPHAPSF_J2000           # Right ascension of the fitted PSF (J2000)                 [deg]
+DELTAPSF_J2000           # Declination of the fitted PSF (J2000)                     [deg]
+FLUX_PSF                 # Flux from PSF-fitting                                     [count]
+FLUXERR_PSF              # RMS flux error for PSF-fitting                            [count]
+SPREAD_MODEL             # Spread parameter from model-fitting
+SPREADERR_MODEL          # Spread parameter error from model-fitting
+NITER_PSF                # Number of iterations for PSF-fitting                     
+CHI2_PSF                 # Reduced chi2 from PSF-fitting                            
 #
 # Original list of possible output parameters (this is the
 # default.param file from v. 2.19.5)

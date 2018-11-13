@@ -1,0 +1,15 @@
+# date modified: 2018-03-22
+#
+NUMBER                 # Running object number                            
+XWIN_IMAGE             # Windowed position estimate along x              [pixel]
+YWIN_IMAGE             # Windowed position estimate along y              [pixel]
+ERRX2WIN_IMAGE         # Variance of position along x                    [pixel**2]
+ERRY2WIN_IMAGE         # Variance of position along y                    [pixel**2]
+ERRXYWIN_IMAGE         # Covariance of position between x and y            [pixel**2]
+ELONGATION             # A_IMAGE/B_IMAGE                                  
+ALPHAWIN_J2000         # Windowed right ascension (J2000)                  [deg]
+DELTAWIN_J2000         # Windowed declination (J2000)                      [deg]
+FLAGS                  # Extraction flags                                 
+FWHM_IMAGE             # FWHM assuming a gaussian core                     [pixel]
+CLASS_STAR             # S/G classifier output                            
+FLUX_MAX               # Peak flux above background                        [count]
