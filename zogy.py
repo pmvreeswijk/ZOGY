@@ -949,6 +949,9 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             if C.make_plots:
                 cmd += ['-regions', base_newref+'_ds9regions.txt']
             result = subprocess.call(cmd)
+    # shutdown internal log before exiting
+    if log is None:
+        logging.shutdown()
     return 'info', 'Successfully ran ZOGY on image.'
 
 
@@ -1308,7 +1311,7 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
         xpos = int(xcoord-0.5)
         ypos = int(ycoord-0.5)
 
-    hsize = size/2
+    hsize = int(size/2)
 
     # if footprint is partially off the image, just go ahead
     # with the pixels on the image
