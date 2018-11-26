@@ -1,5 +1,5 @@
 
-__version__ = '0.42'
+__version__ = '0.6'
 
 #===============================================================================
 # ZOGY
@@ -55,7 +55,6 @@ key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
 gain = 1.0
 key_ron = 'RDNOISE'
-ron = 10.
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
@@ -86,35 +85,41 @@ psf_clean_factor = 0     # pixels with values below (PSF peak * this
 psf_radius = 5           # PSF radius in units of FWHM used to build the PSF
                          # this determines the PSF_SIZE in psfex.config
                          # and size of the VIGNET in sex.params
-
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
                          # new and ref image as:
                          #    psf_sampling = FWHM * [psf_samp_fwhmfrac]
-                         # If non-zero, its value is using for the sampling
+                         # If non-zero, its value is adopted for the sampling
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
+size_vignet_ref = 71     # size of the square VIGNETs saved in the SExtractor
+                         # catalog and used by PSFEx for the reference image.
+                         # For the new image this value is set to
+                         # ~ 2 * [psf_radius] * FWHM. This reference value
+                         # should be set to ~ 2 * [psf_radius] * maximum expected
+                         # FWHM in any of the new images.
+psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
+                         # (don't set this too high as otherwise the PSF
+                         #  will be mainly based on bright stars)
                          
 #===============================================================================
 # Astrometry
 #===============================================================================
 # WCS
-skip_wcs = False         # skip Astrometry.net step if image already
+skip_wcs = Talse         # skip Astrometry.net step if image already
                          # contains a reliable WCS solution
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
 # only search in Astrometry.net index files within this radius of the
-# header RA and DEC
+# header RA and DEC [deg]
 astronet_radius = 1.5
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
-# name of the astrometric catalog (in binary fits format) with columns
-# 'RA' and 'DEC' in degrees against which the astrometric solution
-# found by Astrometry.net is compared
-ast_cat = '/media/data/pmv/Gaia/DR2/MLBG_astcat_GaiaDR2_20180703.fits'
-# magnitude column in [ast_cat] used to sort in brightness
-ast_cat_filter = 'phot_g_mean_mag'
+# calibration catalog used for both astrometry and photometry
+cal_cat = '/media/data/pmv/PhotCalibration/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
+ast_filter = 'r'         # magnitude column to sort in brightness
 
 #===============================================================================
 # Photometry
@@ -138,9 +143,9 @@ ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 # name of the photometric calibration catalog (in binary fits format)
 # with the stars' magnitudes converted to the same filter(s) as the
 # observations (in this case the MeerLICHT/BlackGEM filter set):
-phot_cat = '/media/data/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1_20180319.fits'
-# for very crowded fields, limit the number of calibration stars used
-ncal_max = 500
+# this is now the same as the astrometric catalog: [cal_cat] defined above
+phot_ncal_max = 100 # max no. of calibration stars used for a given field 
+phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
 zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
@@ -150,13 +155,13 @@ zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
 #===============================================================================
 # path and names of configuration files
 cfg_dir = './Config/'
-sex_cfg = cfg_dir+'sex_20180319.config'               # SExtractor configuration file
-sex_cfg_psffit = cfg_dir+'sex_psffit_20180322.config' # same for PSF-fitting version
-sex_par = cfg_dir+'sex_20180319.params'               # SExtractor output parameters definition file
-sex_par_psffit = cfg_dir+'sex_psffit_20180322.params' # same for PSF-fitting version
-sex_par_ref = cfg_dir+'sex_ref_20180404.params'       # same for reference image output version
-psfex_cfg = cfg_dir+'psfex_20180404.config'           # PSFex configuration file
-swarp_cfg = cfg_dir+'swarp_20180326.config'           # SWarp configuration file
+sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
+sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
+sex_par = cfg_dir+'sex.params'               # SExtractor output parameters definition file
+sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
+sex_par_ref = cfg_dir+'sex_ref.params'       # same for reference image output version
+psfex_cfg = cfg_dir+'psfex.config'           # PSFex configuration file
+swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 
 # if a mask image is provided, the mask values can be associated to
 # the type of masked pixel with this dictionary:
@@ -167,6 +172,6 @@ mask_value = {'bad': 1, 'cosmic': 2, 'saturated': 4, 'saturated_connected': 8,
 redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
-display = True           # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+display = False          # show intermediate fits images (centre and 4 corners)
+make_plots = False        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots

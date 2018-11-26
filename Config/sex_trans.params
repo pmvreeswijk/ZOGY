@@ -1,3 +1,5 @@
+# date modified: 2018-03-22
+#
 NUMBER                 # Running object number                            
 XWIN_IMAGE             # Windowed position estimate along x              [pixel]
 YWIN_IMAGE             # Windowed position estimate along y              [pixel]
