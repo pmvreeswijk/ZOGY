@@ -847,12 +847,6 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
 ################################################################################
 
-#def get_cal_cat (xsize, ysize, ra, dec, log):
-
-
-            
-################################################################################
-
 def add_fakestars (psf, data, bkg, readnoise, fwhm, log):
 
     """Function to add fakestars to the image as defined in [data] (this
@@ -945,9 +939,14 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
         else:
             # if multiple extensions are provided, read data into Table array
             for n_ext, ext in enumerate(ext_data):
-                #with fits.open(fits_file, memmap=True) as hdulist:
-                #    data_temp = hdulist[ext].data
-                data_temp = Table.read(fits_file, hdu=ext)
+                with fits.open(fits_file, memmap=True) as hdulist:
+                    data_temp = hdulist[ext].data
+                # convert to table, as otherwise concatenation of
+                # extensions below using [stack_arrays] is slow
+                data_temp = Table(data_temp)
+                # could also read fits extension into Table directly,
+                # but this is about twice as slow as the 2 steps above
+                #data_temp = Table.read(fits_file, hdu=ext)
                 if n_ext==0:
                     data = data_temp
                 else:
@@ -2640,7 +2639,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # determine image zeropoint if ML/BG calibration catalog exists
         ncalstars=0
         if os.path.isfile(C.cal_cat):
-
+            
             # use .wcs file to get RA, DEC of central pixel
             if imtype=='new':
                 wcs = WCS(base_new+'.wcs')
@@ -2754,7 +2753,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                                imtype, log, data_cal)
                 header['PC-NUSED'] = (ncal_used, 'number of photometric stars used')
 
-            del data_cal
+            if C.timing:
+                log_timing_memory (t0=t2, label='determining photometric calibration', log=log)
 
         else:
             log.info('Warning: photometric calibration catalog {} not found!'.format(C.cal_cat))

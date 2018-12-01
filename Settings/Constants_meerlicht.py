@@ -107,7 +107,7 @@ psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
 # Astrometry
 #===============================================================================
 # WCS
-skip_wcs = Talse         # skip Astrometry.net step if image already
+skip_wcs = False         # skip Astrometry.net step if image already
                          # contains a reliable WCS solution
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
