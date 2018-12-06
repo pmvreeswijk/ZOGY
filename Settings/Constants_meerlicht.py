@@ -1,5 +1,5 @@
 
-__version__ = '0.61'
+__version__ = '0.62'
 
 #===============================================================================
 # ZOGY
@@ -117,7 +117,7 @@ astronet_radius = 1.5
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
-cal_cat = '/media/data/pmv/PhotCalibration/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+cal_cat = '/data/projects/meerlicht/ML_calcat_kur_allsky_ext1deg_20181115.fits'
 ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
 ast_filter = 'r'         # magnitude column to sort in brightness
 
