@@ -1,5 +1,5 @@
 
-__version__ = '0.6'
+__version__ = '0.61'
 
 #===============================================================================
 # ZOGY
@@ -18,7 +18,7 @@ dxdy_local = False       # determine dx and dy from subimage (T) or full frame (
 transient_nsigma = 6     # required significance in Scorr for transient detection
 
 # add optional fake stars for testing purposes
-nfakestars = 1           # number of fake stars to be added to each subimage; first star
+nfakestars = 0           # number of fake stars to be added to each subimage; first star
                          # is at the center, the rest (if any) is randomly distributed
 fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars    
 
@@ -173,5 +173,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = False       # make diagnostic plots and save them as pdf
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots

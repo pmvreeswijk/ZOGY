@@ -7,6 +7,8 @@ from astropy.wcs import WCS
 from astropy.table import Table
 import numpy as np
 #import numpy.fft as fft
+import matplotlib
+matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 import os
 import subprocess
@@ -51,7 +53,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 #from memory_profiler import profile
 
-__version__ = '0.6'
+__version__ = '0.61'
 
 ################################################################################
 
@@ -419,7 +421,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         x_fratio, y_fratio, fratio, dx, dy, fratio_sub, dx_sub, dy_sub = (
             get_fratio_dxdy(base_new+'_psfex.cat', base_ref+'_psfex.cat',
                             base_new+'_cat.fits', base_ref+'_cat.fits',
-                            base_new+'.wcs', base_ref+'.wcs',
+                            header_new, header_ref, 
                             nsubs, cuts_ima, log, header_zogy))
         
         # fratio is in counts, convert to electrons, in case gains of new
@@ -669,7 +671,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         # detection, rather than running SExtractor (see below)
         ntrans = get_trans (data_new_full, data_ref_full, data_Scorr_full,
                             data_Fpsf_full, data_Fpsferr_full,
-                            data_new_mask_full, data_ref_mask_full, log)
+                            data_new_mask_full, data_ref_mask_full, header_new, log)
 
         # add header keyword(s):
         header_zogy['T-NSIGMA'] = (C.transient_nsigma, '[sigma] transient detection threshold')
@@ -680,7 +682,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         header_zogy['T-LFLUX5'] = (lflux5, '[e-] full-frame transient 5-sigma limiting flux')
         header_zogy['T-LFLUX'] = (lflux, '[e-] full-frame transient {}-sigma limiting flux'
                                   .format(C.transient_nsigma))
-        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)')
+        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)'
+                                   .format(C.transient_nsigma))
 
         # infer limiting magnitudes from corresponding limiting
         # fluxes using zeropoint and median airmass
@@ -702,7 +705,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             t_fits = time.time() 
 
         header_newzogy = header_new + header_zogy
-        header_newzogy.add_comment('Propagated header from new image (including WCS solution)')
+        #header_newzogy.add_comment('many keywords, incl. WCS solution, are from corresponding image')
         fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, overwrite=True)
@@ -982,67 +985,6 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
 
 ################################################################################
 
-def xy_index_ref (ysize, xsize, wcs_new, wcs_ref, log):
-
-    """Given an image with shape [ysize, xsize] and WCS solutions in
-    [wcs_new] and [wcs_ref], return the masks [mask_new, mask_ref]
-    identifying the pixels in the ref image that correspond to the
-    pixels in the new image, i.e. the new image pixels [mask_new] map
-    onto the reference image pixels [mask_ref]."""
-
-    if C.timing: t = time.time()
-
-    # Sample xx and yy every [step] pixels in each axis to perform the
-    # mapping on a coarse grid, which is interpolated and expanded
-    # back to the input grid below. This is done to avoid running the
-    # functions [wcs.all_pix2world] and [wcs.all_world2pix] on each
-    # and every image pixel.
-    nsteps = 1000
-    # It is important to use the [np.linspace] function below to
-    # ensure that the coarse grid includes the first and last pixel of
-    # each axis; the "+1" converts the indices to pixel coordinates.
-    yy, xx = np.meshgrid(np.linspace(0, ysize-1, nsteps)+1,
-                         np.linspace(0, xsize-1, nsteps)+1,
-                         indexing='ij', copy=False)
-    ysize_coarse, xsize_coarse = yy.shape
-    
-    # flatten xx and yy into x and y
-    x = xx.flatten()
-    y = yy.flatten()
-    
-    # use [wcs_ref] file to get RA, DEC of pixel coordinates x, y
-    wcs = WCS(wcs_new)
-    ra, dec = wcs.all_pix2world(x, y, 1)
-
-    # use [wcs_new] file to get x_ref, y_ref pixel coordinates
-    # corresponding to ra, dec
-    wcs = WCS(wcs_ref)
-    x_ref, y_ref = wcs.all_world2pix(ra, dec, 1)
-
-    # reshape
-    xx_ref_coarse = x_ref.reshape((ysize_coarse, xsize_coarse))
-    yy_ref_coarse = y_ref.reshape((ysize_coarse, xsize_coarse))
-    
-    # resize coarse grid to full input grid
-    xx_ref = ndimage.zoom(xx_ref_coarse, 1.*xsize/xsize_coarse, order=1)
-    yy_ref = ndimage.zoom(yy_ref_coarse, 1.*ysize/ysize_coarse, order=1)
-
-    # define mask defining pixels in reference frame
-    mask_new = ((xx_ref>=0.5) & (yy_ref>=0.5) & (xx_ref<=xsize+0.5) & (yy_ref<=ysize+0.5))
-    
-    # flip to get mask_new of pixels in new frame
-    mask_ref = np.flip(np.flip(mask_new,1),0)
-
-    #del xx_ref, yy_ref
-    
-    if C.timing:
-        log_timing_memory (t0=t, label='xy_index_ref', log=log)
-
-    return mask_new, mask_ref
-        
-        
-################################################################################
-
 def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
                 thumbnail_size=32, cat_type=None, header_toadd=None, exptime=0.):
 
@@ -1266,7 +1208,7 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 ################################################################################
 
 def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
-               data_new_mask, data_ref_mask, log):
+               data_new_mask, data_ref_mask, header_new, log):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), estimates their approximate position, and fits
@@ -1461,7 +1403,7 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
     # add number
     table['NUMBER'] = np.arange(ntrans)+1
     # add RA and DEC
-    wcs = WCS(base_new+'.wcs')
+    wcs = WCS(header_new)
     ra, dec = wcs.all_pix2world(table['XWIN_IMAGE'], table['YWIN_IMAGE'], 1)
     table['ALPHAWIN_J2000'] = ra
     table['DELTAWIN_J2000'] = dec
@@ -2398,7 +2340,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     
     # read in background std image
     fits_bkg_std = base+'_bkg_std.fits'
-    data_bkg_std = read_hdulist (fits_bkg_std, ext_data=0, dtype='float16')
+    data_bkg_std = read_hdulist (fits_bkg_std, ext_data=0, dtype='float32')
 
     # function to create a minimal mask of saturated pixels and the
     # adjacent pixels from input data, in case mask image is not
@@ -2430,9 +2372,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # to the coordinate frame of the new or remapped reference
         # image. At the moment this is done with swarp, but this is a
         # very slow solution. Tried to improve this using functions
-        # [xy_index_ref] and [get_data_remap], but these fail when
-        # there is rotation between the images, resulting in rotated
-        # masks.
+        # [xy_index_ref] and [get_data_remap] (see older zogy
+        # versions), but these fail when there is rotation between the
+        # images, resulting in rotated masks.
 
         use_swarp = True
         if use_swarp:
@@ -2455,59 +2397,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 
             # remap reference image background
             data_ref_bkg_remap = run_swarp(fits_bkg, data_bkg)
-            # remap reference image background std (cannot write float16 data to fits,
-            # while this is the datatype of [data_ref_bkg_map])
-            data_ref_bkg_std_remap = run_swarp(fits_bkg_std,
-                                               data_bkg_std.astype('float32')).astype('float16')
+            # remap reference image background std
+            data_ref_bkg_std_remap = run_swarp(fits_bkg_std, data_bkg_std)
             # remap reference mask image if it exists
             if fits_mask is not None:
+                # SWarp turns integer mask into float during processing,
+                # so need to add 0.5 and convert to integer again
                 data_ref_remap_mask = (run_swarp(fits_mask, data_mask)+0.5).astype('uint8')
-
-        else:
-
-            # instead of using SWarp to remap the background, std and mask
-            # images, use the function [xy_index_ref] to determine indices
-            # of pixels in reference image that correspond to pixels in
-            # new image: image_new[mask_new] correspond to
-            # image_ref[mask_ref]. This mapping needs to be done only
-            # once, and can be used for all three remappings. HOWEVER,
-            # this fails when there is rotation between the images,
-            # and then: image_new[mask_new] = image_ref[mask_ref]
-            # no longer applies!!
-            mask_new, mask_ref = xy_index_ref (ysize, xsize, base_new+'.wcs', base_ref+'.wcs', log)
-
-            # this function applies this mapping to an input fits image,
-            # and returns the remapped data
-            def get_data_remap (ref_fits, mask_new, mask_ref, value_edge=0.):
-                
-                data_ref = read_hdulist (ref_fits, ext_data=0)
-                # initialise remapped image
-                data_remap = np.zeros(mask_new.shape)
-                data_remap[mask_new] = data_ref[mask_ref]
-                ds9_arrays(data_ref=data_ref, data_remap=data_remap)
-
-                # region in image_new that does not overlap with image_ref
-                # is set to [value_edge]
-                if value_edge != 0.:
-                    data_remap[~mask_new] = value_edge
-                ds9_arrays(data_ref=data_ref, data_remap=data_remap)
-                return data_remap
-
-            # remap reference image background
-            ref_fits_bkg = base_ref+'_bkg.fits'
-            data_ref_bkg_remap = get_data_remap(ref_fits_bkg, mask_new, mask_ref).astype('float32')
-            # remap reference image background std
-            ref_fits_bkg_std = base_ref+'_bkg_std.fits'
-            data_ref_bkg_std_remap = get_data_remap(ref_fits_bkg_std, mask_new, mask_ref).astype('float16')
-            # remap mask image if it exists
-            if fits_mask is not None:
-                data_ref_remap_mask = get_data_remap(fits_mask, mask_new, mask_ref,
-                                                     value_edge=C.mask_value['edge']).astype('uint8')
-                
-            if False:
-                ds9_arrays(data_wcs=data_wcs, data_mask=data_mask, data_bkg=data_bkg,
-                           data_ref_remap=data_ref_remap, mask_new=mask_new, mask_ref=mask_ref,
-                           data_ref_bkg_remap=data_ref_bkg_remap)
 
         # if mask image is not provided, use above function [create_mask] to
         # create a minimal mask from the remapped reference data
@@ -2640,11 +2536,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         ncalstars=0
         if os.path.isfile(C.cal_cat):
             
-            # use .wcs file to get RA, DEC of central pixel
-            if imtype=='new':
-                wcs = WCS(base_new+'.wcs')
-            else:
-                wcs = WCS(base_ref+'.wcs')
+            # use WCS solution in input [header] to get RA, DEC of central pixel
+            wcs = WCS(header)
             ra_center, dec_center = wcs.all_pix2world(xsize/2, ysize/2, 1)
             log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
 
@@ -2828,7 +2721,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
     fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_bkg = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
-    fftdata_bkg_std = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float16')
+    fftdata_bkg_std = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
     fftdata_mask = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='uint8')
     for nsub in range(nsubs):
         fftcut = cuts_fft[nsub]
@@ -3353,9 +3246,20 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
         bkg = Background2D(data, C.bkg_boxsize, filter_size=C.bkg_filtersize,
                            sigma_clip=sigma_clip, bkg_estimator=bkg_estimator,
                            mask=mask_reject, edge_method='crop')
+
+        # previously the entire background was returned
         background = bkg.background.astype('float32')
         background_std = bkg.background_rms.astype('float32')
 
+        # now the meshes before interpolation are returned
+        # needs to be checked if this is correct!!!
+        #mesh_median_filt = bkg.background_mesh_ma.astype('float32')
+        #mesh_std_filt = bkg.background_rms_mesh_ma.astype('float32')
+        # these masked arrays lead to an error when trying to save:
+        # File "/usr/lib/python2.7/dist-packages/numpy/ma/core.py", line 5934, in tofile
+        #raise NotImplementedError("MaskedArray.tofile() not implemented yet.")
+        #NotImplementedError: MaskedArray.tofile() not implemented yet.
+        
     else:
 
         # mask to use (opposite of mask_reject)
@@ -3444,42 +3348,48 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
         mesh_median_filt = ndimage.filters.median_filter(mesh_median, shape_filter)
         mesh_std_filt = ndimage.filters.median_filter(mesh_std, shape_filter)
 
-        #if C.timing:
-        #    log_timing_memory (t0=t, label='get_back after median filtering', log=log)
-
-        # resize low-resolution meshes, using cubic spline for the
-        # background image and bilinear for the standard deviation
-        background = ndimage.zoom(mesh_median_filt, C.bkg_boxsize, order=2)
-        background_std = ndimage.zoom(mesh_std_filt, C.bkg_boxsize, order=1)
-
-        #ds9_arrays(data_objmask=data_objmask, mesh_median=mesh_median,
-        #           mesh_median_filt=mesh_median_filt,
-        #           background=background, background_std=background_std)
-        
-        #if C.timing:
-        #    log_timing_memory (t0=t, label='get_back after resizing low-resolution meshes', log=log)
-
-        # if shape of the background is not equal to input [data]
-        # then pad the background images
-        if data.shape != background.shape:
-            t1 = time.time()
-            ypad = ysize - background.shape[0]
-            xpad = xsize - background.shape[1]
-            background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
-            background_std = np.pad(background_std, ((0,ypad),(0,xpad)), 'edge')                   
-            log.info('time to pad ' + str(time.time()-t1))
-            #ds9_arrays(data=data, data_objmask=data_objmask,
-            #           background=background, background_std=background_std)
-            #np.pad seems quite slow; alternative:
-            #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(C.bkg_boxsize,
-            #                                                                   ysize, xsize, log,
-            #                                                                   get_remainder=True)
-            # these now include the remaining patches
-                        
     if C.timing:
         log_timing_memory (t0=t, label='get_back', log=log)
 
-    return background, background_std
+    if use_photutils:
+        return background, background_std
+    else:
+        return mesh_median_filt, mesh_std_filt
+
+
+################################################################################
+
+def mesh2back (mesh_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
+    
+    if C.timing: t = time.time()
+    log.info('Executing mesh2back ...')
+
+    # resize low-resolution meshes, with order [order_interp], where
+    # order=0: nearest
+    # order=1: bilinear spline interpolation
+    # order=2: quadratic spline interpolation
+    # order=3: cubic spline interpolation
+    background = ndimage.zoom(mesh_filt, C.bkg_boxsize, order=order_interp)
+
+    # if shape of the background is not equal to input [data]
+    # then pad the background images
+    if shape_data != background.shape:
+        t1 = time.time()
+        ypad = ysize - background.shape[0]
+        xpad = xsize - background.shape[1]
+        background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
+        log.info('time to pad ' + str(time.time()-t1))
+
+        #np.pad seems quite slow; alternative:
+        #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(C.bkg_boxsize,
+        #                                                                   ysize, xsize, log,
+        #                                                                   get_remainder=True)
+        # these now include the remaining patches
+                        
+    if C.timing:
+        log_timing_memory (t0=t, label='mesh2back', log=log)
+        
+    return background
 
 
 ################################################################################
@@ -3770,12 +3680,15 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         # would also take care of any potential rotation and scaling.
 
         # first infer ra, dec corresponding to x, y pixel positions
-        # (centers[:,1] and centers[:,0], respectively, using the
-        # [new].wcs file from Astrometry.net
-        wcs = WCS(base_new+'.wcs')
+        # (centers[:,1] and centers[:,0], respectively, using the WCS
+        # solution in [new].wcs file from Astrometry.net
+        header_new_temp = read_hdulist (base_new+'_wcs.fits', ext_header=0)
+        wcs = WCS(header_new_temp)
         ra_temp, dec_temp = wcs.all_pix2world(centers[:,1], centers[:,0], 1)
-        # then convert ra, dec back to x, y in the original ref image
-        wcs = WCS(base_ref+'.wcs')
+        # then convert ra, dec back to x, y in the original ref image;
+        # since this block concerns the reference image, the input [header]
+        # corresponds to the reference header
+        wcs = WCS(header)
         centers[:,1], centers[:,0] = wcs.all_world2pix(ra_temp, dec_temp, 1)
         
     # initialize output PSF array
@@ -3915,13 +3828,13 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         log_timing_memory (t0=t1, label='loop_psf_sub pool', log=log)
         log_timing_memory (t0=t, label='get_psf', log=log)
 
-    return psf_ima_shift.astype('float32'), psf_ima.astype('float16')
+    return psf_ima_shift.astype('float32'), psf_ima.astype('float32')
 
 
 ################################################################################
 
 def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
-                    wcs_new, wcs_ref, nsubs, cuts_ima, log, header):
+                    header_new, header_ref, nsubs, cuts_ima, log, header):
     
     """Function that takes in output catalogs of stars used in the PSFex
     runs on the new and the ref image, and returns the arrays with
@@ -3983,11 +3896,11 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
     #ra_new, dec_new = xy2radec(number_new, sexcat_new)
     #ra_ref, dec_ref = xy2radec(number_ref, sexcat_ref)
     # instead use wcs.all_pix2world
-    wcs = WCS(wcs_ref)
+    wcs = WCS(header_ref)
     ra_ref, dec_ref = wcs.all_pix2world(x_ref, y_ref, 1)
 
     # convert the reference RA and DEC to pixels in the new frame
-    wcs = WCS(wcs_new)
+    wcs = WCS(header_new)
     x_ref2new, y_ref2new = wcs.all_world2pix(ra_ref, dec_ref, 1)
 
     # these can be compared to x_new and y_new
@@ -4337,7 +4250,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
     # create ds9 regions text file to show the brightest stars
     if C.make_plots:
-        result = prep_ds9regions('cat_bright_ds9regions.txt',
+        result = prep_ds9regions(base+'_cat_bright_ds9regions.txt',
                                  data_sexcat['XWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  data_sexcat['YWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  radius=5., width=2, color='green')
@@ -4403,6 +4316,12 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # read header saved in .wcs 
     wcsfile = base+'.wcs'
     header_wcs = read_hdulist (wcsfile, ext_header=0)
+
+    # remove HISTORY, COMMENT and DATE fields from Astrometry.net header
+    # they are still present in the base+'.wcs' file
+    header_wcs.pop('HISTORY', None)
+    header_wcs.pop('COMMENT', None)
+    header_wcs.pop('DATE', None)
     
     # add specific keyword indicating index file of match
     if data_match['HEALPIX'][0]!=-1:
@@ -4435,14 +4354,15 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # use astropy.WCS to find RA, DEC corresponding to XWIN_IMAGE,
     # YWIN_IMAGE, based on WCS info saved by Astrometry.net in .wcs
     # file (wcsfile). The 3rd parameter to wcs.all_pix2world indicates
-    # the pixel coordinate of the frame origin. This avoids having to
-    # save the new RAs and DECs to file and read them back into python
-    # arrays. Although it gives a command line warning, it provides
-    # the same RA and DEC as wcs-xy2rd and also as SExtractor run
-    # independently on the WCS-ed image (i.e.  the image_out in this
-    # function). The warning is the mismatch between NAXES in the .wcs
-    # image (0) and that expected by the routine (2).
-    wcs = WCS(wcsfile)
+    # the pixel coordinate of the frame origin. Using astropy.WCS
+    # avoids having to save the new RAs and DECs to file and read them
+    # back into python arrays. It provides the same RA and DEC as
+    # wcs-xy2rd and also as SExtractor run independently on the WCS-ed
+    # image (i.e.  the image_out in this function).
+    # N.B.: WCS accepts header objects - gets rid of old warning about
+    # axis mismatch, as .wcs files have NAXIS=0, while proper image
+    # header files have NAXIS=2
+    wcs = WCS(header)
     newra, newdec = wcs.all_pix2world(data_sexcat['XWIN_IMAGE'],
                                       data_sexcat['YWIN_IMAGE'],
                                       1)
@@ -5094,19 +5014,43 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         # the reference image these data need to refer to the image
         # before remapping
         if C.bkg_method==2:
-            data_bkg, data_bkg_std = get_back(data, objmask, log)
+            data_bkg_mesh, data_bkg_std_mesh = get_back(data, objmask, log)
+           
+            # write these filtered meshes to fits
+            fits.writeto(base+'_bkg_mesh.fits', data_bkg_mesh, overwrite=True)
+            fits.writeto(base+'_bkg_std_mesh.fits', data_bkg_std_mesh, overwrite=True)
+            # and update headers with [C.bkg_boxsize]
+            fits.setval(base+'_bkg_mesh.fits', 'BKG_SIZE', value=C.bkg_boxsize)
+            fits.setval(base+'_bkg_std_mesh.fits', 'BKG_SIZE', value=C.bkg_boxsize)
+
+            # now use function [mesh2back] to turn filtered mesh of median
+            # and std of backgroun regions into full background image and
+            # its standard deviation
+            data_bkg = mesh2back (data_bkg_mesh, data.shape, log,
+                                  order_interp=2, bkg_boxsize=C.bkg_boxsize)
+            data_bkg_std = mesh2back (data_bkg_std_mesh, data.shape, log,
+                                      order_interp=1, bkg_boxsize=C.bkg_boxsize)
+
 
         # similar as above, but now photutils' Background2D is used
         # inside [get_back]
         elif C.bkg_method==3:
+            # for the moment [get_back] is returning the full
+            # background images rather than the meshses; maybe delete
+            # this method altogether also because it's much slower
+            #data_bkg_mesh, data_bkg_std_mesh = get_back(data, objmask, log,
+            #                                            use_photutils=True)
             data_bkg, data_bkg_std = get_back(data, objmask, log,
                                               use_photutils=True)
-            
+
+
         # write the improved background and standard deviation to fits
         # overwriting the fits images produced by SExtractor
         fits.writeto(fits_bkg, data_bkg, overwrite=True)
         fits.writeto(fits_bkg_std, data_bkg_std, overwrite=True)
-    
+
+
+                
     if return_fwhm:
         # get estimate of seeing from output catalog
         fwhm, fwhm_std = get_fwhm(cat_out, C.fwhm_frac, log, class_sort=C.fwhm_class_sort)
@@ -5167,8 +5111,9 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     #       '-SAMPLE_MAXELLIP', maxellip_str]
 
     if C.make_plots:
-        cmd += ['-CHECKPLOT_DEV', 'PDF',
-                '-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, CHI2, RESIDUALS',
+        cmd += ['-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, CHI2, RESIDUALS',
+                '-CHECKPLOT_DEV', 'PS',
+                '-CHECKPLOT_ANTIALIAS', 'N',
                 '-CHECKPLOT_NAME',
                 'psfex_fwhm, psfex_ellip, psfex_counts, psfex_countfrac, psfex_chi2, psfex_resi']
         cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,BASIS',
@@ -5188,9 +5133,23 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     # standard output of PSFEx is .psf; change this to _psf.fits
     psf_in = cat_in.replace('.fits', '.psf')
     psf_out = base+'_psf.fits'
-    cmd = ['mv', psf_in, psf_out]
-    result = subprocess.call(cmd)
-    
+    cmd = 'mv {} {}'.format(psf_in, psf_out)
+
+    if C.make_plots:
+        # if diagnostic plots and images were made, give them a better name
+        file_list = [name for name in os.listdir('.') if name[0:5]=='psfex']
+        for name in file_list:
+            ext = name.split('.')[-1]
+            prefix = '_'.join(name.split('_')[0:2])
+            # this assumes name does not contain more than 1 period
+            name_new = name.split('.')[0]
+            name_new = '_'.join(name_new.split('_')[2:])+'_'+prefix+'.'+ext
+            # remove '_ldac_4psfex' from the name if present
+            name_new = name_new.replace('_ldac_4psfex','')
+            cmd += ' & mv {} {}'.format(name, name_new)
+
+    result = subprocess.call(cmd, shell=True)
+        
     if C.timing:
         log_timing_memory (t0=t, label='run_psfex', log=log)
 
