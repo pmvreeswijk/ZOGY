@@ -279,7 +279,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             # SExtractor version
             cmd = ['sex', '-v']
             result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-            version = result.stdout.read().split()[2]
+            version = result.stdout.read().split()[2].decode('UTF-8')
             header['S-VERS'] = (version, 'SExtractor version used')
 
         # determine WCS solution of new_fits
@@ -301,8 +301,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             else:
                 WCS_processed = True
 
-            # add header keyword(s):
-            header['A-P'] = (WCS_processed, 'successfully processed by Astrometry.net?')
+                # add header keyword(s):
+                header['A-P'] = (WCS_processed, 'successfully processed by Astrometry.net?')
 
         # if .wcs header file does not exist (e.g. if
         # [C.skip_wcs]==True), then create it here from the general
@@ -311,7 +311,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         if not os.path.isfile(wcsfile):
             hdu = fits.PrimaryHDU(header=header)
             hdu.writeto(wcsfile)
-
+            
         return data_cal
 
     if new:
@@ -782,7 +782,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                 plt.close()
 
             
-    if telescope=='meerlicht' or telescope=='blackgem':
+    if telescope=='meerlicht' or telescope=='blackgem' or telescope=='css':
         # using the function [format_cat], write the new, ref and
         # transient output catalogues with the desired format, where the
         # thumbnail images (new, ref, D and Scorr) around each transient
@@ -845,6 +845,9 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             if C.make_plots:
                 cmd += ['-regions', base_newref+'_ds9regions.txt']
             result = subprocess.call(cmd)
+    # shutdown internal log before exiting
+    if log is None:
+        logging.shutdown()
     return 'info', 'Successfully ran ZOGY on image.'
 
 
@@ -1167,7 +1170,7 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
         xpos = int(xcoord-0.5)
         ypos = int(ycoord-0.5)
 
-    hsize = size/2
+    hsize = int(size/2)
 
     # if footprint is partially off the image, just go ahead
     # with the pixels on the image
@@ -1654,7 +1657,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
     psf_samp_update = float(psf_size) / float(psf_size_config)
 
     # define psf_hsize
-    psf_hsize = psf_size/2
+    psf_hsize = int(psf_size/2)
 
     # previously this was a loop; now turned to a function to
     # try pool.map multithreading below
@@ -3298,8 +3301,8 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
         if ysize % C.bkg_boxsize != 0 or xsize % C.bkg_boxsize !=0:
             log.info('Warning: [C.bkg_boxsize] does not fit integer times in image')
             log.info('         remaining pixels will be edge-padded')
-        nysubs = ysize / C.bkg_boxsize
-        nxsubs = xsize / C.bkg_boxsize
+        nysubs = int(ysize / C.bkg_boxsize)
+        nxsubs = int(xsize / C.bkg_boxsize)
         # prepare output median and std output arrays
         mesh_median = np.ndarray(nsubs, dtype='float32')
         mesh_std = np.ndarray(nsubs, dtype='float32')
@@ -3791,11 +3794,11 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         if ysize_fft % 2 != 0 or xsize_fft % 2 != 0:
             log.info('Warning: image not even in one or both dimensions!')
             
-        xcenter_fft, ycenter_fft = xsize_fft/2, ysize_fft/2
+        xcenter_fft, ycenter_fft = int(xsize_fft/2), int(ysize_fft/2)
         if C.verbose and nsub==0:
             log.info('xcenter_fft, ycenter_fft: ' + str(xcenter_fft) + ', ' + str(ycenter_fft))
 
-        psf_hsize = psf_size/2
+        psf_hsize = int(psf_size/2)
         index = [slice(ycenter_fft-psf_hsize, ycenter_fft+psf_hsize+1), 
                  slice(xcenter_fft-psf_hsize, xcenter_fft+psf_hsize+1)]
         psf_ima_center[nsub][index] = psf_ima_resized_norm
@@ -4142,8 +4145,8 @@ def centers_cutouts(subsize, ysize, xsize, log, get_remainder=False):
     fit as many of these in the full frames, and for the moment it
     will ignore any remaining pixels outside."""
     
-    nxsubs = xsize / subsize
-    nysubs = ysize / subsize
+    nxsubs =int(xsize / subsize)
+    nysubs = int(ysize / subsize)
     if get_remainder:
         if xsize % subsize != 0:
             nxsubs += 1
@@ -4389,7 +4392,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         # to determine fits extensions (=zone+1) to read
         fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
         ext_list = get_ext_list (dec_center, fov_half_deg, zone_size=60.)
-        print 'dec_center: {}, ext_list: {}'.format(dec_center, ext_list)
+        print('dec_center: {}, ext_list: {}'.format(dec_center, ext_list))
 
         t4 = time.time()
         # read calibration catalog
@@ -4605,6 +4608,7 @@ def ldac2fits (cat_ldac, cat_fits, log):
             # except for the RA and DEC columns
             data = hdulist[2].data
             cols = hdulist[2].columns
+
             for icol, key in enumerate(cols.names):
                 format_new = cols.formats[icol]
                 if '1D' in cols.formats[icol] and 'J2000' not in key:
@@ -4615,6 +4619,7 @@ def ldac2fits (cat_ldac, cat_fits, log):
                 columns.append(col)
 
             hdulist[2] = fits.BinTableHDU.from_columns(columns)
+
             # overwrite input ldac fits table with double formats
             # converted to float32
             #hdulist.writeto(cat_ldac, overwrite=True)
@@ -5212,7 +5217,7 @@ def clean_norm_psf(psf_array, clean_factor):
     assert xsize == ysize
     
     # set values in the corners of the PSF image to zero
-    hsize = xsize/2
+    hsize = int(xsize/2)
     # even
     if xsize % 2 == 0:
         x = np.arange(-hsize, hsize)
