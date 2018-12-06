@@ -1,5 +1,5 @@
 
-__version__ = '0.52'
+__version__ = '0.6'
 
 #===============================================================================
 # ZOGY
@@ -55,8 +55,6 @@ key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
 gain = 1.0
 key_ron = 'RDNOISE'
-# temporarily fix read-out noise to 10 as header values not always correct
-ron = 10.          
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
@@ -114,16 +112,14 @@ skip_wcs = False         # skip Astrometry.net step if image already
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
 # only search in Astrometry.net index files within this radius of the
-# header RA and DEC
+# header RA and DEC [deg]
 astronet_radius = 1.5
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
-# name of the astrometric catalog (in binary fits format) with columns
-# 'RA' and 'DEC' in degrees against which the astrometric solution
-# found by Astrometry.net is compared
-ast_cat = '/media/data/pmv/Gaia/DR2/MLBG_astcat_GaiaDR2_20180703.fits'
-# magnitude column in [ast_cat] used to sort in brightness
-ast_cat_filter = 'phot_g_mean_mag'
+# calibration catalog used for both astrometry and photometry
+cal_cat = '/media/data/pmv/PhotCalibration/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
+ast_filter = 'r'         # magnitude column to sort in brightness
 
 #===============================================================================
 # Photometry
@@ -147,9 +143,9 @@ ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 # name of the photometric calibration catalog (in binary fits format)
 # with the stars' magnitudes converted to the same filter(s) as the
 # observations (in this case the MeerLICHT/BlackGEM filter set):
-phot_cat = '/media/data/pmv/PhotCalibration/MLBG_calcat_sdssDR14+skymapperDR1p1_20180319.fits'
-# for very crowded fields, limit the number of calibration stars used
-ncal_max = 500
+# this is now the same as the astrometric catalog: [cal_cat] defined above
+phot_ncal_max = 100 # max no. of calibration stars used for a given field 
+phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
 zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
