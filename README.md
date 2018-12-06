@@ -7,15 +7,15 @@ This module accepts a new and a reference fits image, runs SExtractor on them, f
 
 It makes grateful use of the following programs that first need to be installed:
 
- - Astrometry.net (in particular "solve-field" and index files): http://astrometry.net 
- - SExtractor: http://www.astromatic.net/software/sextractor
- - SWarp: http://www.astromatic.net/software/swarp
- - PSFex: http://www.astromatic.net/software/psfex
- - ds9
- - sip_to_pv package from David Shupe: https://github.com/stargaser/sip_tpv
- - pyfftw to speed up the many FFTs performed
- - the other modules imported at the top (e.g. astropy, matplotlib, etc.)
- 
+- Astrometry.net (in particular "solve-field" and index files): http://astrometry.net 
+- SExtractor: http://www.astromatic.net/software/sextractor
+- SWarp: http://www.astromatic.net/software/swarp
+- PSFex: http://www.astromatic.net/software/psfex
+- ds9
+- sip_to_pv package from David Shupe: https://github.com/stargaser/sip_tpv
+- pyfftw to speed up the many FFTs performed
+- the other modules imported at the top (e.g. astropy, matplotlib, etc.)
+
 Warning: this module is still being developed and has so far been tested on KMTNet and MeerLICHT images. It is designed specifically to be included in the MeerLICHT and BlackGEM pipelines, but we hope that it will be useful to apply to images of other telescopes as well.
 
 This project is licensed under the terms of the MIT license.
