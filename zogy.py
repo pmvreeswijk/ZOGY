@@ -4472,7 +4472,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         # to determine fits extensions (=zone+1) to read
         fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
         ext_list = get_ext_list (dec_center, fov_half_deg, zone_size=60.)
-        print 'dec_center: {}, ext_list: {}'.format(dec_center, ext_list)
+        print('dec_center: {}, ext_list: {}'.format(dec_center, ext_list))
 
         t4 = time.time()
         # read calibration catalog
