@@ -53,14 +53,14 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 #from memory_profiler import profile
 
-__version__ = '0.61'
+__version__ = '0.62'
 
 ################################################################################
 
 #@profile
 def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                         ref_fits_mask=None, telescope=None, log=None,
-                        verbose=None):
+                        verbose=None,nthread=None):
     
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -88,6 +88,14 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     """
 
     global C
+
+     # make nthreads a global parameter instead of passing it on
+    # through different functions
+    global nthreads
+    nthreads = nthread
+
+    # set environment variable
+    os.environ["OMP_NUM_THREADS"] = str(nthreads)
 
     settings_module = 'Settings.Constants'
     if telescope is not None:
@@ -5689,16 +5697,9 @@ def main():
     # parameters are now referred to as C.[parameter name]
     args = parser.parse_args()
 
-    # make nthreads a global parameter instead of passing it on
-    # through different functions
-    global nthreads
-    nthreads = args.nthreads
-
-    # set environment variable
-    os.environ["OMP_NUM_THREADS"] = str(nthreads)
 
     optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask, args.ref_fits_mask,
-                        args.telescope, args.log, args.verbose)
+                        args.telescope, args.log, args.verbose, args.nthreads)
 
 if __name__ == "__main__":
     main()
