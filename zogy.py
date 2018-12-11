@@ -713,32 +713,11 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                                      .format(C.transient_nsigma))
 
 
-        # write full images to fits
-        if C.timing:
-            t_fits = time.time() 
-
-        header_newzogy = header_new + header_zogy
-        #header_newzogy.add_comment('many keywords, incl. WCS solution, are from corresponding image')
-        fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, overwrite=True)
-        fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, overwrite=True)
-        fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, overwrite=True)
-        fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_newzogy, overwrite=True)
-        
-        if C.timing:
-            log_timing_memory (t0=t_fits, label='writing D, Scorr, Fpsf and Fpsferr fits images', log=log)
-        
-        if C.display:
-            fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
-            fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
-            fits.writeto('new_mask.fits', data_new_mask_full, header_new, overwrite=True)
-            fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref, overwrite=True)
-            fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
-
         if C.nfakestars==0:
             
             # still write these header keywords
             header_zogy['T-NFAKE'] = (C.nfakestars, 'number of fake stars added to full frame')
-            header_zogy['T-FAKESN'] = (C.fakestar_s2n, 'fake stars input S/N?')
+            header_zogy['T-FAKESN'] = (C.fakestar_s2n, 'fake stars input S/N')
             
         else:
 
@@ -751,7 +730,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             # add header keyword(s):
             nfake = len(fakestar_flux_input)
             header_zogy['T-NFAKE'] = (nfake, 'number of fake stars added to full frame')
-            header_zogy['T-FAKESN'] = (C.fakestar_s2n, 'fake stars input S/N?')
+            header_zogy['T-FAKESN'] = (C.fakestar_s2n, 'fake stars input S/N')
 
             # write to ascii file
             filename = base_new+'_fakestars.dat'
@@ -800,7 +779,29 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                 if C.show_plots: plt.show()
                 plt.close()
 
-                
+
+        # write full ZOGY output images to fits
+        if C.timing:
+            t_fits = time.time() 
+
+        header_newzogy = header_new + header_zogy
+        #header_newzogy.add_comment('many keywords, incl. WCS solution, are from corresponding image')
+        fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, overwrite=True)
+        fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, overwrite=True)
+        fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, overwrite=True)
+        fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_newzogy, overwrite=True)
+        
+        if C.timing:
+            log_timing_memory (t0=t_fits, label='writing D, Scorr, Fpsf and Fpsferr fits images', log=log)
+        
+        if C.display:
+            fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
+            fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
+            fits.writeto('new_mask.fits', data_new_mask_full, header_new, overwrite=True)
+            fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref, overwrite=True)
+            fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
+
+                                
     if telescope=='meerlicht' or telescope=='blackgem' or telescope=='css':
         # using the function [format_cat], write the new, ref and
         # transient output catalogues with the desired format, where the
