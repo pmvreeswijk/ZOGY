@@ -89,9 +89,12 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
     global C
 
-     # make nthreads a global parameter instead of passing it on
+    # make nthreads a global parameter instead of passing it on
     # through different functions
     global nthreads
+    # this subtlety is because [nthreads] used to be made global in
+    # [main], which is not executed if another module, such as
+    # subpipe, is calling [optimal_subtraction] directly
     nthreads = nthread
 
     # set environment variable
@@ -814,14 +817,16 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             cat_new = base_new+'_cat_fluxopt.fits'
             cat_new_out = base_new+'_cat.fits'
             result = format_cat (cat_new, cat_new_out, log, cat_type='new',
-                                 header_toadd=header_new, exptime=exptime_new)
+                                 header_toadd=header_new, exptime=exptime_new,
+                                 apphot_radii=C.apphot_radii)
         # ref catalogue
         if ref:
             exptime_ref = read_header(header_ref, ['exptime'], log)
             cat_ref = base_ref+'_cat_fluxopt.fits'
             cat_ref_out = base_ref+'_cat.fits'
             result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
-                                 header_toadd=header_ref, exptime=exptime_ref)
+                                 header_toadd=header_ref, exptime=exptime_ref,
+                                 apphot_radii=C.apphot_radii)
         # trans catalogue
         if new and ref:
             cat_trans = base_newref+'.transcat'
@@ -834,7 +839,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             result = format_cat (cat_trans, cat_trans_out, log, cat_type='trans',
                                  thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
                                  thumbnail_size=32, header_toadd=header_newzogy,
-                                 exptime=exptime_new)
+                                 exptime=exptime_new, apphot_radii=C.apphot_radii)
 
     end_time = os.times()
     if new and ref:
@@ -1008,8 +1013,9 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
 
 ################################################################################
 
-def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
-                thumbnail_size=32, cat_type=None, header_toadd=None, exptime=0.):
+def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=None,
+                thumbnail_size=32, cat_type=None, header_toadd=None, exptime=0.,
+                apphot_radii=None):
 
     """Function that formats binary fits table [cat_in] according to
         MeerLICHT/BlackGEM specifications and saves the resulting
@@ -1017,16 +1023,21 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
 
     """
     
-    if C.timing: t = time.time()
+    if cat_in is not None:
 
-    with fits.open(cat_in) as hdulist:
-        prihdu = hdulist[0]
-        header = hdulist[1].header
-        data = hdulist[1].data
+        if C.timing: t = time.time()
 
-    if header_toadd is not None:
-        header += header_toadd
+        with fits.open(cat_in) as hdulist:
+            prihdu = hdulist[0]
+            header = hdulist[1].header
+            data = hdulist[1].data
 
+        if header_toadd is not None:
+            header += header_toadd
+
+    else:
+        header = header_toadd
+            
     thumbnail_size2 = str(thumbnail_size**2)
         
     # this [formats] dictionary lists the output format, the output
@@ -1111,21 +1122,30 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
                 #log.info('exptime: {}, key: {}, formats[key][1]: {}'.format(exptime, key, formats[key][1]))
                 data[key] /= exptime
         else:
-            log.info('Warning: input [exptime] in function [format_cat] is zero')
+            if log is not None:
+                log.info('Warning: input [exptime] in function [format_cat] is zero')
                 
         if key=='FLUX_APER' or key=='FLUXERR_APER':
             # update column names of aperture fluxes to include radii
             # loop apertures
-            for i_ap in range(len(C.apphot_radii)):
-                name = key+'_R'+str(C.apphot_radii[i_ap])+'xFWHM'
-                col = fits.Column(name=name, format=formats[key][0], unit=formats[key][1], 
-                                  disp=formats[key][2], array=data[key][:,i_ap])
+            for i_ap in range(len(apphot_radii)):
+                name = key+'_R'+str(apphot_radii[i_ap])+'xFWHM'
+                if cat_in is not None:
+                    col = fits.Column(name=name, format=formats[key][0], unit=formats[key][1], 
+                                      disp=formats[key][2], array=data[key][:,i_ap])
+                else:
+                    col = fits.Column(name=name, format=formats[key][0], unit=formats[key][1], 
+                                      disp=formats[key][2])
                 columns.append(col)
         else:
-            if key in data.names:
+            if cat_in is not None:
+                if key in data.names:
+                    col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
+                                      disp=formats[key][2], array=data[key])
+            else:
                 col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
-                                  disp=formats[key][2], array=data[key])
-                columns.append(col)
+                                  disp=formats[key][2])
+            columns.append(col)
         
     # add [thumbnails]
     if thumbnail_data is not None and thumbnail_keys is not None:
@@ -1156,8 +1176,9 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
                 try:
                     data_col[i_pos] = thumbnail_data[i_tn][index]
                 except ValueError as ve:
-                    log.info('skipping object at x,y: {:.0f},{:.0f} due to ValueError: {}'.
-                             format(xcoords[i_pos], ycoords[i_pos], ve))
+                    if log is not None:
+                        log.info('skipping object at x,y: {:.0f},{:.0f} due to ValueError: {}'.
+                                 format(xcoords[i_pos], ycoords[i_pos], ve))
                     
             # add column to table
             dim_str = '('+str(thumbnail_size)+','+str(thumbnail_size)+')'
@@ -1171,8 +1192,9 @@ def format_cat (cat_in, cat_out, log, thumbnail_data=None, thumbnail_keys=None,
     hdu.header += header
     hdu.writeto(cat_out, overwrite=True)
     
-    if C.timing:
-        log_timing_memory (t0=t, label='format_cat', log=log)
+    if cat_in is not None:
+        if C.timing and log is not None:
+            log_timing_memory (t0=t, label='format_cat', log=log)
 
     return
 
@@ -5791,7 +5813,6 @@ def main():
     # Utils/Constants_[telescope} file as C; all former global
     # parameters are now referred to as C.[parameter name]
     args = parser.parse_args()
-
 
     optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask, args.ref_fits_mask,
                         args.telescope, args.log, args.verbose, args.nthreads)
