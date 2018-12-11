@@ -1,5 +1,5 @@
 
-__version__ = '0.62'
+__version__ = '0.6.2'
 
 #===============================================================================
 # ZOGY
@@ -117,8 +117,9 @@ astronet_radius = 1.5
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
-cal_cat = '/data/projects/meerlicht/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+cal_cat = '/media/data/pmv/PhotCalibration/ML_calcat_kur_allsky_ext1deg_20181115.fits'
 ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
+                         # crosscheck of positions obtained against calibration catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
 
 #===============================================================================
@@ -148,7 +149,7 @@ phot_ncal_max = 100 # max no. of calibration stars used for a given field
 phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
-zp_default = {'u':24., 'g':24., 'q':24., 'r':24., 'i':24., 'z':24.}
+zp_default = {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}
 
 #===============================================================================
 # Configuration
