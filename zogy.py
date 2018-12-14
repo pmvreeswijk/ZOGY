@@ -295,18 +295,13 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             version = result.stdout.read().split()[2].decode('UTF-8')
             header['S-VERS'] = (version, 'SExtractor version used')
 
-        # determine WCS solution of new_fits
-        fits_wcs = base+'_wcs.fits'
+        # determine WCS solution
         data_cal = None
-        if not os.path.isfile(fits_wcs) or C.redo:
+        if ('CTYPE1' not in header.keys() and 'CTYPE2' not in header.keys()) or C.redo:
             try:
                 if not C.skip_wcs:
-                    data_cal = run_wcs(base+'.fits', fits_wcs, ra, dec, pixscale, xsize, ysize,
+                    data_cal = run_wcs(base+'.fits', base+'.fits', ra, dec, pixscale, xsize, ysize,
                                        header, log)
-                else:
-                    # just copy original image to _wcs.fits image
-                    cmd = ['cp', base+'.fits', fits_wcs]
-                    result = subprocess.call(cmd)
             except Exception as e:
                 WCS_processed = False
                 log.info(traceback.format_exc())
@@ -317,14 +312,6 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                 # add header keyword(s):
                 header['A-P'] = (WCS_processed, 'successfully processed by Astrometry.net?')
 
-        # if .wcs header file does not exist (e.g. if
-        # [C.skip_wcs]==True), then create it here from the general
-        # header as it is used in various places
-        wcsfile = base+'.wcs'
-        if not os.path.isfile(wcsfile):
-            hdu = fits.PrimaryHDU(header=header)
-            hdu.writeto(wcsfile)
-            
         return data_cal
 
     if new:
@@ -358,7 +345,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         header_zogy = fits.Header()
 
         # remap ref to new
-        ref_fits_remap = base_ref+'_wcs_remap.fits'
+        ref_fits_remap = base_ref+'_remap.fits'
         if not os.path.isfile(ref_fits_remap) or C.redo:
             # if reference image is poorly sampled, could use bilinear
             # interpolation for the remapping using SWarp - this
@@ -369,7 +356,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             resampling_type='LANCZOS3'
             # if fwhm_ref <= 2: resampling_type='BILINEAR'
             try:
-                result = run_remap(base_new+'_wcs.fits', base_ref+'_wcs.fits', ref_fits_remap,
+                result = run_remap(base_new+'.fits', base_ref+'.fits', ref_fits_remap,
                                    [ysize_new, xsize_new], gain=gain_new, log=log, config=C.swarp_cfg,
                                    resampling_type=resampling_type, resample='Y') 
             except Exception as e:
@@ -408,7 +395,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     # ref, psf and background images
     if new:
         data_new, psf_new, psf_orig_new, data_new_bkg, data_new_bkg_std, data_new_mask = (
-            prep_optimal_subtraction(base_new+'_wcs.fits', nsubs, 'new', fwhm_new, header_new,
+            prep_optimal_subtraction(base_new+'.fits', nsubs, 'new', fwhm_new, header_new,
                                      log, fits_mask=new_fits_mask, data_cal=data_cal_new)
         )
             
@@ -416,7 +403,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     # [ref_fits_remap] will be None
     if ref_fits is not None:
         data_ref, psf_ref, psf_orig_ref, data_ref_bkg, data_ref_bkg_std, data_ref_mask = (
-            prep_optimal_subtraction(base_ref+'_wcs.fits', nsubs, 'ref', fwhm_ref, header_ref,
+            prep_optimal_subtraction(base_ref+'.fits', nsubs, 'ref', fwhm_ref, header_ref,
                                      log, fits_mask=ref_fits_mask, ref_fits_remap=ref_fits_remap,
                                      data_cal=data_cal_ref)
         )
@@ -613,10 +600,10 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                 fits.writeto(base_newref+'_Scorr'+subend, data_Scorr.astype('float32'), overwrite=True)
         
                 # write new and ref subimages to fits
-                newname = base_new+'_wcs'+subend
+                newname = base_new+subend
                 #fits.writeto(newname, ((data_new[nsub]+data_new_bkg[nsub])/gain_new).astype('float32'), overwrite=True)
                 fits.writeto(newname, data_new[nsub].astype('float32'), overwrite=True)
-                refname = base_ref+'_wcs'+subend
+                refname = base_ref+subend
                 #fits.writeto(refname, ((data_ref[nsub]+data_ref_bkg[nsub])/gain_ref).astype('float32'), overwrite=True)
                 fits.writeto(refname, data_ref[nsub].astype('float32'), overwrite=True)
 
@@ -652,19 +639,23 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                 result = subprocess.call(cmd)
 
 
-        # compute statistics on full Scorr image and show histogram
+        # compute statistics on Scorr image and show histogram
+        # discarding the edge, and using a fraction of the total image
+        edge = 100
+        nstat = int(0.05 * (xsize_new*ysize_new))
+        x_stat = (np.random.rand(nstat)*(xsize_new-2*edge)).astype(int) + edge
+        y_stat = (np.random.rand(nstat)*(ysize_new-2*edge)).astype(int) + edge
         mean_Scorr, std_Scorr, median_Scorr = (
-            clipped_stats (data_Scorr_full, clip_zeros=True, make_hist=C.make_plots,
-                           name_hist=base_newref+'_Scorr_hist.pdf',
+            clipped_stats (data_Scorr_full[y_stat,x_stat], clip_zeros=True,
+                           make_hist=C.make_plots, name_hist=base_newref+'_Scorr_hist.pdf',
                            hist_xlabel='value in Scorr image', log=log))
         if C.verbose:
             log.info('Scorr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
                      .format(mean_Scorr, median_Scorr, std_Scorr))
-            
-        # compute statistics on Fpsferr image using pixels with Scorr values < 1
-        mask_Scorr_1sigma = (np.abs(data_Scorr_full) < 1.)
+
+        # compute statistics on Fpsferr image
         mean_Fpsferr, std_Fpsferr, median_Fpsferr = (
-            clipped_stats (data_Fpsferr_full[mask_Scorr_1sigma], make_hist=C.make_plots,
+            clipped_stats (data_Fpsferr_full[y_stat,x_stat], make_hist=C.make_plots,
                            name_hist=base_newref+'_Fpsferr_hist.pdf',
                            hist_xlabel='value in Fpsferr image', log=log))
         if C.verbose:
@@ -2434,11 +2425,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # local function to help with remapping of the background
             # maps and mask
             def run_swarp (fits2remap, data2remap, header2remap=header_wcs,
-                           fits2remap2=base_new+'_wcs.fits'):
+                           fits2remap2=base_new+'.fits'):
 
                 # update headers of fits image with that of the
                 # original wcs-corrected reference image
-                fits.writeto(fits2remap, data2remap, header=header2remap, overwrite=True)
+                fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
                 # project fits image to new image
                 fits_out = fits2remap.replace('.fits', '_remap.fits')
                 if not os.path.isfile(fits_out) or C.redo:
@@ -3328,28 +3319,29 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
         #if C.timing:
         #    log_timing_memory (t0=t, label='get_back -2', log=log)
 
+        # determine background for fraction of the full masked image
+        ysize, xsize = data.shape
+        index_stat = get_index_stat (xsize*ysize, np.sum(mask_use))
+        
         # determine clipped median and RMS/std in data with objects
         # masked
         if clip:
             # get clipped_stats mean, std and median 
-            mean_full, std_full, median_full = clipped_stats(data[mask_use],
+            mean_full, std_full, median_full = clipped_stats(data[mask_use][index_stat],
                                                              nsigma=C.bkg_nsigma,
                                                              log=log)
             #if C.timing:
             #    log_timing_memory (t0=t, label='get_back -1', log=log)
         else:
-            median_full = np.median(data[mask_use])
-            std_full = np.std(data[mask_use])
+            median_full = np.median(data[mask_use][index_stat])
+            std_full = np.std(data[mask_use][index_stat])
         if C.verbose:
             log.info('Background median in object-masked image: {:.3f} +- {:.3f}'
                      .format(median_full, std_full))
 
-        #if C.timing:
-        #    log_timing_memory (t0=t, label='get_back after determining full-frame median and std', log=log)
-            
+
         # loop through subimages the size of C.bkg_boxsize, and
         # determine median from the masked data
-        ysize, xsize = data.shape
         centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(C.bkg_boxsize,
                                                                            ysize, xsize, log)        
         nsubs = centers.shape[0]
@@ -3376,26 +3368,6 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
                 nsub, cuts_ima, data, mask_use, mask_minsize, clip,
                 median_full, std_full, log=log)
         
-        # alternatively use multiprocessing, but this takes about 10s longer!
-        # problem to pass on log to function; results in following error:
-        # 'TypeError: can't pickle thread.lock objects'
-        if False:
-            # use functools.partial to simplify function [get_median_std]
-            # below
-            get_median_std_partial = partial(get_median_std, cuts_ima=cuts_ima, data=data,
-                                             mask_use=mask_use, mask_minsize=mask_minsize,
-                                             clip=clip, median_full=median_full,
-                                             std_full=std_full)
-            pool = Pool(nthreads)
-            results_pool = pool.map(get_median_std_partial, range(nsubs))
-            pool.close()
-            pool.join()
-            for nsub in range(nsubs):
-                mesh_median[nsub], mesh_std[nsub] = results_pool[nsub]
-
-        #if C.timing:
-        #    log_timing_memory (t0=t, label='get_back after loop/pool', log=log)
-
         # reshape and transpose
         mesh_median = mesh_median.reshape((nxsubs, nysubs)).transpose()
         mesh_std = mesh_std.reshape((nxsubs, nysubs)).transpose()
@@ -3454,19 +3426,37 @@ def mesh2back (mesh_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
 
 ################################################################################
 
+def get_index_stat (npix, nmask, frac_nmask_max=0.5, frac_npix_stat=0.1):
+    
+    ratio = 1.*nmask/npix
+    if ratio >= frac_nmask_max:
+        nstat = int(frac_npix_stat * npix / ratio)
+        index_stat = (np.random.rand(nstat)*nmask).astype(int)
+    else:
+        index_stat = np.arange(nmask)
+        
+    return index_stat
+
+
+################################################################################
+
 def get_median_std (nsub, cuts_ima, data, mask_use, mask_minsize, clip,
                     median_full, std_full, log=None):
-
+    
     subcut = cuts_ima[nsub]
     data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
     mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+
+    # determine background for fraction of the masked image
+    #ysize, xsize = data_sub.shape
+    #index_stat = get_index_stat(xsize*ysize, np.sum(mask_sub), frac_npix_stat=0.5)
+
     if np.sum(mask_sub) > mask_minsize:
         if clip:
             # get clipped_stats mean, std and median 
-            mean, std, median = clipped_stats(data_sub[mask_sub],
-                                              clip_upper_frac=0,
-                                              nsigma=C.bkg_nsigma,
-                                              log=log)
+            mean, std, median = clipped_stats(
+                data_sub[mask_sub], clip_upper_frac=0,
+                nsigma=C.bkg_nsigma, log=log)
         else:
             median = np.median(data_sub[mask_sub])
             std = np.std(data_sub[mask_sub])
@@ -3730,7 +3720,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         # first infer ra, dec corresponding to x, y pixel positions
         # (centers[:,1] and centers[:,0], respectively, using the WCS
         # solution in [new].wcs file from Astrometry.net
-        header_new_temp = read_hdulist (base_new+'_wcs.fits', ext_header=0)
+        header_new_temp = read_hdulist (base_new+'.fits', ext_header=0)
         wcs = WCS(header_new_temp)
         ra_temp, dec_temp = wcs.all_pix2world(centers[:,1], centers[:,0], 1)
         # then convert ra, dec back to x, y in the original ref image;
@@ -3939,7 +3929,8 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
             ra.append(ra_sex[n-1])
             dec.append(dec_sex[n-1])
         return np.array(ra), np.array(dec)
-    
+
+
     # get reference ra, dec corresponding to x, y
     #ra_new, dec_new = xy2radec(number_new, sexcat_new)
     #ra_ref, dec_ref = xy2radec(number_ref, sexcat_ref)
@@ -4328,7 +4319,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            '--tweak-order', str(C.astronet_tweak_order), '--scale-low', str(scale_low),
            '--scale-high', str(scale_high), '--scale-units', 'app',
            '--ra', str(ra), '--dec', str(dec), '--radius', str(C.astronet_radius),
-           '--new-fits', image_out, '--overwrite',
+           '--new-fits', 'none', '--overwrite',
            '--out', base
     ]
 
@@ -4458,7 +4449,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         # to determine fits extensions (=zone+1) to read
         fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
         ext_list = get_ext_list (dec_center, fov_half_deg, zone_size=60.)
-        print('dec_center: {}, ext_list: {}'.format(dec_center, ext_list))
+        log.info('declination zone indices read from calibration catalog: {}'
+                 .format(ext_list))
 
         t4 = time.time()
         # read calibration catalog
@@ -4537,10 +4529,10 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     else:
         log.info('Warning: calibration catalog {} not found!'.format(C.cal_cat))
         data_cal = None
-        
+
     # write image_out including header
-    fits.writeto(image_out, data, header=header, overwrite=True)
-    
+    fits.writeto(image_out, data, header, overwrite=True)
+
     if C.timing:
         log_timing_memory (t0=t3, label='calculate offset wrt external catalog', log=log)
         
@@ -4791,12 +4783,9 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         # determined by which input pixels will end up in the output
         # image. Determine the "0,0" pixel in the output image that
         # corresponds to "0,0" in the input image:
-        wcs = WCS(header_resample)
-        ra0, dec0 = wcs.all_pix2world(0, 0, 0)
-        wcs = WCS(header_out)
-        x0, y0 = wcs.all_world2pix(ra0, dec0, 0)
-        x0 = int(x0+0.5)
-        y0 = int(y0+0.5)
+        ra0, dec0 = WCS(header_resample).all_pix2world(0, 0, 0)
+        x0, y0 = WCS(header_out).all_world2pix(ra0, dec0, 0)
+        x0, y0 = int(x0+0.5), int(y0+0.5)
 
         # resampled image is a bit smaller than the original image
         # size
@@ -4808,10 +4797,8 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
                    x0:x0+xsize_resample] = data_resample
 
         # write to fits [image_out] with correct header
-        hdu = fits.PrimaryHDU(data_remap)
-        hdu.header = header_out
         if not os.path.isfile(image_out) or C.redo:
-            hdu.writeto(image_out, overwrite=True)
+            fits.writeto(image_out, data_remap, header_out, overwrite=True)
     
     if C.timing:
         log_timing_memory (t0=t, label='run_remap', log=log)
