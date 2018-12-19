@@ -8,7 +8,7 @@ from astropy.table import Table
 import numpy as np
 #import numpy.fft as fft
 import matplotlib
-matplotlib.use('PDF')
+#matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 import os
 import subprocess
@@ -53,14 +53,14 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 #from memory_profiler import profile
 
-__version__ = '0.6.2'
+__version__ = '0.6.3'
 
 ################################################################################
 
 #@profile
 def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
                         ref_fits_mask=None, telescope=None, log=None,
-                        verbose=None,nthread=None):
+                        verbose=None, nthread=1):
     
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -97,6 +97,9 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
     # subpipe, is calling [optimal_subtraction] directly
     nthreads = nthread
 
+    print 'nthread', nthread
+    print 'nthreads', nthreads
+    
     # set environment variable
     os.environ["OMP_NUM_THREADS"] = str(nthreads)
 
@@ -829,7 +832,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             # in an error if transients are close to the edge
             result = format_cat (cat_trans, cat_trans_out, log, cat_type='trans',
                                  thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
-                                 thumbnail_size=32, header_toadd=header_newzogy,
+                                 thumbnail_size=100, header_toadd=header_newzogy,
                                  exptime=exptime_new, apphot_radii=C.apphot_radii)
 
     end_time = os.times()
@@ -1005,7 +1008,7 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
 ################################################################################
 
 def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=None,
-                thumbnail_size=32, cat_type=None, header_toadd=None, exptime=0.,
+                thumbnail_size=64, cat_type=None, header_toadd=None, exptime=0.,
                 apphot_radii=None):
 
     """Function that formats binary fits table [cat_in] according to
@@ -1071,6 +1074,8 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
         'MAGERR_OPT':     ['E', 'mag'  , 'flt16' ],
         'FLUX_PSF':       ['E', 'e-/s' , 'flt32' ],
         'FLUXERR_PSF':    ['E', 'e-/s' , 'flt16' ],
+        'MAG_PSF':        ['E', 'mag'  , 'flt32' ],
+        'MAGERR_PSF':     ['E', 'mag'  , 'flt16' ],
         'S2N':            ['E', ''     , 'flt16' ],
         'THUMBNAIL_RED':  [thumbnail_size2+'E', 'e-' , 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_size2+'E', 'e-' , 'flt16' ],
@@ -1102,7 +1107,7 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
                           'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
-                          'S2N', 'FLUX_PSF', 'FLUXERR_PSF']
+                          'S2N', 'FLUX_PSF', 'FLUXERR_PSF', 'MAG_PSF', 'MAGERR_PSF']
         
     columns = []
     for key in keys_to_record:
@@ -1161,11 +1166,12 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
             for i_pos in range(ncoords):
 
                 # get index around x,y position using function [get_index_around_xy]
-                index = get_index_around_xy(ysize, xsize, ycoords[i_pos], xcoords[i_pos],
-                                            thumbnail_size)
+                index_full, index_small = get_index_around_xy(ysize, xsize, ycoords[i_pos],
+                                                              xcoords[i_pos], thumbnail_size)
+
                 # record in data_col
                 try:
-                    data_col[i_pos] = thumbnail_data[i_tn][index]
+                    data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]                        
                 except ValueError as ve:
                     if log is not None:
                         log.info('skipping object at x,y: {:.0f},{:.0f} due to ValueError: {}'.
@@ -1194,51 +1200,27 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
 
 def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 
-    if size % 2 == 0:
-        oddsized = False
-        xpos = int(xcoord)
-        ypos = int(ycoord)
-    else:
-        oddsized = True
-        xpos = int(xcoord-0.5)
-        ypos = int(ycoord-0.5)
-
+    # size is assumed to be even!
+    xpos = int(xcoord)
+    ypos = int(ycoord)
     hsize = int(size/2)
 
     # if footprint is partially off the image, just go ahead
     # with the pixels on the image
     y1 = max(0, ypos-hsize)
     x1 = max(0, xpos-hsize)
-    if oddsized:
-        y2 = min(ysize, ypos+hsize+1)
-        x2 = min(xsize, xpos+hsize+1)
-        # make sure axis sizes are odd
-        if (x2-x1) % 2 == 0:
-            if x1==0:
-                x2 -= 1
-            else:
-                x1 += 1
-        if (y2-y1) % 2 == 0:
-            if y1==0:
-                y2 -= 1
-            else:
-                y1 += 1
-    else:
-        y2 = min(ysize, ypos+hsize)
-        x2 = min(xsize, xpos+hsize)
-        # make sure axis sizes are even
-        if (x2-x1) % 2 != 0:
-            if x1==0:
-                x2 -= 1
-            else:
-                x1 += 1
-        if (y2-y1) % 2 != 0:
-            if y1==0:
-                y2 -= 1
-            else:
-                y1 += 1
-
-    return [slice(y1,y2),slice(x1,x2)]
+    y2 = min(ysize, ypos+hsize)
+    x2 = min(xsize, xpos+hsize)
+    index = [slice(y1,y2),slice(x1,x2)]
+    
+    # also determine indices of small image of sizexsize
+    y1_small = max(0, hsize-ypos)
+    x1_small = max(0, hsize-xpos)
+    y2_small = min(size, size-(ypos+hsize-ysize))
+    x2_small = min(size, size-(xpos+hsize-xsize))
+    index_small = [slice(y1_small,y2_small),slice(x1_small,x2_small)]
+    
+    return index, index_small
 
 
 ################################################################################
@@ -1435,12 +1417,32 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
 
     ntrans = np.sum(mask_keep)
     log.info('ntrans: {}'.format(ntrans))
-
+    
+    # need to convert psf fluxes to magnitudes by applying the zeropoint
+    keywords = ['exptime', 'filter']
+    exptime, filt = read_header(header_new, keywords, log)
+    # get zeropoint from [header_new]
+    if 'PC-ZP' in header_new.keys():
+        zp = header_new['PC-ZP']
+    else:
+        zp = C.zp_default[filt]
+    # get airmass from [header_new]
+    if 'PC-AIRM' in header_new.keys():
+        airmass = header_new['PC-AIRM']
+    elif 'AIRMASSC' in header_new.keys():
+        airmass = header_new['PC-AIRM']
+    # get magnitudes corresponding to fluxes
+    mag_array, magerr_array = apply_zp(flux_array, zp, airmass, exptime, filt, log,
+                                       fluxerr=fluxerr_array, zp_std=None)
+    
     # create output table:
     table_all = Table([x_array, y_array, errx2_array, erry2_array, errxy_array,
-                       elongation_array, Scorr_array, flux_array, fluxerr_array],
+                       elongation_array, Scorr_array, flux_array, fluxerr_array,
+                       mag_array, magerr_array],
                       names=('XWIN_IMAGE', 'YWIN_IMAGE', 'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE',
-                             'ERRXYWIN_IMAGE', 'ELONGATION', 'S2N', 'FLUX_PSF', 'FLUXERR_PSF'))
+                             'ERRXYWIN_IMAGE', 'ELONGATION', 'S2N', 'FLUX_PSF', 'FLUXERR_PSF',
+                             'MAG_PSF', 'MAGERR_PSF'))
+
     # keep relevant transients
     table = table_all[mask_keep]
     # add number
