@@ -1,5 +1,5 @@
 
-__version__ = '0.6.2'
+__version__ = '0.6.3'
 
 #===============================================================================
 # ZOGY
@@ -174,5 +174,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+make_plots = False       # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
