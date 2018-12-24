@@ -53,7 +53,9 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 #from memory_profiler import profile
 
-__version__ = '0.6.3'
+import objgraph
+
+__version__ = '0.6.4'
 
 ################################################################################
 
@@ -547,6 +549,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         data_new_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
         data_ref_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
 
+        objgraph.show_most_common_types()
+
         for nsub in range(nsubs):
 
             # using results from pool:
@@ -808,19 +812,23 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         # new catalogue
         if new:
             exptime_new = read_header(header_new, ['exptime'], log)
-            cat_new = base_new+'_cat_fluxopt.fits'
+            cat_new = base_new+'_cat.fits'
             cat_new_out = base_new+'_cat.fits'
-            result = format_cat (cat_new, cat_new_out, log, cat_type='new',
-                                 header_toadd=header_new, exptime=exptime_new,
-                                 apphot_radii=C.apphot_radii)
+            header_cat = read_hdulist(cat_new, ext_header=1)
+            if 'FORMAT-P' not in header_cat.keys():
+                result = format_cat (cat_new, cat_new_out, log, cat_type='new',
+                                     header_toadd=header_new, exptime=exptime_new,
+                                     apphot_radii=C.apphot_radii)
         # ref catalogue
         if ref:
             exptime_ref = read_header(header_ref, ['exptime'], log)
-            cat_ref = base_ref+'_cat_fluxopt.fits'
+            cat_ref = base_ref+'_cat.fits'
             cat_ref_out = base_ref+'_cat.fits'
-            result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
-                                 header_toadd=header_ref, exptime=exptime_ref,
-                                 apphot_radii=C.apphot_radii)
+            header_cat = read_hdulist(cat_ref, ext_header=1)
+            if 'FORMAT-P' not in header_cat.keys():
+                result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
+                                     header_toadd=header_ref, exptime=exptime_ref,
+                                     apphot_radii=C.apphot_radii)
         # trans catalogue
         if new and ref:
             cat_trans = base_newref+'.transcat'
@@ -1185,14 +1193,17 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
             columns.append(col)
 
             
-    hdu = fits.BinTableHDU.from_columns(columns)
-    hdu.header += header
-    hdu.writeto(cat_out, overwrite=True)
-    
     if cat_in is not None:
+        # add header keyword indicating catalog was successfully formatted
+        header['FORMAT-P'] = (True, 'successfully formatted catalog')
+
         if C.timing and log is not None:
             log_timing_memory (t0=t, label='format_cat', log=log)
 
+    hdu = fits.BinTableHDU.from_columns(columns)
+    hdu.header += header
+    hdu.writeto(cat_out, overwrite=True)
+            
     return
 
 
@@ -2378,14 +2389,28 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     keywords = ['gain', 'ron', 'pixscale', 'satlevel']
     gain, readnoise, pixscale, satlevel = read_header(header, keywords, log)
     ysize, xsize = np.shape(data_wcs)
-        
+
     # read in background image
     fits_bkg = base+'_bkg.fits'
-    data_bkg = read_hdulist (fits_bkg, ext_data=0, dtype='float32')
-    
-    # read in background std image
+    if os.path.exists(fits_bkg):
+        data_bkg = read_hdulist (fits_bkg, ext_data=0, dtype='float32')
+    else:
+        # if it does not exist, create it from the background mesh
+        fits_bkg_mesh = base+'_bkg_mesh.fits'
+        data_bkg_mesh = read_hdulist (fits_bkg_mesh, ext_data=0, dtype='float32')        
+        data_bkg = mesh2back (data_bkg_mesh, data_wcs.shape, log,
+                              order_interp=2, bkg_boxsize=C.bkg_boxsize)
+
+    # same for background std image
     fits_bkg_std = base+'_bkg_std.fits'
-    data_bkg_std = read_hdulist (fits_bkg_std, ext_data=0, dtype='float32')
+    if os.path.exists(fits_bkg_std):
+        data_bkg_std = read_hdulist (fits_bkg_std, ext_data=0, dtype='float32')
+    else:
+        # if it does not exist, create it from the background mesh
+        fits_bkg_std_mesh = base+'_bkg_std_mesh.fits'
+        data_bkg_std_mesh = read_hdulist (fits_bkg_std_mesh, ext_data=0, dtype='float32')        
+        data_bkg_std = mesh2back (data_bkg_std_mesh, data_wcs.shape, log,
+                                  order_interp=1, bkg_boxsize=C.bkg_boxsize)
 
     # function to create a minimal mask of saturated pixels and the
     # adjacent pixels from input data, in case mask image is not
@@ -2500,16 +2525,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # this is different from SExtractor PSF-fitting
     mypsffit = False
 
-    newcat = base+'_cat_fluxopt.fits'
-    if not os.path.isfile(newcat) or C.redo:
+    # first read SExtractor fits table
+    sexcat = base+'_cat.fits'
+    data_sex = read_hdulist (sexcat, ext_data=1)
+    
+    if 'FLUX_OPT' not in data_sex.dtype.names or C.redo:
         
         if C.timing: t1 = time.time()
         log.info('deriving optimal fluxes ...')
     
-        # first read SExtractor fits table
-        sexcat = base+'_cat.fits'
-        data_sex = read_hdulist (sexcat, ext_data=1)
-
         # read in positions and their errors
         xwin = data_sex['XWIN_IMAGE']
         ywin = data_sex['YWIN_IMAGE']
@@ -2738,15 +2762,19 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
         header['LIMMAG5'] = (limmag_5sigma, '[mag] full-frame 5-sigma limiting magnitude')
 
+        # if these optimal fluxes and magnitudes already present in catalog,
+        # delete them; this could happen in case [C.redo] is set to True
+        if 'FLUX_OPT' in data_sex.dtype.names:
+            data_sex = drop_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT','MAG_OPT','MAGERR_OPT'])
+
         data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
                                  [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
-        #data_sex = drop_fields(data_sex, 'VIGNET')
         
         data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
                                  [mag_opt, magerr_opt], usemask=False, asrecarray=True)
 
         # write updated catalog to file
-        fits.writeto(newcat, data_sex, overwrite=True)
+        fits.writeto(sexcat, data_sex, overwrite=True)
                         
         if C.timing:
             log_timing_memory (t0=t2, label='creating binary fits table including fluxopt', log=log)
@@ -2798,7 +2826,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             data_sex['FLUX_AUTO'][0]
         except NameError:
             # read SExtractor fits table
-            data_sex = read_hdulist (newcat, ext_data=1)
+            data_sex = read_hdulist (sexcat, ext_data=1)
             # and define flux_opt and fluxerr_opt
             flux_opt = data_sex['FLUX_OPT']
             fluxerr_opt = data_sex['FLUXERR_OPT']
@@ -3012,16 +3040,16 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
             zp_array[mask_match] = (mag_cal[i] - mag_sex_inst[mask_match] +
                                     airmass_sex[mask_match]*C.ext_coeff[filt])
 
-            if C.verbose: 
-                if 'spectype' in data_cal.dtype.names:
-                    log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}, spectype: {}, chi2: {}, absdev: {}'.
-                             format(ra_cal[i], dec_cal[i], mag_cal[i],
-                                    magerr_sex_inst[mask_match], zp_array[mask_match],
-                                    data_cal['spectype'][i], data_cal['chi2'][i], data_cal['absdev'][i]))
-                else:
-                    log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}'.
-                             format(ra_cal[i], dec_cal[i], mag_cal[i],
-                                    magerr_sex_inst[mask_match], zp_array[mask_match]))
+            #if C.verbose:
+            #    if 'spectype' in data_cal.dtype.names:
+            #        log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}, spectype: {}, chi2: {}, absdev: {}'.
+            #                 format(ra_cal[i], dec_cal[i], mag_cal[i],
+            #                        magerr_sex_inst[mask_match], zp_array[mask_match],
+            #                        data_cal['spectype'][i], data_cal['chi2'][i], data_cal['absdev'][i]))
+            #    else:
+            #        log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}'.
+            #                 format(ra_cal[i], dec_cal[i], mag_cal[i],
+            #                        magerr_sex_inst[mask_match], zp_array[mask_match]))
 
                     
             # done when number of matches equals [C.phot_ncal_max]
