@@ -1,5 +1,6 @@
+import os
 
-__version__ = '0.6.3'
+__version__ = '0.7'
 
 #===============================================================================
 # ZOGY
@@ -65,7 +66,7 @@ key_filter = 'FILTER'
 key_obsdate = 'DATE-OBS'
 
 #===============================================================================
-# initial seeing estimate
+# Initial seeing estimate
 #===============================================================================
 fwhm_imafrac = 0.25      # fraction of image area that will be used
                          # for initial seeing estimate
@@ -117,7 +118,7 @@ astronet_radius = 1.5
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
-cal_cat = '/media/data/pmv/PhotCalibration/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+cal_cat = os.environ['ZOGYHOME']+'/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
 ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
                          # crosscheck of positions obtained against calibration catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
@@ -133,9 +134,10 @@ apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
 dosex_psffit = False     # do extra SExtractor run with PSF fitting
                               
 # Photometric calibration
-obs_lat = -32.38722      # observatory latitude in degrees (North)
-obs_long = 20.81667      # observatory longitude in degrees (East)
-obs_height = 1798.       # observatory height in meters above sealevel
+obs_lat = -32.37989      # telescope latitude in degrees (North); BlackGEM: -29.25747
+obs_long = 20.81122      # telescope longitude in degrees (East); BlackGEM: -70.73797
+obs_height = 1767.       # telescope height in meters above sealevel; BlackGEM: 2343.
+obs_timezone = 'Africa/Johannesburg' # observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
 # these [ext_coeff] are mean extinction estimates for Sutherland in
 # the MeerLICHT filters:
 ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
@@ -155,9 +157,10 @@ zp_default = {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}
 # Configuration
 #===============================================================================
 # path and names of configuration files
-cfg_dir = './Config/'
+cfg_dir = os.environ['ZOGYHOME']+'/Config/'
 sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
 sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
+sex_det_filt = cfg_dir+'default.conv'        # SExtractor detection filter file
 sex_par = cfg_dir+'sex.params'               # SExtractor output parameters definition file
 sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
 sex_par_ref = cfg_dir+'sex_ref.params'       # same for reference image output version
@@ -166,8 +169,8 @@ swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 
 # if a mask image is provided, the mask values can be associated to
 # the type of masked pixel with this dictionary:
-mask_value = {'bad': 1, 'cosmic': 2, 'saturated': 4, 'saturated_connected': 8,
-              'satellite': 16, 'edge': 32}
+mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4, 'saturated-connected': 8,
+              'satellite trail': 16, 'edge': 32}
 
 # switch on/off different functions
 redo = False             # execute functions even if output file exist
