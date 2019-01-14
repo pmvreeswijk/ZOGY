@@ -11,6 +11,7 @@ import matplotlib
 #matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 import os
+import glob
 import subprocess
 from scipy import ndimage
 from scipy import stats
@@ -53,16 +54,17 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 #from memory_profiler import profile
 
-import objgraph
+#import objgraph
 
-__version__ = '0.6.4'
+__version__ = '0.7'
 
 ################################################################################
 
 #@profile
-def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
-                        ref_fits_mask=None, telescope=None, log=None,
-                        verbose=None, nthread=1):
+def optimal_subtraction(new_fits=None,      ref_fits=None,
+                        new_fits_mask=None, ref_fits_mask=None,
+                        set_file='Settings.set_zogy', log=None,
+                        verbose=None, nthread=1, telescope=None):
     
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -89,26 +91,18 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
     """
 
-    global C
 
     # make nthreads a global parameter instead of passing it on
-    # through different functions
+    # through different functions, as it is used in many places
     global nthreads
-    # this subtlety is because [nthreads] used to be made global in
-    # [main], which is not executed if another module, such as
-    # subpipe, is calling [optimal_subtraction] directly
     nthreads = nthread
+    # this needs to be done here to allow [optimal_subtraction]
+    # to be run not from the command line
 
-    print 'nthread', nthread
-    print 'nthreads', nthreads
-    
-    # set environment variable
-    os.environ["OMP_NUM_THREADS"] = str(nthreads)
-
-    settings_module = 'Settings.Constants'
-    if telescope is not None:
-        settings_module += '_'+telescope
-    C = importlib.import_module(settings_module)
+    # import settings file as C such that all parameters defined there
+    # can be referred to as C.[parameter]
+    global C
+    C = importlib.import_module(set_file)
 
     # if verbosity is provided through input parameter [verbose], it
     # will overwrite the corresponding setting in Constants
@@ -351,6 +345,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
         # remap ref to new
         ref_fits_remap = base_ref+'_remap.fits'
+        ref_fits_remap = get_remap_name(base_new, base_ref, ref_fits_remap)
+            
         if not os.path.isfile(ref_fits_remap) or C.redo:
             # if reference image is poorly sampled, could use bilinear
             # interpolation for the remapping using SWarp - this
@@ -363,7 +359,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             try:
                 result = run_remap(base_new+'.fits', base_ref+'.fits', ref_fits_remap,
                                    [ysize_new, xsize_new], gain=gain_new, log=log, config=C.swarp_cfg,
-                                   resampling_type=resampling_type, resample='Y') 
+                                   resampling_type=resampling_type, resample='Y')
             except Exception as e:
                 remap_processed = False
                 log.info(traceback.format_exc())
@@ -540,16 +536,17 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
 
         # first initialize full output images
         data_D_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_S_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+        #data_S_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_Scorr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_Fpsf_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_Fpsferr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+
         data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
         data_new_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
         data_ref_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
 
-        objgraph.show_most_common_types()
+        #objgraph.show_most_common_types()
 
         for nsub in range(nsubs):
 
@@ -585,14 +582,13 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             index_extract = [slice(y1,y2), slice(x1,x2)]
 
             data_D_full[index_subcut] = data_D[index_extract] #/ gain_new
-            data_S_full[index_subcut] = data_S[index_extract]
+            #data_S_full[index_subcut] = data_S[index_extract]
             data_Scorr_full[index_subcut] = data_Scorr[index_extract]
             data_Fpsf_full[index_subcut] = data_Fpsf[index_extract]
             data_Fpsferr_full[index_subcut] = data_Fpsferr[index_extract]
-            data_new_full[index_subcut] = (data_new[nsub][index_extract] +
-                                           data_new_bkg[nsub][index_extract]) #/ gain_new
-            data_ref_full[index_subcut] = (data_ref[nsub][index_extract] +
-                                           data_ref_bkg[nsub][index_extract]) #/ gain_ref
+
+            data_new_full[index_subcut] = data_new[nsub][index_extract]
+            data_ref_full[index_subcut] = data_ref[nsub][index_extract]
             data_new_mask_full[index_subcut] = data_new_mask[nsub][index_extract]
             data_ref_mask_full[index_subcut] = data_ref_mask[nsub][index_extract]
         
@@ -608,10 +604,8 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         
                 # write new and ref subimages to fits
                 newname = base_new+subend
-                #fits.writeto(newname, ((data_new[nsub]+data_new_bkg[nsub])/gain_new).astype('float32'), overwrite=True)
-                fits.writeto(newname, data_new[nsub].astype('float32'), overwrite=True)
                 refname = base_ref+subend
-                #fits.writeto(refname, ((data_ref[nsub]+data_ref_bkg[nsub])/gain_ref).astype('float32'), overwrite=True)
+                fits.writeto(newname, data_new[nsub].astype('float32'), overwrite=True)
                 fits.writeto(refname, data_ref[nsub].astype('float32'), overwrite=True)
 
                 # background images
@@ -788,6 +782,7 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
         header_newzogy = header_new + header_zogy
         #header_newzogy.add_comment('many keywords, incl. WCS solution, are from corresponding image')
         fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, overwrite=True)
+        #fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, overwrite=True)
         fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_newzogy, overwrite=True)
@@ -800,48 +795,46 @@ def optimal_subtraction(new_fits=None, ref_fits=None, new_fits_mask=None,
             fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
             fits.writeto('new_mask.fits', data_new_mask_full, header_new, overwrite=True)
             fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref, overwrite=True)
-            fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
 
                                 
-    if telescope=='meerlicht' or telescope=='blackgem' or telescope=='css':
-        # using the function [format_cat], write the new, ref and
-        # transient output catalogues with the desired format, where the
-        # thumbnail images (new, ref, D and Scorr) around each transient
-        # are added as array columns in the transient catalogue.
+    # using the function [format_cat], write the new, ref and
+    # transient output catalogues with the desired format, where the
+    # thumbnail images (new, ref, D and Scorr) around each transient
+    # are added as array columns in the transient catalogue.
 
-        # new catalogue
-        if new:
-            exptime_new = read_header(header_new, ['exptime'], log)
-            cat_new = base_new+'_cat.fits'
-            cat_new_out = base_new+'_cat.fits'
-            header_cat = read_hdulist(cat_new, ext_header=1)
-            if 'FORMAT-P' not in header_cat.keys():
-                result = format_cat (cat_new, cat_new_out, log, cat_type='new',
-                                     header_toadd=header_new, exptime=exptime_new,
-                                     apphot_radii=C.apphot_radii)
-        # ref catalogue
-        if ref:
-            exptime_ref = read_header(header_ref, ['exptime'], log)
-            cat_ref = base_ref+'_cat.fits'
-            cat_ref_out = base_ref+'_cat.fits'
-            header_cat = read_hdulist(cat_ref, ext_header=1)
-            if 'FORMAT-P' not in header_cat.keys():
-                result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
-                                     header_toadd=header_ref, exptime=exptime_ref,
-                                     apphot_radii=C.apphot_radii)
-        # trans catalogue
-        if new and ref:
-            cat_trans = base_newref+'.transcat'
-            cat_trans_out = base_newref+'_trans.fits'
-            thumbnail_data = [data_new_full, data_ref_full, data_D_full, data_Scorr_full]
-            thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 'THUMBNAIL_SCORR']
-            # need to take care of objects closer than 32/2 pixels to
-            # the full image edge in creation of thumbnails - results
-            # in an error if transients are close to the edge
-            result = format_cat (cat_trans, cat_trans_out, log, cat_type='trans',
-                                 thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
-                                 thumbnail_size=100, header_toadd=header_newzogy,
-                                 exptime=exptime_new, apphot_radii=C.apphot_radii)
+    # new catalogue
+    if new:
+        exptime_new = read_header(header_new, ['exptime'], log)
+        cat_new = base_new+'_cat.fits'
+        cat_new_out = base_new+'_cat.fits'
+        header_cat = read_hdulist(cat_new, ext_header=1)
+        if 'FORMAT-P' not in header_cat.keys():
+            result = format_cat (cat_new, cat_new_out, log, cat_type='new',
+                                 header_toadd=header_new, exptime=exptime_new,
+                                 apphot_radii=C.apphot_radii)
+    # ref catalogue
+    if ref:
+        exptime_ref = read_header(header_ref, ['exptime'], log)
+        cat_ref = base_ref+'_cat.fits'
+        cat_ref_out = base_ref+'_cat.fits'
+        header_cat = read_hdulist(cat_ref, ext_header=1)
+        if 'FORMAT-P' not in header_cat.keys():
+            result = format_cat (cat_ref, cat_ref_out, log, cat_type='ref',
+                                 header_toadd=header_ref, exptime=exptime_ref,
+                                 apphot_radii=C.apphot_radii)
+    # trans catalogue
+    if new and ref:
+        cat_trans = base_newref+'.transcat'
+        cat_trans_out = base_newref+'_trans.fits'
+        thumbnail_data = [data_new_full, data_ref_full, data_D_full, data_Scorr_full]
+        thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 'THUMBNAIL_SCORR']
+        # need to take care of objects closer than 32/2 pixels to
+        # the full image edge in creation of thumbnails - results
+        # in an error if transients are close to the edge
+        result = format_cat (cat_trans, cat_trans_out, log, cat_type='trans',
+                             thumbnail_data=thumbnail_data, thumbnail_keys=thumbnail_keys,
+                             thumbnail_size=100, header_toadd=header_newzogy,
+                             exptime=exptime_new, apphot_radii=C.apphot_radii)
 
     end_time = os.times()
     if new and ref:
@@ -962,7 +955,7 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
 
         if type(ext_data)==int:
             # if single extension is provided, read data into fitsrec array
-            with fits.open(fits_file, memmap=True) as hdulist:
+            with fits.open(fits_file) as hdulist:
                 data = hdulist[ext_data].data
 
             # convert to [dtype] if it is defined
@@ -972,7 +965,7 @@ def read_hdulist (fits_file, ext_data=None, ext_header=None, dtype=None,
         else:
             # if multiple extensions are provided, read data into Table array
             for n_ext, ext in enumerate(ext_data):
-                with fits.open(fits_file, memmap=True) as hdulist:
+                with fits.open(fits_file) as hdulist:
                     data_temp = hdulist[ext].data
                 # convert to table, as otherwise concatenation of
                 # extensions below using [stack_arrays] is slow
@@ -1024,7 +1017,7 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
         binary fits table [cat_out].
 
     """
-    
+
     if cat_in is not None:
 
         if C.timing: t = time.time()
@@ -1092,7 +1085,8 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
     }
 
     if cat_type is None:
-        keys_to_record = data.names
+        if cat_in is not None:
+            keys_to_record = data.dtype.names
     elif cat_type == 'ref':
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
@@ -1116,41 +1110,52 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
                           'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
                           'S2N', 'FLUX_PSF', 'FLUXERR_PSF', 'MAG_PSF', 'MAGERR_PSF']
+
+
+    def get_col (key, key_new, data_key):
+
+        # function that returns column definition based on input
+        # [key], [key_new], and [data_key]; for most fields [key] and
+        # [key_new] are the same, except for 'FLUX_APER' and
+        # 'FLUXERR_APER', which are split into the separate apertures,
+        # and the aperture sizes enter in the new key name as well.
         
+        # if exposure time is non-zero, modify all 'e-/s' columns accordingly
+        if exptime != 0:
+            if formats[key][1]=='e-/s':
+                data_key /= exptime 
+        else:
+            if log is not None:
+                log.warn('input [exptime] in function [format_cat] is zero')
+
+        if cat_in is not None:
+            col = fits.Column(name=key_new, format=formats[key][0],
+                              unit=formats[key][1], disp=formats[key][2],
+                              array=data_key)
+        # if [cat_in] is None, define the column but without the data;
+        # this is used for making a table with the same field
+        # definitions but without any entries
+        else:
+            col = fits.Column(name=key_new, format=formats[key][0],
+                              unit=formats[key][1], disp=formats[key][2])
+
+        return col   
+
+    
     columns = []
     for key in keys_to_record:
 
-        # divide relevant keys (with format[1]=='e-/s') by exptime
-        if exptime != 0.:
-            if formats[key][1]=='e-/s':
-                #log.info('exptime: {}, key: {}, formats[key][1]: {}'.format(exptime, key, formats[key][1]))
-                data[key] /= exptime
-        else:
-            if log is not None:
-                log.info('Warning: input [exptime] in function [format_cat] is zero')
-                
         if key=='FLUX_APER' or key=='FLUXERR_APER':
             # update column names of aperture fluxes to include radii
             # loop apertures
             for i_ap in range(len(apphot_radii)):
-                name = key+'_R'+str(apphot_radii[i_ap])+'xFWHM'
-                if cat_in is not None:
-                    col = fits.Column(name=name, format=formats[key][0], unit=formats[key][1], 
-                                      disp=formats[key][2], array=data[key][:,i_ap])
-                else:
-                    col = fits.Column(name=name, format=formats[key][0], unit=formats[key][1], 
-                                      disp=formats[key][2])
-                columns.append(col)
+                key_new = '{}_R{}xFWHM'.format(key, apphot_radii[i_ap])
+                columns.append(get_col (key, key_new, data[key][:,i_ap]))
         else:
-            if cat_in is not None:
-                if key in data.names:
-                    col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
-                                      disp=formats[key][2], array=data[key])
-            else:
-                col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
-                                  disp=formats[key][2])
-            columns.append(col)
-        
+            if key in data.dtype.names:
+                columns.append(get_col (key, key, data[key]))
+
+                
     # add [thumbnails]
     if thumbnail_data is not None and thumbnail_keys is not None:
         
@@ -1323,13 +1328,6 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
         x_index = coords[:,1]
         index_region = [y_index, x_index]
 
-        data_new_region = data_new[index_region]
-        data_ref_region = data_ref[index_region]
-        #data_D_region = data_D[index_region]
-        data_Scorr_region = data_Scorr[index_region]
-        data_Fpsf_region = data_Fpsf[index_region]
-        data_Fpsferr_region = data_Fpsferr[index_region]
-
         # rectangular bounding box of the current region; N.B.: this
         # includes pixels that are not significant and is mostly for
         # displaying purpose
@@ -1344,7 +1342,8 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
         # the input new and ref mask arrays; for the moment, discard
         # the region if sum of flags in either new or ref mask is
         # nonzero
-        if np.sum(data_new_mask[index_region]) > 0 or np.sum(data_ref_mask[index_region]):
+        if (np.sum(data_new_mask[index_region]) > 0 or
+            np.sum(data_ref_mask[index_region])):
             continue
 
         # discard if region area is too small or too big
@@ -1354,23 +1353,24 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
 
         # discard if region contains both positively significant as
         # negatively significant values
-        if (np.amax(data_Scorr_region) >= C.transient_nsigma and
-            np.amin(data_Scorr_region) <= -C.transient_nsigma):
+        if (np.amax(data_Scorr[index_region]) >= C.transient_nsigma and
+            np.amin(data_Scorr[index_region]) <= -C.transient_nsigma):
             continue
 
         # x and y indices of peak significance
-        index_peak = np.abs(data_Scorr_region).argmax()
+        index_peak = np.abs(data_Scorr[index_region]).argmax()
         XPEAK = x_index[index_peak]
         YPEAK = y_index[index_peak]
-        Scorr_peak = data_Scorr_region[index_peak]
+        Scorr_peak = data_Scorr[index_region][index_peak]
         if False:
             log.info('XPEAK: {}, YPEAK: {}, Scorr_peak: {}'.format(XPEAK, YPEAK, Scorr_peak))
 
         # flux and fluxerr
-        flux_peak = data_Fpsf_region[index_peak]
-        fluxerr_peak = data_Fpsferr_region[index_peak]
+        flux_peak = data_Fpsf[index_region][index_peak]
+        fluxerr_peak = data_Fpsferr[index_region][index_peak]
         
         color_ds9 = 'green'
+        data_Scorr_region = np.copy(data_Scorr[index_region])
         if Scorr_peak < 0.:
             color_ds9 = 'pink'
             data_Scorr_region = -data_Scorr_region
@@ -1379,7 +1379,8 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
         # quantities, such as central pixel coordinates and
         # elongation, weighted with image [intensity]
         X, Y, X2, Y2, XY, ERRX2, ERRY2, ERRXY, A, B, THETA, ERRA, ERRB, ERRTHETA = (
-            trans_measure(data_Scorr_region, x_index+1, y_index+1, var_bkg=data_Fpsferr_region))
+            trans_measure(data_Scorr_region, x_index+1, y_index+1,
+                          var_bkg=data_Fpsferr[index_region]))
         if B!=0:
             ELONGATION = A/B
         else:
@@ -1890,7 +1891,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
             if replace_satdata:        
                 # first determine mask of saturated pixels:
                 mask_sat = ((D_mask_sub==C.mask_value['saturated']) |
-                            (D_mask_sub==C.mask_value['saturated_connected']))
+                            (D_mask_sub==C.mask_value['saturated-connected']))
                 # if any pixels close to the center of the object are
                 # saturated, replace them
                 mask_inner = (P_shift >= 0.25*np.amax(P_shift))
@@ -2370,6 +2371,28 @@ def get_keyvalue (key, header, log):
 
 ################################################################################
 
+def get_remap_name(new_name, ref_name, remap_name): 
+
+    # in case full paths are provided for the input images and the new
+    # and ref directories are different, the remapped reference images
+    # should end up in the new directory
+
+    def get_dir_name (name):
+        dir_name = '.'
+        if '/' in name:
+            dir_name = '/'.join(name.split('/')[:-1])
+        return dir_name
+
+    new_dir = get_dir_name(new_name)
+    ref_dir = get_dir_name(ref_name)
+    if new_dir != ref_dir:
+        remap_name = '{}/{}'.format(new_dir, remap_name.split('/')[-1])
+
+    return remap_name
+        
+            
+################################################################################
+
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                              fits_mask=None, ref_fits_remap=None, data_cal=None):
 
@@ -2396,9 +2419,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_bkg = read_hdulist (fits_bkg, ext_data=0, dtype='float32')
     else:
         # if it does not exist, create it from the background mesh
-        fits_bkg_mesh = base+'_bkg_mesh.fits'
-        data_bkg_mesh = read_hdulist (fits_bkg_mesh, ext_data=0, dtype='float32')        
-        data_bkg = mesh2back (data_bkg_mesh, data_wcs.shape, log,
+        fits_bkg_mini = base+'_bkg_mini.fits'
+        data_bkg_mini = read_hdulist (fits_bkg_mini, ext_data=0, dtype='float32')        
+        data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
                               order_interp=2, bkg_boxsize=C.bkg_boxsize)
 
     # same for background std image
@@ -2407,9 +2430,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_bkg_std = read_hdulist (fits_bkg_std, ext_data=0, dtype='float32')
     else:
         # if it does not exist, create it from the background mesh
-        fits_bkg_std_mesh = base+'_bkg_std_mesh.fits'
-        data_bkg_std_mesh = read_hdulist (fits_bkg_std_mesh, ext_data=0, dtype='float32')        
-        data_bkg_std = mesh2back (data_bkg_std_mesh, data_wcs.shape, log,
+        fits_bkg_std_mini = base+'_bkg_std_mini.fits'
+        data_bkg_std_mini = read_hdulist (fits_bkg_std_mini, ext_data=0, dtype='float32')        
+        data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape, log,
                                   order_interp=1, bkg_boxsize=C.bkg_boxsize)
 
     # function to create a minimal mask of saturated pixels and the
@@ -2423,7 +2446,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # pixels connected to saturated pixels
         mask_sat_adj = ndimage.binary_dilation(mask_sat, structure=np.ones((3,3)).astype('bool'))
         mask_sat_adj[mask_sat] = False
-        data_mask[mask_sat_adj] += C.mask_value['saturated_connected']
+        data_mask[mask_sat_adj] += C.mask_value['saturated-connected']
         return data_mask
     
     # and read in mask image
@@ -2459,6 +2482,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
                 # project fits image to new image
                 fits_out = fits2remap.replace('.fits', '_remap.fits')
+                fits_out = get_remap_name(fits2remap2, fits2remap, fits_out)
                 if not os.path.isfile(fits_out) or C.redo:
                     result = run_remap(fits2remap2, fits2remap, fits_out,
                                        [ysize, xsize], gain=gain, log=log, config=C.swarp_cfg,
@@ -2675,22 +2699,29 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             filt_req['i'] = ['PS1_z', 'PS1_y', 'SDSS_z', 'SM_z']
             filt_req['z'] = ['PS1_y']
 
+            # [mask_cal] is mask for entries in [data_cal] where all
+            # filters listed in [filt_req['all']] are present (True)
             mask_cal = np.all([data_cal[col] for col in filt_req['all']], axis=0)
             data_cal = data_cal[mask_cal]
             
+            # loop the the filter keys of [filt_req]
             if filt in filt_req.keys():
-                mask_cal = np.any([data_cal[col] for col in filt_req[filt]], axis=0)
+                # [mask_cal_filt] is mask for for entries in the
+                # updated [data_cal] for which all filters in
+                # [filt_req[current filter]] are present
+                mask_cal_filt = np.any([data_cal[col] for col in filt_req[filt]], axis=0)
                 # if less than [C.phot_ncal_min] stars left, drop filter requirements and hope for the best!
-                if np.sum(mask_cal) >= C.phot_ncal_min:
-                    data_cal = data_cal[mask_cal]
+                if np.sum(mask_cal_filt) >= C.phot_ncal_min:
+                    data_cal = data_cal[mask_cal_filt]
                 else:
                     log.info('Warning: less than {} calibration stars with default filter requirements'.
                              format(C.phot_ncal_min))
-                    log.info('filter: {}, requirements (any of these): {}'.format(filt, filt_req[filt]))
-
+                    log.info('filter: {}, requirements (any one of these): {}'.format(filt, filt_req[filt]))
+                    log.info('dropping this specific requirement and hoping for the best')
+                    
             # This is the number of photometric calibration stars
             # after the chi2 and filter requirements cut.
-            ncalstars = np.sum(mask_cal)
+            ncalstars = np.shape(data_cal)[0]
             log.info('number of photometric stars in FOV after filter cut: {}'.format(ncalstars))
             header['PC-FNCAL'] = (ncalstars, 'number of photcal stars after filter cut')
             
@@ -2823,7 +2854,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # catalogue with FLUX_OPT needs to be read in here to be able
         # to make the plots below
         try:
-            data_sex['FLUX_AUTO'][0]
+            data_sex['FLUX_OPT'][0]
         except NameError:
             # read SExtractor fits table
             data_sex = read_hdulist (sexcat, ext_data=1)
@@ -2853,11 +2884,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         flux_auto = data_sex['FLUX_AUTO'][index] * gain
         fluxerr_auto = data_sex['FLUXERR_AUTO'][index] * gain
         s2n_auto = flux_auto / fluxerr_auto
-        flux_opt = flux_opt[index]
-        fluxerr_opt = fluxerr_opt[index]
+        flux_opt = data_sex['FLUX_OPT'][index]
+        fluxerr_opt = data_sex['FLUXERR_OPT'][index]
         if os.path.isfile(C.cal_cat) and 'mag_opt' in locals():
-            mag_opt = mag_opt[index]
-            magerr_opt = magerr_opt[index]
+            mag_opt = data_sex['MAG_OPT'][index]
+            magerr_opt = data_sex['MAGERR_OPT'][index]
         x_win = data_sex['XWIN_IMAGE'][index]
         y_win = data_sex['YWIN_IMAGE'][index]
         fwhm_image = data_sex['FWHM_IMAGE'][index]
@@ -2918,23 +2949,38 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                           filename=base+'_xyposition_win_vs_mypsf_fwhm.pdf',
                           title='rainbow color coding follows FWHM_IMAGE')
             
-        # compare flux_opt with flux_aper 2xFWHM
+        # compare flux_opt with flux_aper
         for i in range(len(C.apphot_radii)):
-            aper_str = str(C.apphot_radii[i])
 
-            flux_aper = data_sex['FLUX_APER'][index,i] * gain
-            fluxerr_aper = data_sex['FLUXERR_APER'][index,i] * gain
+            aper = C.apphot_radii[i]
+            field = 'FLUX_APER'
+            field_err = 'FLUXERR_APER'
+            field_format = 'FLUX_APER_R{}xFWHM'.format(aper)
+            field_format_err = 'FLUXERR_APER_R{}xFWHM'.format(aper)
+
+            if field in data_sex.dtype.names:
+                flux_aper = data_sex[field][index,i] * gain
+                fluxerr_aper = data_sex[field_err][index,i] * gain
+            elif field_format in data_sex.dtype.names:
+                flux_aper = data_sex[field_format][index] * gain
+                fluxerr_aper = data_sex[field_format_err][index] * gain
+                
             flux_diff = (flux_opt - flux_aper) / flux_aper
+            xlabel = 'S/N (AUTO)'
+            ylabel = '(FLUX_OPT - {}) / {}'.format(field_format, field_format)
+
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)', ylabel='(FLUX_OPT - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
-                          filename=base+'_fluxopt_vs_fluxaper'+aper_str+'xFWHM.pdf',
+                          xlabel=xlabel, ylabel=ylabel,
+                          filename='{}_fluxopt_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
 
             flux_diff = (flux_auto - flux_aper) / flux_aper
+            ylabel = '(FLUX_AUTO - {}) / {}'.format(field_format, field_format)
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)', ylabel='(FLUX_AUTO - FLUX_APER ('+aper_str+'xFWHM)) / FLUX_APER ('+aper_str+'xFWHM)', 
-                          filename=base+'_fluxauto_vs_fluxaper'+aper_str+'xFWHM.pdf',
+                          xlabel=xlabel, ylabel=ylabel,
+                          filename='{}_fluxauto_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
                           title='rainbow color coding follows CLASS_STAR: from purple (star) to red (galaxy)')
+
 
             if mypsffit:
                 flux_diff = (flux_mypsf - flux_aper) / flux_aper
@@ -3383,8 +3429,8 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
         nysubs = int(ysize / C.bkg_boxsize)
         nxsubs = int(xsize / C.bkg_boxsize)
         # prepare output median and std output arrays
-        mesh_median = np.ndarray(nsubs, dtype='float32')
-        mesh_std = np.ndarray(nsubs, dtype='float32')
+        mini_median = np.ndarray(nsubs, dtype='float32')
+        mini_std = np.ndarray(nsubs, dtype='float32')
 
         # minimum fraction of background subimage pixels not to be
         # affected by the object mask
@@ -3394,21 +3440,21 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
         # their median and standard deviation
         t1=time.time()
         for nsub in range(nsubs):
-            mesh_median[nsub], mesh_std[nsub] = get_median_std(
+            mini_median[nsub], mini_std[nsub] = get_median_std(
                 nsub, cuts_ima, data, mask_use, mask_minsize, clip,
                 median_full, std_full, log=log)
         
         # reshape and transpose
-        mesh_median = mesh_median.reshape((nxsubs, nysubs)).transpose()
-        mesh_std = mesh_std.reshape((nxsubs, nysubs)).transpose()
+        mini_median = mini_median.reshape((nxsubs, nysubs)).transpose()
+        mini_std = mini_std.reshape((nxsubs, nysubs)).transpose()
 
         #if C.timing:
         #    log_timing_memory (t0=t, label='get_back after reshaping and transposing', log=log)
 
         # median filter the meshes with filter of size [C.bkg_filtersize]
         shape_filter = (C.bkg_filtersize, C.bkg_filtersize)
-        mesh_median_filt = ndimage.filters.median_filter(mesh_median, shape_filter)
-        mesh_std_filt = ndimage.filters.median_filter(mesh_std, shape_filter)
+        mini_median_filt = ndimage.filters.median_filter(mini_median, shape_filter)
+        mini_std_filt = ndimage.filters.median_filter(mini_std, shape_filter)
 
     if C.timing:
         log_timing_memory (t0=t, label='get_back', log=log)
@@ -3416,22 +3462,22 @@ def get_back (data, objmask, log, use_photutils=False, clip=True):
     if use_photutils:
         return background, background_std
     else:
-        return mesh_median_filt, mesh_std_filt
+        return mini_median_filt, mini_std_filt
 
 
 ################################################################################
 
-def mesh2back (mesh_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
+def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
     
     if C.timing: t = time.time()
-    log.info('Executing mesh2back ...')
+    log.info('Executing mini2back ...')
 
     # resize low-resolution meshes, with order [order_interp], where
     # order=0: nearest
     # order=1: bilinear spline interpolation
     # order=2: quadratic spline interpolation
     # order=3: cubic spline interpolation
-    background = ndimage.zoom(mesh_filt, C.bkg_boxsize, order=order_interp)
+    background = ndimage.zoom(mini_filt, C.bkg_boxsize, order=order_interp)
 
     # if shape of the background is not equal to input [data]
     # then pad the background images
@@ -3449,7 +3495,7 @@ def mesh2back (mesh_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
         # these now include the remaining patches
                         
     if C.timing:
-        log_timing_memory (t0=t, label='mesh2back', log=log)
+        log_timing_memory (t0=t, label='mini2back', log=log)
         
     return background
 
@@ -3496,8 +3542,8 @@ def get_median_std (nsub, cuts_ima, data, mask_use, mask_minsize, clip,
         median, std = median_full, std_full
             
     # fill median and std arrays
-    #mesh_median[nsub] = median
-    #mesh_std[nsub] = std
+    #mini_median[nsub] = median
+    #mini_std[nsub] = std
 
     return median, std
         
@@ -4325,6 +4371,11 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                                  radius=5., width=2, color='green')
         
     #scampcat = image_in.replace('.fits','.scamp')
+
+    dir_out = '.'
+    if '/' in base:
+        dir_out = '/'.join(base.split('/')[:-1])
+
     cmd = ['solve-field', '--no-plots', #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'XWIN_IMAGE', '--y-column', 'YWIN_IMAGE',
            '--sort-column', 'FLUX_AUTO',
@@ -4350,7 +4401,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            '--scale-high', str(scale_high), '--scale-units', 'app',
            '--ra', str(ra), '--dec', str(dec), '--radius', str(C.astronet_radius),
            '--new-fits', 'none', '--overwrite',
-           '--out', base
+           '--out', base.split('/')[-1],
+           '--dir', dir_out
     ]
 
     # log cmd executed
@@ -4739,7 +4791,11 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
        [image_new] and saves the resulting image in [image_out] with
        size [image_size].
     """
-
+    
+    if '/' in image_new:
+        # set resample directory to that of the new image
+        resample_dir = '/'.join(image_new.split('/')[:-1])
+        
     # for testing of alternative way; for the moment switch on but
     # needs some further testing
     run_alt = True
@@ -4782,7 +4838,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
                 '-RESAMPLE_DIR', resample_dir,
                 '-RESAMPLE_SUFFIX', resample_suffix,
                 '-DELETE_TMPFILES', 'N']
-        
+
     # log cmd executed
     cmd_str = ' '.join(cmd)
     log.info('SWarp command executed:\n{}'.format(cmd_str))
@@ -4797,8 +4853,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         return 'error'
 
     if run_alt:
-        
-        image_resample = resample_dir+'/'+image_ref.replace('.fits', resample_suffix)
+        image_resample = image_out.replace('_remap.fits', resample_suffix)
         data_resample, header_resample = read_hdulist(image_resample,
                                                       ext_data=0, ext_header=0)
         # SWarp turns integers (mask images) into floats, so making
@@ -5088,23 +5143,14 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                     file_out.write('IMAFLAGS_ISO\n')
             file_params = file_params+'_temp'
 
-        # try setting edge pixels to zero to avoid source detections
-        # on the edge; this should really be done in BGreduce instead
-        # where this extra read and write can probably be avoided
-        #if telescope=='meerlicht' or telescope=='blackgem':
-        #    # replace edge pixel values with zero
-        #    data, header = read_hdulist (image, ext_data=0, ext_header=0)
-        #    data_mask = read_hdulist (mask, ext_data=0)
-        #    # replace
-        #    data[data_mask==2] = 0.
-        #    fits.writeto(image, data, header, overwrite=True)            
-                    
+
     # run sextractor from the unix command line
     cmd = ['sex', image, '-c', file_config, '-CATALOG_NAME', cat_out, 
            '-PARAMETERS_NAME', file_params, '-PIXEL_SCALE', str(pixscale),
            '-SEEING_FWHM', str(seeing),'-PHOT_APERTURES',apphot_diams_str,
            '-BACK_SIZE', str(C.bkg_boxsize), '-BACK_FILTERSIZE', str(C.bkg_filtersize),
-           '-NTHREADS', str(nthreads)]
+           '-NTHREADS', str(nthreads), '-FILTER_NAME', C.sex_det_filt,
+           '-STARNNW_NAME', C.cfg_dir+'default.nnw']
 
     # add commands to produce BACKGROUND, BACKGROUND_RMS and
     # background-subtracted image with all pixels where objects were
@@ -5158,21 +5204,21 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         # the reference image these data need to refer to the image
         # before remapping
         if C.bkg_method==2:
-            data_bkg_mesh, data_bkg_std_mesh = get_back(data, objmask, log)
+            data_bkg_mini, data_bkg_std_mini = get_back(data, objmask, log)
            
             # write these filtered meshes to fits
-            fits.writeto(base+'_bkg_mesh.fits', data_bkg_mesh, overwrite=True)
-            fits.writeto(base+'_bkg_std_mesh.fits', data_bkg_std_mesh, overwrite=True)
+            fits.writeto(base+'_bkg_mini.fits', data_bkg_mini, overwrite=True)
+            fits.writeto(base+'_bkg_std_mini.fits', data_bkg_std_mini, overwrite=True)
             # and update headers with [C.bkg_boxsize]
-            fits.setval(base+'_bkg_mesh.fits', 'BKG_SIZE', value=C.bkg_boxsize)
-            fits.setval(base+'_bkg_std_mesh.fits', 'BKG_SIZE', value=C.bkg_boxsize)
+            fits.setval(base+'_bkg_mini.fits', 'BKG_SIZE', value=C.bkg_boxsize)
+            fits.setval(base+'_bkg_std_mini.fits', 'BKG_SIZE', value=C.bkg_boxsize)
 
-            # now use function [mesh2back] to turn filtered mesh of median
+            # now use function [mini2back] to turn filtered mesh of median
             # and std of backgroun regions into full background image and
             # its standard deviation
-            data_bkg = mesh2back (data_bkg_mesh, data.shape, log,
+            data_bkg = mini2back (data_bkg_mini, data.shape, log,
                                   order_interp=2, bkg_boxsize=C.bkg_boxsize)
-            data_bkg_std = mesh2back (data_bkg_std_mesh, data.shape, log,
+            data_bkg_std = mini2back (data_bkg_std_mini, data.shape, log,
                                       order_interp=1, bkg_boxsize=C.bkg_boxsize)
 
 
@@ -5249,6 +5295,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     # Need to check whether the VIGNET size from the SExtractor run is
     # sufficient large compared to [psf_samp] and [psf_size_config].
     
+
     # run psfex from the unix command line
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
@@ -5280,22 +5327,21 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     # standard output of PSFEx is .psf; change this to _psf.fits
     psf_in = cat_in.replace('.fits', '.psf')
     psf_out = base+'_psf.fits'
-    cmd = 'mv {} {}'.format(psf_in, psf_out)
+    os.rename (psf_in, psf_out)
 
-    if C.make_plots:
-        # if diagnostic plots and images were made, give them a better name
-        file_list = [name for name in os.listdir('.') if name[0:5]=='psfex']
-        for name in file_list:
-            ext = name.split('.')[-1]
-            prefix = '_'.join(name.split('_')[0:2])
-            # this assumes name does not contain more than 1 period
-            name_new = name.split('.')[0]
-            name_new = '_'.join(name_new.split('_')[2:])+'_'+prefix+'.'+ext
-            # remove '_ldac_4psfex' from the name if present
-            name_new = name_new.replace('_ldac_4psfex','')
-            cmd += ' & mv {} {}'.format(name, name_new)
-
-    result = subprocess.call(cmd, shell=True)
+    cwd = os.getcwd()
+    file_list = glob.glob('{}/psfex*'.format(cwd))
+    for name in file_list:
+        # DP: replaced tabs for this section with 8 spaces (gave
+        # inconsistancy error in Tabs and spaces)
+        short = name.split('/')[-1]
+        prefix = '_'.join(short.split('_')[0:2])
+        name_new = short.replace('ldac_4psfex', prefix)
+        name_new = name_new.replace(prefix+'_','')
+        name_new = '{}/{}'.format(cwd, name_new)
+        log.info ('name: {}, name_new: {}'.format(name, name_new))
+        os.rename (name, name_new)
+        
         
     if C.timing:
         log_timing_memory (t0=t, label='run_psfex', log=log)
@@ -5707,15 +5753,20 @@ def run_ZOGY_backup(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, log=None):
 
 ################################################################################
 
-def log_timing_memory(t0, label, log):
-    
-    log.info('wall-time spent in {}: {:.4f} s'.format(label, time.time()-t0))
+def log_timing_memory(t0, label, log=None):
+  
     # ru_maxrss is in units of kilobytes on Linux; however, this seems
     # to be OS dependent as on mac os maverick it is in units of
     # bytes; see manpages of "getrusage"
     mem_GB = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6
-    log.info('peak memory used in {}: {:.4f} GB'.format(label, mem_GB))
-    
+
+    if log is not None:
+        log.info ('wall-time spent in {}: {:.4f} s'.format(label, time.time()-t0))
+        log.info ('peak memory used in {}: {:.4f} GB'.format(label, mem_GB))
+    else:
+        print ('wall-time spent in {}: {:.4f} s'.format(label, time.time()-t0))
+        print ('peak memory used in {}: {:.4f} GB'.format(label, mem_GB))
+        
 
 ################################################################################
 
@@ -5820,19 +5871,19 @@ def main():
     parser.add_argument('--ref_fits', default=None, help='filename of ref image')
     parser.add_argument('--new_fits_mask', default=None, help='filename of new image mask')
     parser.add_argument('--ref_fits_mask', default=None, help='filename of ref image mask')
-    parser.add_argument('--telescope', default=None, help='telescope')
+    parser.add_argument('--set_file', default='Settings.set_zogy', help='name of settings file')
     parser.add_argument('--log', default=None, help='help')
     parser.add_argument('--verbose', default=None, help='verbose')
     parser.add_argument('--nthreads', default=1, type=int, help='number of threads to use')
+    parser.add_argument('--telescope', default=None, help='telescope')
     
-    #global_pars(args.telescope)
-    # replaced [global_pars] function with importing
-    # Utils/Constants_[telescope} file as C; all former global
-    # parameters are now referred to as C.[parameter name]
+    # replaced [global_pars] function with importing [set_file] as C;
+    # all former global parameters are now referred to as C.[parameter
+    # name]. This importing is done inside [optimal_subtraction] in
+    # case it is not called from the command line.
     args = parser.parse_args()
-
     optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask, args.ref_fits_mask,
-                        args.telescope, args.log, args.verbose, args.nthreads)
+                        args.set_file, args.log, args.verbose, args.nthreads, args.telescope)
 
 if __name__ == "__main__":
     main()
