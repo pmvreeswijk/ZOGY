@@ -56,7 +56,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, st
 
 #import objgraph
 
-__version__ = '0.7'
+__version__ = '0.7.1'
 
 ################################################################################
 
@@ -5472,16 +5472,26 @@ def zogy_subloop (nsub, data_ref, data_new,
     # a subimage, so does not need the [nsub] index
     Vn = data_new[nsub] + readnoise_new**2
     Vr = data_ref[nsub] + readnoise_ref**2
+
+    if np.sum(~mask_zero) != 0:
     
-    # subtract the background where images are nonzero
-    N[~mask_zero] -= data_new_bkg[nsub][~mask_zero]
-    R[~mask_zero] -= data_ref_bkg[nsub][~mask_zero]
+        # subtract the background where images are nonzero
+        N[~mask_zero] -= data_new_bkg[nsub][~mask_zero]
+        R[~mask_zero] -= data_ref_bkg[nsub][~mask_zero]
     
-    # determine subimage s_new and s_ref from background RMS
-    # images
-    sn = np.median(data_new_bkg_std[nsub][~mask_zero])
-    sr = np.median(data_ref_bkg_std[nsub][~mask_zero])
-    
+        # determine subimage s_new and s_ref from background RMS
+        # images
+        sn = np.median(data_new_bkg_std[nsub][~mask_zero])
+        sr = np.median(data_ref_bkg_std[nsub][~mask_zero])
+
+    else:
+
+        log.warn('empty subimage; large shift between new and ref image?')
+        
+        sn = 1
+        sr = 1
+        
+        
     if C.verbose and log is not None:
         log.info('fn: {}, fr: {}'.format(fn, fr))
         log.info('dx: {}, dy: {}'.format(dx, dy))
