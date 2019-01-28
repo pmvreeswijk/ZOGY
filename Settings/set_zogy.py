@@ -1,6 +1,6 @@
 import os
 
-__version__ = '0.7'
+__version__ = '0.7.3'
 
 #===============================================================================
 # ZOGY
@@ -30,7 +30,6 @@ fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 # backbround and its standard deviation (STD):
 # (1) background and STD/RMS map determined by SExtractor (fastest)
 # (2) improved background and STD map using masking of all sources (recommended)
-# (3) similar to 2 but using photutils' Background2D (very very slow!)
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                          # clipped (methods 2 and 3)
@@ -118,7 +117,8 @@ astronet_radius = 1.5
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
-cal_cat = os.environ['ZOGYHOME']+'/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+
+cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'.format(os.environ['ZOGYHOME'])}
 ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
                          # crosscheck of positions obtained against calibration catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
@@ -134,13 +134,17 @@ apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
 dosex_psffit = False     # do extra SExtractor run with PSF fitting
                               
 # Photometric calibration
-obs_lat = -32.37989      # telescope latitude in degrees (North); BlackGEM: -29.25747
-obs_long = 20.81122      # telescope longitude in degrees (East); BlackGEM: -70.73797
-obs_height = 1767.       # telescope height in meters above sealevel; BlackGEM: 2343.
-obs_timezone = 'Africa/Johannesburg' # observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
+# telescope latitude in degrees (North)
+obs_lat = {'ML1': -32.37989, 'BG': -29.25747}  
+# telescope longitude in degrees (East); BlackGEM: -70.73797
+obs_long = {'ML1': 20.81122, 'BG': -70.73797}
+# telescope height in meters above sealevel; BlackGEM: 2343.
+obs_height = {'ML1': 1803, 'BG': 2343}
+# observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
+obs_timezone = {'ML1': 'Africa/Johannesburg', 'BG': 'America/Santiago'}
 # these [ext_coeff] are mean extinction estimates for Sutherland in
 # the MeerLICHT filters:
-ext_coeff = {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
+ext_coeff = {'ML1': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}}
 # and the same for La Silla in the BlackGEM filters:
 #ext_coeff = {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}
 # name of the photometric calibration catalog (in binary fits format)
@@ -151,7 +155,7 @@ phot_ncal_max = 100 # max no. of calibration stars used for a given field
 phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
-zp_default = {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}
+zp_default = {'ML1': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}}
 
 #===============================================================================
 # Configuration
@@ -169,8 +173,8 @@ swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 
 # if a mask image is provided, the mask values can be associated to
 # the type of masked pixel with this dictionary:
-mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4, 'saturated-connected': 8,
-              'satellite trail': 16, 'edge': 32}
+mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
+              'saturated-connected': 8, 'satellite trail': 16, 'edge': 32}
 
 # switch on/off different functions
 redo = False             # execute functions even if output file exist
