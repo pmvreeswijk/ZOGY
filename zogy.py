@@ -3408,7 +3408,7 @@ def get_back (data, objmask, log, clip=True):
         # get clipped_stats mean, std and median 
         mean_full, std_full, median_full = clipped_stats(data[mask_use][index_stat],
                                                              nsigma=get_par(C.bkg_nsigma,tel),
-                                                             log=log)
+                                                             log=None)
         #if get_par(C.timing,tel):
         #    log_timing_memory (t0=t, label='get_back -1', log=log)
     else:
@@ -3445,7 +3445,7 @@ def get_back (data, objmask, log, clip=True):
     for nsub in range(nsubs):
         mini_median[nsub], mini_std[nsub] = get_median_std(
             nsub, cuts_ima, data, mask_use, mask_minsize, clip,
-            median_full, std_full, log=log)
+            median_full, std_full, log=None)
         
     # reshape and transpose
     mini_median = mini_median.reshape((nxsubs, nysubs)).transpose()
