@@ -48,7 +48,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, st
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.7.3'
+__version__ = '0.7.4'
 
 ################################################################################
 
@@ -1067,50 +1067,50 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
     # this [formats] dictionary lists the output format, the output
     # column unit, and the desired format
     formats = {
-        'NUMBER':         ['J', ''     , 'uint16'],
-        'XWIN_IMAGE':     ['E', 'pix'  , 'flt32' ],
-        'YWIN_IMAGE':     ['E', 'pix'  , 'flt32' ],
-        'ERRX2WIN_IMAGE': ['E', 'pix^2', 'flt16' ],
-        'ERRY2WIN_IMAGE': ['E', 'pix^2', 'flt16' ],
-        'ERRXYWIN_IMAGE': ['E', 'pix^2', 'flt16' ],
-        'X2WIN_IMAGE':    ['E', 'pix^2', 'flt16' ],
-        'Y2WIN_IMAGE':    ['E', 'pix^2', 'flt16' ],
-        'XYWIN_IMAGE':    ['E', 'pix^2', 'flt16' ],
-        'ELONGATION':     ['E', ''     , 'flt16' ],
-        'ALPHAWIN_J2000': ['E', 'deg'  , 'flt32' ],
-        'DELTAWIN_J2000': ['E', 'deg'  , 'flt32' ],
-        'FLAGS':          ['I', ''     , 'uint8' ],
-        'IMAFLAGS_ISO':   ['I', ''     , 'uint8' ],
-        'FWHM_IMAGE':     ['E', 'pix'  , 'flt16' ],
-        'CLASS_STAR':     ['E', ''     , 'flt16' ],
-        'FLUX_APER':      ['E', 'e-/s' , 'flt32' ],
-        'FLUXERR_APER':   ['E', 'e-/s' , 'flt16' ],
-        'BACKGROUND':     ['E', 'e-/s' , 'flt16' ],
-        'FLUX_MAX':       ['E', 'e-/s' , 'flt16' ],
-        'FLUX_AUTO':      ['E', 'e-/s' , 'flt32' ],
-        'FLUXERR_AUTO':   ['E', 'e-/s' , 'flt16' ],
-        'KRON_RADIUS':    ['E', 'pix'  , 'flt16' ],
-        'FLUX_ISO':       ['E', 'e-/s' , 'flt32' ],
-        'FLUXERR_ISO':    ['E', 'e-/s' , 'flt16' ],
-        'ISOAREA_IMAGE':  ['E', 'pix^2', 'flt16' ],
-        'MU_MAX':         ['E', 'mag'  , 'flt16' ],
-        'FLUX_RADIUS':    ['E', 'pix'  , 'flt16' ],
-        'FLUX_PETRO':     ['E', 'e-/s' , 'flt32' ],
-        'FLUXERR_PETRO':  ['E', 'e-/s' , 'flt16' ],
-        'PETRO_RADIUS':   ['E', 'pix'  , 'flt16' ],
-        'FLUX_OPT':       ['E', 'e-/s' , 'flt32' ],
-        'FLUXERR_OPT':    ['E', 'e-/s' , 'flt16' ],
-        'MAG_OPT':        ['E', 'mag'  , 'flt32' ],
-        'MAGERR_OPT':     ['E', 'mag'  , 'flt16' ],
-        'FLUX_PSF':       ['E', 'e-/s' , 'flt32' ],
-        'FLUXERR_PSF':    ['E', 'e-/s' , 'flt16' ],
-        'MAG_PSF':        ['E', 'mag'  , 'flt32' ],
-        'MAGERR_PSF':     ['E', 'mag'  , 'flt16' ],
-        'S2N':            ['E', ''     , 'flt16' ],
-        'THUMBNAIL_RED':  [thumbnail_size2+'E', 'e-' , 'flt16' ],
-        'THUMBNAIL_REF':  [thumbnail_size2+'E', 'e-' , 'flt16' ],
-        'THUMBNAIL_D':    [thumbnail_size2+'E', 'e-' , 'flt16' ],
-        'THUMBNAIL_SCORR':[thumbnail_size2+'E', 'e-' , 'flt16' ]
+        'NUMBER':         ['J', ''     ], #, 'uint16'],
+        'XWIN_IMAGE':     ['E', 'pix'  ], #, 'flt32' ],
+        'YWIN_IMAGE':     ['E', 'pix'  ], #, 'flt32' ],
+        'ERRX2WIN_IMAGE': ['E', 'pix^2'], #, 'flt16' ],
+        'ERRY2WIN_IMAGE': ['E', 'pix^2'], #, 'flt16' ],
+        'ERRXYWIN_IMAGE': ['E', 'pix^2'], #, 'flt16' ],
+        'X2WIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
+        'Y2WIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
+        'XYWIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
+        'ELONGATION':     ['E', ''     ], #, 'flt16' ],
+        'ALPHAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
+        'DELTAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
+        'FLAGS':          ['I', ''     ], #, 'uint8' ],
+        'IMAFLAGS_ISO':   ['I', ''     ], #, 'uint8' ],
+        'FWHM_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
+        'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
+        'FLUX_APER':      ['E', 'e-/s' ], #, 'flt32' ],
+        'FLUXERR_APER':   ['E', 'e-/s' ], #, 'flt16' ],
+        'BACKGROUND':     ['E', 'e-/s' ], #, 'flt16' ],
+        'FLUX_MAX':       ['E', 'e-/s' ], #, 'flt16' ],
+        'FLUX_AUTO':      ['E', 'e-/s' ], #, 'flt32' ],
+        'FLUXERR_AUTO':   ['E', 'e-/s' ], #, 'flt16' ],
+        'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
+        'FLUX_ISO':       ['E', 'e-/s' ], #, 'flt32' ],
+        'FLUXERR_ISO':    ['E', 'e-/s' ], #, 'flt16' ],
+        'ISOAREA_IMAGE':  ['E', 'pix^2'], #, 'flt16' ],
+        'MU_MAX':         ['E', 'mag'  ], #, 'flt16' ],
+        'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
+        'FLUX_PETRO':     ['E', 'e-/s' ], #, 'flt32' ],
+        'FLUXERR_PETRO':  ['E', 'e-/s' ], #, 'flt16' ],
+        'PETRO_RADIUS':   ['E', 'pix'  ], #, 'flt16' ],
+        'FLUX_OPT':       ['E', 'e-/s' ], #, 'flt32' ],
+        'FLUXERR_OPT':    ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_OPT':        ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_OPT':     ['E', 'mag'  ], #, 'flt16' ],
+        'FLUX_PSF':       ['E', 'e-/s' ], #, 'flt32' ],
+        'FLUXERR_PSF':    ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_PSF':        ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_PSF':     ['E', 'mag'  ], #, 'flt16' ],
+        'S2N':            ['E', ''     ], #, 'flt16' ],
+        'THUMBNAIL_RED':  [thumbnail_size2+'E', 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_REF':  [thumbnail_size2+'E', 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_D':    [thumbnail_size2+'E', 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_SCORR':[thumbnail_size2+'E', 'e-' ], #, 'flt16' ]
     }
 
     if cat_type is None:
@@ -1159,14 +1159,14 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
 
         if cat_in is not None:
             col = fits.Column(name=key_new, format=formats[key][0],
-                              unit=formats[key][1], disp=formats[key][2],
+                              unit=formats[key][1], #disp=formats[key][2],
                               array=data_key)
         # if [cat_in] is None, define the column but without the data;
         # this is used for making a table with the same field
         # definitions but without any entries
         else:
             col = fits.Column(name=key_new, format=formats[key][0],
-                              unit=formats[key][1], disp=formats[key][2])
+                              unit=formats[key][1]) #, disp=formats[key][2])
 
         return col   
 
@@ -1223,7 +1223,8 @@ def format_cat (cat_in, cat_out, log=None, thumbnail_data=None, thumbnail_keys=N
             dim_str = '('+str(thumbnail_size)+','+str(thumbnail_size)+')'
             key = thumbnail_keys[i_tn]
             col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
-                              disp=formats[key][2], array=data_col, dim=dim_str)
+                              #disp=formats[key][2],
+                              array=data_col, dim=dim_str)
             columns.append(col)
 
             
@@ -4756,6 +4757,8 @@ def ldac2fits (cat_ldac, cat_fits, log):
 
             for icol, key in enumerate(cols.names):
                 format_new = cols.formats[icol]
+                # shouldn't it be 'D' and 'E' instead of '1D' and '1E'
+                # below?
                 if '1D' in cols.formats[icol] and 'J2000' not in key:
                     format_new = '1E'
                     #data[key] = data[key].astype('float32')
