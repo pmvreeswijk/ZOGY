@@ -36,7 +36,6 @@ from skimage import restoration, measure
 import logging
 import traceback
 
-from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool
 from functools import partial
 
@@ -45,10 +44,13 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 
+import warnings
+warnings.filterwarnings('ignore', '.*output shape of zoom.*')
+
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.7.4'
+__version__ = '0.8'
 
 ################################################################################
 
@@ -242,7 +244,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # if [new_fits] is not defined, [fwhm_new]=None ensures that code
     # does not crash in function [update_vignet_size] which uses both
     # [fwhm_new] and [fwhm_max]
-    fwhm_new = None
+    fwhm_new = 0
     if new:
         # run SExtractor for seeing estimate of new_fits and ref_fits;
         # both new and ref need to have their fwhm determined before
@@ -252,7 +254,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
             base_new, sexcat_new, pixscale_new, 'new', header_new, log)
 
-    fwhm_ref = None
+    fwhm_ref = 0
     if ref:
         # do the same for the reference image
         sexcat_ref = base_ref+'_ldac.fits'
@@ -487,8 +489,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             # add the fake stars to the new subimages
             for nsub in range(nsubs):
-                index_fake = [slice(nsub*get_par(C.nfakestars,tel),
-                                    (nsub+1)*get_par(C.nfakestars,tel))]
+                index_fake = tuple([slice(nsub*get_par(C.nfakestars,tel),
+                                          (nsub+1)*get_par(C.nfakestars,tel))])
                 fakestar_xcoord[index_fake], fakestar_ycoord[index_fake], \
                     fakestar_flux_input[index_fake] = add_fakestars (psf=psf_orig_new[nsub],
                                                                      data=data_new[nsub],
@@ -562,8 +564,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # compare the input flux with the PSF flux determined by
             # run_ZOGY.
             if get_par(C.nfakestars,tel)>0:
-                index_fake = [slice(nsub*get_par(C.nfakestars,tel),
-                                    (nsub+1)*get_par(C.nfakestars,tel))]
+                index_fake = tuple([slice(nsub*get_par(C.nfakestars,tel),
+                                          (nsub+1)*get_par(C.nfakestars,tel))])
                 x_fake = fakestar_xcoord[index_fake]-1
                 y_fake = fakestar_ycoord[index_fake]-1
                 fakestar_flux_output[index_fake] = data_Fpsf[y_fake, x_fake]
@@ -582,10 +584,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             # put sub images without the borders into output frames
             subcut = cuts_ima[nsub]
-            index_subcut = [slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])]
+            index_subcut = tuple([slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])])
             x1, y1 = get_par(C.subimage_border,tel), get_par(C.subimage_border,tel)
             x2, y2 = x1+get_par(C.subimage_size,tel), y1+get_par(C.subimage_size,tel)
-            index_extract = [slice(y1,y2), slice(x1,x2)]
+            index_extract = tuple([slice(y1,y2), slice(x1,x2)])
 
             data_D_full[index_subcut] = data_D[index_extract] #/ gain_new
             #data_S_full[index_subcut] = data_S[index_extract]
@@ -671,7 +673,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # add header keyword(s):
         header_zogy['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
-        header_zogy['Z-REF'] = (base_ref+'.fits', 'name reference image')
+        header_zogy['Z-REF'] = (base_ref.split('/')[-1]+'.fits', 'name reference image')
         header_zogy['Z-SIZE'] = (get_par(C.subimage_size,tel), '[pix] size of (square) ZOGY subimages')
         header_zogy['Z-BSIZE'] = (get_par(C.subimage_border,tel), '[pix] size of ZOGY subimage borders')
         header_zogy['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
@@ -938,8 +940,8 @@ def add_fakestars (psf, data, bkg, readnoise, fwhm, log):
     
     for nstar in range(get_par(C.nfakestars,tel)):
             
-        index_temp = [slice(ypos[nstar]-psf_hsize, ypos[nstar]+psf_hsize+1),
-                      slice(xpos[nstar]-psf_hsize, xpos[nstar]+psf_hsize+1)]
+        index_temp = tuple([slice(ypos[nstar]-psf_hsize, ypos[nstar]+psf_hsize+1),
+                            slice(xpos[nstar]-psf_hsize, xpos[nstar]+psf_hsize+1)])
 
         # Use function [flux_optimal_s2n] to estimate flux needed for
         # star with S/N of [C.fakestar_s2n].  This S/N estimate
@@ -1257,14 +1259,14 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
     x1 = max(0, xpos-hsize)
     y2 = min(ysize, ypos+hsize)
     x2 = min(xsize, xpos+hsize)
-    index = [slice(y1,y2),slice(x1,x2)]
+    index = tuple([slice(y1,y2),slice(x1,x2)])
     
     # also determine indices of small image of sizexsize
     y1_small = max(0, hsize-ypos)
     x1_small = max(0, hsize-xpos)
     y2_small = min(size, size-(ypos+hsize-ysize))
     x2_small = min(size, size-(xpos+hsize-xsize))
-    index_small = [slice(y1_small,y2_small),slice(x1_small,x2_small)]
+    index_small = tuple([slice(y1_small,y2_small),slice(x1_small,x2_small)])
     
     return index, index_small
 
@@ -1356,7 +1358,7 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
         coords = region_temp.coords
         y_index = coords[:,0]
         x_index = coords[:,1]
-        index_region = [y_index, x_index]
+        index_region = tuple([y_index, x_index])
 
         # rectangular bounding box of the current region; N.B.: this
         # includes pixels that are not significant and is mostly for
@@ -1366,7 +1368,7 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
         # they can be directly used to slice an array, i.e. xmax and
         # ymax already have 1 added
         xmin, ymin, xmax, ymax = bbox
-        index_bbox = [slice(xmin,xmax),slice(ymin,ymax)]
+        index_bbox = tuple([slice(xmin,xmax),slice(ymin,ymax)])
          
         # check if region is affected by one or more flagged pixels in
         # the input new and ref mask arrays; for the moment, discard
@@ -1798,7 +1800,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
                     y2 -= 1
                 else:
                     y1 += 1
-        index = [slice(y1,y2),slice(x1,x2)]
+        index = tuple([slice(y1,y2),slice(x1,x2)])
 
         # extract subsection from D, S and D_mask
         D_sub = D[index]
@@ -1874,7 +1876,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
         x1_P = x1 - (xpos - psf_hsize)
         y2_P = y2 - (ypos - psf_hsize)
         x2_P = x2 - (xpos - psf_hsize)
-        index_P = [slice(y1_P,y2_P),slice(x1_P,x2_P)]
+        index_P = tuple([slice(y1_P,y2_P),slice(x1_P,x2_P)])
         
         P_shift = psf_shift[index_P]
         # only required if psf-fitting is performed
@@ -2874,9 +2876,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     fftdata_mask = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='uint8')
     for nsub in range(nsubs):
         fftcut = cuts_fft[nsub]
-        index_fft = [slice(fftcut[0],fftcut[1]), slice(fftcut[2],fftcut[3])]
+        index_fft = tuple([slice(fftcut[0],fftcut[1]), slice(fftcut[2],fftcut[3])])
         subcutfft = cuts_ima_fft[nsub]
-        index_fftdata = [slice(subcutfft[0],subcutfft[1]), slice(subcutfft[2],subcutfft[3])]
+        index_fftdata = tuple([slice(subcutfft[0],subcutfft[1]), slice(subcutfft[2],subcutfft[3])])
         fftdata[nsub][index_fft] = data[index_fftdata]
         fftdata_bkg[nsub][index_fft] = data_bkg[index_fftdata]
         fftdata_bkg_std[nsub][index_fft] = data_bkg_std[index_fftdata]
@@ -3262,7 +3264,7 @@ def haversine (ra1, dec1, ra2, dec2):
     
     a = np.sin(d_dec/2)**2 + np.cos(dec1) * np.cos(dec2) * np.sin(d_ra/2)**2
     c = 2*np.arcsin(np.sqrt(a))
-    return map(np.degrees, [c])[0]
+    return list(map(np.degrees, [c]))[0]
 
 
 ################################################################################
@@ -3912,8 +3914,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
             log.info('xcenter_fft, ycenter_fft: ' + str(xcenter_fft) + ', ' + str(ycenter_fft))
 
         psf_hsize = int(psf_size/2)
-        index = [slice(ycenter_fft-psf_hsize, ycenter_fft+psf_hsize+1), 
-                 slice(xcenter_fft-psf_hsize, xcenter_fft+psf_hsize+1)]
+        index = tuple([slice(ycenter_fft-psf_hsize, ycenter_fft+psf_hsize+1), 
+                       slice(xcenter_fft-psf_hsize, xcenter_fft+psf_hsize+1)])
         psf_ima_center[nsub][index] = psf_ima_resized_norm
 
         # perform fft shift
