@@ -1,10 +1,10 @@
 from setuptools import setup, find_packages
 setup(
     name='zogy',
-    version='0.7.4',
+    version='0.8',
     description='a Python implementation of proper image subtraction (ZOGY 2016, ApJ, 830, 27)',
     url='https://github.com/pmvreeswijk/ZOGY',
-    author='Paul Vreeswijk',
+    author='Paul Vreeswijk, Kerry Paterson',
     author_email='pmvreeswijk@gmail.com',
     license='MIT',
     packages=find_packages(),
