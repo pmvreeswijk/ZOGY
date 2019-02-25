@@ -1,6 +1,6 @@
 import os
 
-__version__ = '0.7.3'
+__version__ = '0.8'
 
 #===============================================================================
 # ZOGY
@@ -118,7 +118,7 @@ pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
 
-cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'.format(os.environ['ZOGYHOME'])}
+cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'.format(os.environ['ZOGY_HOME'])}
 ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
                          # crosscheck of positions obtained against calibration catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
@@ -161,7 +161,7 @@ zp_default = {'ML1': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':
 # Configuration
 #===============================================================================
 # path and names of configuration files
-cfg_dir = os.environ['ZOGYHOME']+'/Config/'
+cfg_dir = os.environ['ZOGY_HOME']+'/Config/'
 sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
 sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
 sex_det_filt = cfg_dir+'default.conv'        # SExtractor detection filter file
