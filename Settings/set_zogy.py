@@ -1,6 +1,8 @@
 import os
 
-__version__ = '0.8'
+# discontinuing versions for this setting file as it is automatically
+# linked to the zogy.py version using tags in github
+#__version__ = '0.8'
 
 #===============================================================================
 # ZOGY

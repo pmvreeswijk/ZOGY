@@ -32,6 +32,7 @@ from sip_tpv import sip_to_pv
 
 import resource
 from skimage import restoration, measure
+#import inpaint
 
 import logging
 import traceback
@@ -41,6 +42,9 @@ from functools import partial
 
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy import units as u
+from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
+from astropy.convolution import convolve, convolve_fft
 
 from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
 
@@ -50,7 +54,7 @@ warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.8'
+__version__ = '0.8.1'
 
 ################################################################################
 
@@ -673,6 +677,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # add header keyword(s):
         header_zogy['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
+        header_zogy['Z-V'] = (__version__, 'ZOGY version used')
         header_zogy['Z-REF'] = (base_ref.split('/')[-1]+'.fits', 'name reference image')
         header_zogy['Z-SIZE'] = (get_par(C.subimage_size,tel), '[pix] size of (square) ZOGY subimages')
         header_zogy['Z-BSIZE'] = (get_par(C.subimage_border,tel), '[pix] size of ZOGY subimage borders')
@@ -706,6 +711,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'PC-ZP' in header_new and 'PC-AIRM' in header_new:
             keywords = ['exptime', 'filter']
             exptime, filt = read_header(header_new, keywords, log)
+            if tel=='LCO': filt=filt[0]
             zeropoint = header_new['PC-ZP']
             airmass = header_new['PC-AIRM']
             [lmag3, lmag5, lmag] = apply_zp([lflux3, lflux5, lflux],
@@ -1465,6 +1471,7 @@ def get_trans (data_new, data_ref, data_Scorr, data_Fpsf, data_Fpsferr,
     # need to convert psf fluxes to magnitudes by applying the zeropoint
     keywords = ['exptime', 'filter']
     exptime, filt = read_header(header_new, keywords, log)
+    if tel=='LCO': filt=filt[0]
     # get zeropoint from [header_new]
     if 'PC-ZP' in header_new.keys():
         zp = header_new['PC-ZP']
@@ -2472,7 +2479,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     def create_mask (data, satlevel):
         # saturated pixels
         data_mask = np.zeros(data.shape, dtype='uint8')
-        mask_sat = (data >= satlevel)
+        mask_sat = (data >= 0.8*satlevel)
         data_mask[mask_sat] += get_par(C.mask_value['saturated'],tel)
         # pixels connected to saturated pixels
         mask_sat_adj = ndimage.binary_dilation(mask_sat, structure=np.ones((3,3)).astype('bool'))
@@ -2544,15 +2551,17 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     data_bkg *= gain
     data_bkg_std *= gain
     # fix pixels using function [fixpix]
-    fixpix (data_wcs, data_bkg, log, satlevel=satlevel, data_mask=data_mask)
+    if imtype=='new':
+        data_wcs = fixpix (data_wcs, data_bkg, log, satlevel=satlevel, data_mask=data_mask,
+                           fwhm=fwhm, base=base)
 
     if ref_fits_remap is not None:
         data_ref_remap *= gain
         data_ref_bkg_remap *= gain
         data_ref_bkg_std_remap *= gain
         # fix pixels using function [fixpix] also in remapped reference image
-        fixpix (data_ref_remap, data_ref_bkg_remap, log, satlevel=satlevel,
-                data_mask=data_ref_remap_mask)
+        data_ref_remap = fixpix (data_ref_remap, data_ref_bkg_remap, log, satlevel=satlevel,
+                                 data_mask=data_ref_remap_mask, fwhm=fwhm, base=base)
 
     # print warning if any pixel value is not finite
     # if np.any(~np.isfinite(data_wcs)):
@@ -2648,6 +2657,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # read a few extra header keywords needed in [get_zp] and [apply_zp]
         keywords = ['exptime', 'filter', 'obsdate']
         exptime, filt, obsdate = read_header(header, keywords, log)
+        if tel=='LCO': filt=filt[0]
         if get_par(C.verbose,tel):
             log.info('exptime: {}, filter: {}, obsdate: {}'.format(exptime, filt, obsdate))
 
@@ -2776,6 +2786,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 
 
             # only continue if calibration stars are present in the FOV
+            # and filter is present in calibration catalog
             if ncalstars>0:
                 ra_cal = data_cal['ra']
                 dec_cal = data_cal['dec']
@@ -2810,7 +2821,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             header['PC-P'] = (False, 'successfully processed by photometric calibration?')
             zp = get_par(C.zp_default,tel)[filt]
             zp_std = 0.
-            
+
         # apply the zeropoint
         mag_opt, magerr_opt = apply_zp(flux_opt, zp, airmass_sex, exptime, filt, log,
                                        fluxerr=fluxerr_opt, zp_std=None)
@@ -3219,6 +3230,33 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
 
 ################################################################################
 
+def field_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
+
+    # find entries in [ra_cat] and [dec_cat] within [dist] of
+    # [ra] and [dec]
+    mask_data = np.zeros(len(ra_cat), dtype='bool')
+    # make a big cut in arrays ra_cat and dec_cat to speed up
+    mask_cut = (np.abs(dec_cat-dec)<=dist)
+    ra_cat_cut = ra_cat[mask_cut]
+    dec_cat_cut = dec_cat[mask_cut]
+    
+    center = SkyCoord(ra*u.deg, dec*u.deg, frame="icrs")
+    targets = SkyCoord(ra=ra_cat_cut*u.deg, dec=dec_cat_cut*u.deg, frame="icrs")
+    separation = center.separation(targets).deg
+
+    if search=='circle':
+        # find within circle:
+        mask_data[mask_cut] = (separation<=dist)
+    else:
+        posangle = center.position_angle(targets).to(u.deg).rad
+        mask_data[mask_cut] = ((abs(separation*np.sin(posangle)) <= dist) & 
+                               (abs(separation*np.cos(posangle)) <= dist))
+
+    return mask_data
+
+
+################################################################################
+
 def find_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
 
     if get_par(C.timing,tel): t = time.time()
@@ -3303,47 +3341,72 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, log=None):
         
 ################################################################################
 
-def fixpix (data, data_bkg, log, satlevel=60000., data_mask=None):
+def fixpix (data, data_bkg, log, satlevel=60000., data_mask=None, fwhm=3,
+            base=None):
 
     if get_par(C.timing,tel): t = time.time()
     log.info('Executing fixpix ...')
 
-    # replace infinite values and nans with the background
-    mask_infnan = ~np.isfinite(data)
-    data[mask_infnan] = data_bkg[mask_infnan]
-    n_infnan = np.sum(mask_infnan)
-    if n_infnan>0:
-        log.info('Warning: number of infinite/nan numbers in image: {}'.
-                 format(n_infnan))
-
-    # replace non-positive vales with the background
-    mask_nonpos = (data <= 0.)
-    data[mask_nonpos] = data_bkg[mask_nonpos]
-            
-    # replace edge pixels with zeros
-    mask_edge = (data_mask==get_par(C.mask_value['edge'],tel))
-    data[mask_edge] = 0.
+    data_fixed = np.copy(data)
     
+    # replace infinite values and nans with the background
+    #mask_infnan = ~np.isfinite(data)
+    #data[mask_infnan] = data_bkg[mask_infnan]
+    #n_infnan = np.sum(mask_infnan)
+    #if n_infnan>0:
+    #    log.info('Warning: number of infinite/nan numbers in image: {}'.
+    #             format(n_infnan))
+
+    # replace edge pixels with the background
+    mask_edge = (data_mask==get_par(C.mask_value['edge'],tel))
+    #data[mask_edge] = 0.
+    # or with the background
+    data_fixed[mask_edge] = data_bkg[mask_edge]
+
     # now try to clean the image from artificially sharp features such
     # as saturated and pixels as defined in data_mask - the FFTs in
     # [run_ZOGY] produce large-scale features surrounding these sharp
-    # features in the subtracted image. Currently the (KMTNet) masks
-    # do not seem to completely define all the bad pixels/columns
-    # correctly - temporarily remake a mask here from negative or
-    # saturated pixels
-    #mask = np.zeros(data.shape, dtype='uint8')
-    #mask[data < 0] = 1 
-    #mask[data >= satlevel] = 4
+    # features in the subtracted image.
 
-    # try just replacing the edge pixels with the background
-    #mask_replace = (data_mask==2)
-    #data[mask_replace] = data_bkg[mask_replace]
+    # first replace bad/saturated pixels with nans
+    mask_inpaint = ((data_mask == C.mask_value['bad']) |
+                    (data_mask == C.mask_value['saturated']) |
+                    (data_mask == C.mask_value['saturated-connected']))
+        
+    print ('np.sum(mask_inpaint): {}'.format(np.sum(mask_inpaint)))        
+    data_fixed[mask_inpaint] = np.nan
+    
+    # using inpaint.py from https://github.com/Technariumas/Inpainting
+    #array : 2d np.ndarray - an array containing NaN elements that have to be replaced
+    #max_iter : int - the number of iterations
+    #kernel_size : int - the size of the kernel, default is 1
+    #method : str - the method used to replace invalid values. Valid options are
+    # `localmean`, 'idw'.
+    #data_fixed = inpaint.replace_nans(data, max_iter=5, kernel_radius=5,
+    #                                  kernel_sigma=5, method='idw')
 
-    # Replace pixels that correspond to zeros in data with the
-    # background; this will ensure that the borders on the sides of
-    # the entire image and the parts of the image where the new and
-    # ref do not overlap can be handled by run_ZOGY.
-    #data[data==0] = data_bkg[data==0]
+    # using astropy convolution: first defined a Gaussian kernel
+    # scaled to the FWHM
+    std_odd = int(fwhm/2.35)
+    # or keep it small
+    std_odd = 1
+    if not std_odd % 2:
+        std_odd += 1
+    # prepare convolution kernel
+    kernel = Gaussian2DKernel(std_odd, x_size=3, y_size=3)
+        
+    # astropy's convolution replaces the NaN pixels with a kernel-weighted
+    # interpolation from their neighbors
+    it=0
+    while np.isnan(data_fixed).any():
+        it+=1
+        log.info ('iteration: {}'.format(it))
+        #data_fixed = convolve(data_fixed, kernel)
+        data_fixed = interpolate_replace_nans(data_fixed, kernel)
+        log.info ('np.sum(np.isnan(data_fixed)): {}'.format(np.sum(np.isnan(data_fixed))))
+
+
+    fits.writeto(base+'_fixed.fits', data_fixed, overwrite=True)
     
     # using restoration.inpaint_biharmonic
     # replace nonzero pixels with 1
@@ -3353,21 +3416,11 @@ def fixpix (data, data_bkg, log, satlevel=60000., data_mask=None):
     #data_fixed = restoration.inpaint_biharmonic(data/norm, mask, multichannel=False)
     #data_fixed *= norm
 
-    # using inpaint.py from https://github.com/Technariumas/Inpainting
-    #array : 2d np.ndarray - an array containing NaN elements that have to be replaced
-    #max_iter : int - the number of iterations
-    #kernel_size : int - the size of the kernel, default is 1
-    #method : str - the method used to replace invalid values. Valid options are
-    # `localmean`, 'idw'.
-    # replace bad/saturated pixels with nans
-    #data[mask != 0] = np.nan
-    #data_fixed = inpaint.replace_nans(data, max_iter=5, kernel_radius=1,
-    #                                  kernel_sigma=2, method='localmean')
     
     if get_par(C.timing,tel):
         log_timing_memory (t0=t, label='fix_pix', log=log)
 
-    return
+    return data_fixed
 
         
 ################################################################################
@@ -3486,6 +3539,7 @@ def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
     # then pad the background images
     if shape_data != background.shape:
         t1 = time.time()
+        ysize, xsize = shape_data
         ypad = ysize - background.shape[0]
         xpad = xsize - background.shape[1]
         background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
