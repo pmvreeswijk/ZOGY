@@ -16,7 +16,7 @@ subimage_size = 960      # size of subimages
 subimage_border = 32     # border around subimage to avoid edge effects
 
 # ZOGY parameters
-fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+fratio_local = False     # determinne fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
 
@@ -35,11 +35,13 @@ fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                          # clipped (methods 2 and 3)
-bkg_boxsize = 240        # size of region used to determine
+bkg_boxsize = 120        # size of region used to determine
                          # background (all methods)
-bkg_filtersize = 5       # size of filter used for smoothing the above
+bkg_filtersize = 3       # size of filter used for smoothing the above
                          # regions (all methods)
+bkg_npasses = 1          # number of background iterations
 
+                         
 #===============================================================================
 # Header keywords
 #===============================================================================
@@ -121,8 +123,10 @@ pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
 # calibration catalog used for both astrometry and photometry
 
 cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'.format(os.environ['ZOGYHOME'])}
-ast_nbright = 1000       # brightest no. of objects in the field to use for astrometry
-                         # crosscheck of positions obtained against calibration catalog
+ast_nbright = 1000       # brightest no. of objects in the field to
+                         # use for astrometry solution and crosscheck
+                         # of positions obtained against calibration
+                         # catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
 
 #===============================================================================
@@ -134,14 +138,15 @@ apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
                               # in SExtractor general
 # PSF fitting
 dosex_psffit = False     # do extra SExtractor run with PSF fitting
-                              
+
+
 # Photometric calibration
 # telescope latitude in degrees (North)
 obs_lat = {'ML1': -32.37989, 'BG': -29.25747}  
 # telescope longitude in degrees (East); BlackGEM: -70.73797
-obs_long = {'ML1': 20.81122, 'BG': -70.73797}
+obs_lon = {'ML1': 20.81122, 'BG': -70.73797}
 # telescope height in meters above sealevel; BlackGEM: 2343.
-obs_height = {'ML1': 1803, 'BG': 2343}
+obs_height = {'ML1': 1802, 'BG': 2348}
 # observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
 obs_timezone = {'ML1': 'Africa/Johannesburg', 'BG': 'America/Santiago'}
 # these [ext_coeff] are mean extinction estimates for Sutherland in
@@ -183,5 +188,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = False       # make diagnostic plots and save them as pdf
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
