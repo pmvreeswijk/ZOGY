@@ -1271,8 +1271,6 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
 
     if cat_in is not None:
 
-        #if get_par(C.timing,tel): t = time.time()
-
         # read data and header of [cat_in]
         with fits.open(cat_in) as hdulist:
             prihdu = hdulist[0]
@@ -1282,11 +1280,18 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         if header_toadd is not None:
             header += header_toadd
 
+        # not a dummy catalog created from the header only
+        dummy_cat = False
+            
     else:
         # if no [cat_in] is provided, just define the header using
         # [header_toadd]
         header = header_toadd
-            
+
+        # a dummy catalog created from the header only
+        dummy_cat = True
+        
+        
     thumbnail_size2 = str(thumbnail_size**2)
         
     # this [formats] dictionary lists the output format, the output
@@ -1491,6 +1496,9 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
             
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
+    
+    # header keyword indicating 
+    header['DUMMYCAT'] = (dummy_cat, 'is this a dummy catalog without actual sources?')
 
     #if get_par(C.timing,tel) and log is not None:
     #    log_timing_memory (t0=t, label='format_cat', log=log)
