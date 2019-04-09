@@ -145,6 +145,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if image_fits is not None:
             if os.path.isfile(image_fits):
                 ima_bool = True
+                # check that image is not in compressed format
+                with fits.open(image_fits) as hdulist:
+                    header_temp = hdulist[0].header
+                if header_temp['NAXIS'] != 2:
+                    log.critical('input fits images need to be uncompresed')
+                    raise SystemExit
             else:
                 log.info('file {} does not exist'.format(image_fits))
         return ima_bool
@@ -152,10 +158,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     ref = set_bool (ref_fits)
     if not new and not ref:
         log.critical('no valid input image(s) provided')
-        if log:
-            return 'critical', 'No valid input image - please check filenames/paths.'
-        else:
-            raise SystemExit
+        raise SystemExit
 
     # global parameters
     if new:
@@ -183,10 +186,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         for filename in filelist:
             if not os.path.isfile(filename):
                 log.critical('{} does not exist'.format(filename))
-                if log:
-                    return 'critical', filename+' does not exist'
-                else:
-                    raise SystemExit
+                raise SystemExit
             # modified date in log not really needed
             #else:
             #    # write date modified to log
@@ -2935,20 +2935,14 @@ def get_keyvalue (key, header, log):
             key_name = eval('C.key_'+key)
         except:
             log.critical('either [{}] or [{}] needs to be defined in [settings_file]'.
-                      format(key, 'key_'+key))
-            if log:
-                return 'critical', key+' not defined in setting file.'
-            else:
-                raise SystemExit
+                         format(key, 'key_'+key))
+            raise SystemExit
         else:
             if key_name in header:
                 value = header[key_name]
             else:
                 log.critical('keyword {} not present in header'.format(key_name))
-                if log:
-                    return 'critical', key_name+' not in header.'
-                else:
-                    raise SystemExit
+                raise SystemExit
 
     if get_par(C.verbose,tel):
         log.info('keyword: {}, adopted value: {}'.format(key, value))
