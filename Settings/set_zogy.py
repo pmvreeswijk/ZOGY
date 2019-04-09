@@ -19,6 +19,16 @@ subimage_border = 32     # border around subimage to avoid edge effects
 fratio_local = False     # determinne fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
+chi2_red_max = 2         # maximum chi2 in PSF fit to D to filter transients
+# maximum number of flagged pixels of particular type (corresponding
+# to [mask_value] below) in the vicinity of the transient to filter
+transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
+                      'saturated-connected': 0, 'satellite trail': 0, 'edge': 0}
+
+save_thumbnails = True   # save thumbnails of reduced image, remapped reference
+                         # image and ZOGY products D and Scorr in transient catalog
+size_thumbnails = 100    # size of square thumbnail arrays in (new) image pixels
+
 
 # add optional fake stars for testing purposes
 nfakestars = 0           # number of fake stars to be added to each subimage; first star
@@ -34,11 +44,11 @@ fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 # (2) improved background and STD map using masking of all sources (recommended)
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
-                         # clipped (methods 2 and 3)
-bkg_boxsize = 120        # size of region used to determine
-                         # background (all methods)
-bkg_filtersize = 3       # size of filter used for smoothing the above
-                         # regions (all methods)
+                         # clipped (method 2 only)
+bkg_boxsize = 30         # size of region used to determine
+                         # background (both methods)
+bkg_filtersize = 5       # size of filter used for smoothing the above
+                         # regions (both methods)
 bkg_npasses = 1          # number of background iterations
 
                          
@@ -122,7 +132,8 @@ pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
 
-cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'.format(os.environ['ZOGYHOME'])}
+cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+           .format(os.environ['ZOGYHOME'])}
 ast_nbright = 1000       # brightest no. of objects in the field to
                          # use for astrometry solution and crosscheck
                          # of positions obtained against calibration
@@ -137,8 +148,11 @@ apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
                               # used for aperture photometry
                               # in SExtractor general
 # PSF fitting
-dosex_psffit = False     # do extra SExtractor run with PSF fitting
+psffit = False                # perform PSF fitting using own function
+psffit_sex = False            # perform PSF fitting using SExtractor
 
+source_nsigma = 5             # required S/N in total flux (optimal or psffit)
+                              # for source to be included in output catalog
 
 # Photometric calibration
 # telescope latitude in degrees (North)
@@ -188,5 +202,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+make_plots = False       # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
