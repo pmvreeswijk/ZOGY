@@ -5,7 +5,7 @@ Written by Paul Vreeswijk with vital input from Barak Zackay and Eran Ofek. Adap
 
 This module accepts a new and a reference fits image, runs SExtractor on them, finds their WCS solution using Astrometry.net, uses PSFex to infer the position-dependent PSFs of the images and SWarp to map the reference image to the new image and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), the corrected significance image (Scorr), and PSF photometry image (Fpsf - alpha in the paper) and associated error image (Fpsferr). The inferred PSFs are also used to extract optimal photometry (following Horne 1986, PASP, 98, 609) of all sources detected by SExtractor. The configuration files of SExtractor, PSFex and SWarp are located in the Config directory.
 
-It makes grateful use of the following programs that first need to be installed:
+It makes grateful use of the following programs:
 
 - Astrometry.net (in particular "solve-field" and index files): http://astrometry.net 
 - SExtractor: http://www.astromatic.net/software/sextractor
