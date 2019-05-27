@@ -8,7 +8,7 @@ import os
 # ZOGY
 #===============================================================================
 # the full image will be subdivided in a number of square subimages
-# defined by [subimage_size]; the FFTs for the image subraction will
+# defined by [subimage_size]; the FFTs for the image subtraction will
 # be performed on images with size [subimage_size]+2xsubimage_border,
 # where only the central [subimage_size] pixels will be used for the
 # full output image
@@ -16,7 +16,7 @@ subimage_size = 960      # size of subimages
 subimage_border = 32     # border around subimage to avoid edge effects
 
 # ZOGY parameters
-fratio_local = False     # determinne fratio (Fn/Fr) from subimage (T) or full frame (F)
+fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
 chi2_red_max = 2         # maximum chi2 in PSF fit to D to filter transients
@@ -127,7 +127,7 @@ skip_wcs = False         # skip Astrometry.net step if image already
 astronet_tweak_order = 3
 # only search in Astrometry.net index files within this radius of the
 # header RA and DEC [deg]
-astronet_radius = 1.5
+astronet_radius = 30.
 pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
@@ -144,9 +144,9 @@ ast_filter = 'r'         # magnitude column to sort in brightness
 # Photometry
 #===============================================================================
 # aperture radii in units of FWHM
-apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM
-                              # used for aperture photometry
-                              # in SExtractor general
+apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM used
+                              # for aperture photometry in SExtractor
+
 # PSF fitting
 psffit = False                # perform PSF fitting using own function
 psffit_sex = False            # perform PSF fitting using SExtractor
@@ -188,6 +188,8 @@ sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
 sex_det_filt = cfg_dir+'default.conv'        # SExtractor detection filter file
 sex_par = cfg_dir+'sex.params'               # SExtractor output parameters definition file
 sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
+# change back after ADC runs!!!
+#sex_par_ref = cfg_dir+'sex_ADC.params'       # same for reference image output version
 sex_par_ref = cfg_dir+'sex_ref.params'       # same for reference image output version
 psfex_cfg = cfg_dir+'psfex.config'           # PSFex configuration file
 swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
@@ -202,5 +204,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = False       # make diagnostic plots and save them as pdf
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
