@@ -57,7 +57,7 @@ warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.8.5'
+__version__ = '0.8.6'
 
 
 ################################################################################
@@ -149,11 +149,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 with fits.open(image_fits) as hdulist:
                     header_temp = hdulist[0].header
                 if header_temp['NAXIS'] != 2:
-                    log.critical('input fits images need to be uncompresed')
+                    log.critical('input images need to be uncompressed')
                     raise SystemExit
             else:
                 log.info('file {} does not exist'.format(image_fits))
         return ima_bool
+
+    
     new = set_bool (new_fits)
     ref = set_bool (ref_fits)
     if not new and not ref:
@@ -162,12 +164,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     # global parameters
     if new:
-        global base_new, fwhm_new
+        global base_new, fwhm_new, pixscale_new
         # define the base names of input fits files as global so they
         # can be used in any function in this module
         base_new = new_fits.split('.fits')[0]
     if ref:
-        global base_ref, fwhm_ref
+        global base_ref, fwhm_ref, pixscale_ref
         # define the base names of input fits files as global so they
         # can be used in any function in this module
         base_ref = ref_fits.split('.fits')[0]
@@ -316,8 +318,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # determine WCS solution
         data_cal = None
-        if (('CTYPE1' not in header.keys() and 
-             'CTYPE2' not in header.keys()) or get_par(C.redo,tel)):
+        if (('CTYPE1' not in header and 'CTYPE2' not in header) or get_par(C.redo,tel)):
             try:
                 if not get_par(C.skip_wcs,tel):
                     WCS_processed = False
@@ -922,7 +923,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_new = base_new+'_cat.fits'
         cat_new_out = base_new+'_cat.fits'
         header_cat = read_hdulist(cat_new, get_data=False, get_header=True)
-        if 'FORMAT-P' not in header_cat.keys():
+        if 'FORMAT-P' not in header_cat:
             result = format_cat (cat_new, cat_new_out, cat_type='new', log=log,
                                  header_toadd=header_new, exptime=exptime_new,
                                  apphot_radii=get_par(C.apphot_radii,tel))
@@ -932,7 +933,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_ref = base_ref+'_cat.fits'
         cat_ref_out = base_ref+'_cat.fits'
         header_cat = read_hdulist(cat_ref, get_data=False, get_header=True)
-        if 'FORMAT-P' not in header_cat.keys():
+        if 'FORMAT-P' not in header_cat:
             result = format_cat (cat_ref, cat_ref_out, cat_type='ref', log=log,
                                  header_toadd=header_ref, exptime=exptime_ref,
                                  apphot_radii=get_par(C.apphot_radii,tel))
@@ -940,20 +941,26 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new and ref:
         cat_trans = base_newref+'.transcat'
         cat_trans_out = base_newref+'_trans.fits'
-        thumbnail_data = [data_new_full, data_ref_full, data_D_full, 
-                          data_Scorr_full]
-        thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
-                          'THUMBNAIL_SCORR']
-        # need to take care of objects closer than 32/2 pixels to
-        # the full image edge in creation of thumbnails - results
-        # in an error if transients are close to the edge
-        result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
-                             thumbnail_data=thumbnail_data, 
-                             thumbnail_keys=thumbnail_keys,
-                             thumbnail_size=get_par(C.size_thumbnails,tel), 
-                             header_toadd=header_newzogy, exptime=exptime_new, 
-                             apphot_radii=get_par(C.apphot_radii,tel))
-
+        if get_par(C.save_thumbnails,tel):
+            thumbnail_data = [data_new_full, data_ref_full, data_D_full, 
+                              data_Scorr_full]
+            thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
+                              'THUMBNAIL_SCORR']
+            # need to take care of objects closer than 32/2 pixels to
+            # the full image edge in creation of thumbnails - results
+            # in an error if transients are close to the edge
+            result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
+                                 thumbnail_data=thumbnail_data, 
+                                 thumbnail_keys=thumbnail_keys,
+                                 thumbnail_size=get_par(C.size_thumbnails,tel), 
+                                 header_toadd=header_newzogy, exptime=exptime_new, 
+                                 apphot_radii=get_par(C.apphot_radii,tel))
+        else:
+            result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
+                                 header_toadd=header_newzogy, exptime=exptime_new, 
+                                 apphot_radii=get_par(C.apphot_radii,tel))
+            
+            
     end_time = os.times()
     if new and ref:
         dt_usr  = end_time[2] - start_time2[2]
@@ -991,7 +998,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         #if get_par(C.display,tel):
         if False:
             result = subprocess.call(cmd)
-    
+            
             
     # shutdown internal log before exiting
     if log is None:
@@ -1017,12 +1024,12 @@ def get_par (par, tel):
 
     par_val = par
     if type(par) is dict:
-        if tel in par.keys():
+        if tel in par:
             par_val = par[tel]
         else:
             # cut off digits from [tel]
             tel_base = ''.join([char for char in tel if char.isalpha()])
-            if tel_base in par.keys():
+            if tel_base in par:
                 par_val = par[tel_base]
         
     return par_val
@@ -1256,7 +1263,7 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 
 ################################################################################
 
-def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None, 
+def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 thumbnail_keys=None, thumbnail_size=64, header_toadd=None, 
                 exptime=0., apphot_radii=None):
     
@@ -1306,6 +1313,13 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         'X2WIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
         'Y2WIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
         'XYWIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
+        # A,B,THETA and errors added for ADC runs
+        #'AWIN_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
+        #'BWIN_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
+        #'THETAWIN_IMAGE': ['E', 'deg'  ], #, 'flt16' ],
+        #'ERRAWIN_IMAGE':  ['E', 'pix'  ], #, 'flt16' ],
+        #'ERRBWIN_IMAGE':  ['E', 'pix'  ], #, 'flt16' ],
+        #'ERRTHETAWIN_IMAGE': ['E', 'deg'  ], #, 'flt16' ],
         'ELONGATION':     ['E', ''     ], #, 'flt16' ],
         'ALPHAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
         'DELTAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
@@ -1373,6 +1387,9 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
                           'X2WIN_IMAGE', 'Y2WIN_IMAGE', 'XYWIN_IMAGE',   
+                          # change back after ADC runs!!!
+                          #'AWIN_IMAGE', 'BWIN_IMAGE', 'THETAWIN_IMAGE',
+                          #'ERRAWIN_IMAGE', 'ERRBWIN_IMAGE', 'ERRTHETAWIN_IMAGE',
                           'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
                           'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
                           'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
@@ -1383,6 +1400,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
     elif cat_type == 'new':
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
+                          #'X2WIN_IMAGE', 'Y2WIN_IMAGE', 'XYWIN_IMAGE',
                           'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
                           'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
                           'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
@@ -1412,7 +1430,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 data_key /= exptime 
         else:
             if log is not None:
-                log.warn('input [exptime] in function [format_cat] is zero')
+                log.warning('input [exptime] in function [format_cat] is zero')
 
         if data_key is not None:
             col = fits.Column(name=key_new, format=formats[key][0],
@@ -1451,8 +1469,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 
 
     # add [thumbnails]
-    if (thumbnail_data is not None and thumbnail_keys is not None and
-        get_par(C.save_thumbnails,tel)):
+    if thumbnail_keys is not None:
         
         # number of thumbnail images to add
         nthumbnails = len(thumbnail_keys)
@@ -1465,34 +1482,41 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         # loop thumbnails
         for i_tn in range(nthumbnails):
 
-            ysize, xsize = thumbnail_data[i_tn].shape
-            
-            # initialise output column
-            data_col = np.zeros((ncoords,thumbnail_size,thumbnail_size))
-            
-            # loop x,y coordinates
-            for i_pos in range(ncoords):
-
-                # get index around x,y position using function [get_index_around_xy]
-                index_full, index_small = (get_index_around_xy(
-                    ysize, xsize, ycoords[i_pos], xcoords[i_pos], thumbnail_size))
-                
-                # record in data_col
-                try:
-                    data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]                        
-                except ValueError as ve:
-                    if log is not None:
-                        log.info('skipping object at x,y: {:.0f},{:.0f} due to ValueError: {}'.
-                                 format(xcoords[i_pos], ycoords[i_pos], ve))
-                    
-            # add column to table
             dim_str = '('+str(thumbnail_size)+','+str(thumbnail_size)+')'
             key = thumbnail_keys[i_tn]
-            col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1], 
-                              #disp=formats[key][2],
-                              array=data_col, dim=dim_str)
-            columns.append(col)
+                        
+            if thumbnail_data is not None:
 
+                # initialise output column
+                data_col = np.zeros((ncoords,thumbnail_size,thumbnail_size))
+                
+                # loop x,y coordinates
+                ysize, xsize = thumbnail_data[i_tn].shape
+                for i_pos in range(ncoords):
+
+                    # get index around x,y position using function [get_index_around_xy]
+                    index_full, index_small = (get_index_around_xy(
+                        ysize, xsize, ycoords[i_pos], xcoords[i_pos], thumbnail_size))
+                    
+                    # record in data_col
+                    try:
+                        data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]                        
+                    except ValueError as ve:
+                        if log is not None:
+                            log.info('skipping object at x,y: {:.0f},{:.0f} due to '
+                                     'ValueError: {}'.
+                                     format(xcoords[i_pos], ycoords[i_pos], ve))
+
+                # add column to table
+                col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1],
+                                  array=data_col, dim=dim_str)
+            else:
+                col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1],
+                                  dim=dim_str)
+            
+            # append column
+            columns.append(col)
+            
             
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
@@ -1564,22 +1588,28 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                readnoise_new, readnoise_ref, log):
 
     """Function that selects transient candidates from the significance
-    array (data_Scorr), and estimates a number of SExtractor-like
-    quantities (N.B.: the normal versions, not the windowed ones!),
-    such as position and shape parameters, and also returns the peak
-    significance, the PSF flux and error from the ZOGY images Scorr,
-    Fpsf and Fpsferr.
+    array (data_Scorr), and determines all regions with peak Scorr
+    values above the set threshold, and down to where the region wings
+    reaches the 2 sigma isochrone. Regions are discarded if they:
 
-    Possible extension in the future: fit the PSF to data_Scorr,
-    data_Fpsf, data_Fpsferr to infer the exact position, peak
-    significance, peak PSF flux and its error, and an alternative
-    measurement of the PSF-fit flux of the candidate transient.  These
-    quantities and the chi-square of the fits could be used to assess
-    the reality of the transient, and weed out some additional bogus
-    transients. The PSF to be fit to these data arrays is a
-    combination of the PSFs of the new and ref image, i.e. P_D in
-    ZOGY-speak.
+    - are too big or too small
+    - contain both negatively and positively significant Scorr values
+      (at 5 sigma level) within the same region
+    - contain both negatively and positively significant Scorr values
+      (at 5 sigma level) in this region and region at a pixel position
+      that is due to the shift between the new and reference image
+      (e.g. an artefact that is present in both the new and reference
+       image will create transients with opposite significance at
+       pixel positions equal to the shift between the images)
+    - contain more flagged pixels than the maximum indicated in 
+      [C.transient_mask_max]
 
+    Futhermore, a PSF fit to the D image is performed at the location
+    of the filtered transients, using combination of the PSFs of the
+    new and ref image, i.e. P_D in ZOGY-speak. This results in an
+    independent estimate of the transient flux and error, as well
+    as the pixel location and error. The resulting chi2 of the PSF
+    fit is used to futher filter out transients.
     """
 
     if get_par(C.timing,tel): t = time.time()
@@ -1638,6 +1668,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         xerr_psf_D, yerr_psf_D = [np.zeros(nregions) for _ in range(9)]
     x_psf_Scorr, y_psf_Scorr, chi2_psf_Scorr = [np.zeros(nregions) for _ in range(3)]
     
+    # initialize mask of regions to keep
+    mask_keep = np.zeros(nregions, dtype=bool)
+
     # or-combine new and ref masks
     data_newref_mask = ((data_new_mask) | (data_ref_mask))
 
@@ -1645,10 +1678,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     ysize, xsize = np.shape(data_ref)
 
     t1 = time.time()
+
+
     # loop over the regions:
     for i in range(nregions):
-        
-        
+            
         # determine the indices of the input data arrays corresponding
         # to the current region with the significant pixels
         region_temp = region[i]
@@ -1674,22 +1708,35 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         # there are too many pixels of a particular type (bad,
         # cosmics, etc.), which is defined in [C.transient_mask_max]
         
-        # get [transient_mask_max] parameter
-        mask_max = get_par(C.transient_mask_max,tel)
+        # [mask_value] is the dictionary defining the integer
+        # corresponding to the type of masked pixel (bad, edge, etc.)
         mask_value = get_par(C.mask_value,tel)
-        # check that keys are the same
+        # get [transient_mask_max] parameter defining the dictionary
+        # with the maximum number of masked pixels allowed for each
+        # type
+        mask_max = get_par(C.transient_mask_max,tel)
+        # [mask_npix] is a dictionary with the number of masked pixels
+        # present within the region; it contains the same keys as
+        # [mask_max] above; initialize the keys to 0
+        mask_npix = {key: 0 for key in mask_max}
+        # check that keys of [mask_max] (and therefore also
+        # [mask_npix]) are the same as [mask_value]
         if mask_max.keys() != mask_value.keys():
-            log.info('warning: keys of [transient_mask_max] and [mask_value] '
-                     'not identical')
-        # go through the keys
-        for key in mask_max.keys():
+            log.error('warning: keys of [transient_mask_max] and [mask_value] '
+                      'not identical')
+        # go through the keys and count the number of masked pixels
+        # for each type in the region
+        for key in mask_max:
             # count number of pixels in region affected by this type (key)
-            npix = np.sum(data_newref_mask[index_region] & mask_value[key] 
-                          == mask_value[key])
-            npix_mask[i] += npix
-            # if number is higher than maximum listed in [mask_max], discard
-            if npix > mask_max[key]:
-                continue
+            mask_npix[key] = np.sum(data_newref_mask[index_region] & mask_value[key] 
+                                    == mask_value[key])
+        # [npix_mask] is the total number of masked pixels (of any type)
+        # in the region
+        npix_mask[i] = sum(mask_npix.values())
+        # if number of masked pixels for any type is higher than
+        # maximum defined in [mask_max], discard this region
+        if np.any([mask_npix[key] > mask_max[key] for key in mask_max]):
+            continue
             
             
         # discard if region area is too small or too big
@@ -1711,6 +1758,10 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         y_peak[i] = y_index[index_peak] + 1
         Scorr_peak[i] = data_Scorr[index_region][index_peak]
         
+        # flux and fluxerr at peak values in Fpsf and Fpsferr images
+        flux_peak[i] = data_Fpsf[index_region][index_peak]
+        fluxerr_peak[i] = data_Fpsferr[index_region][index_peak]
+        
         # discard oppositely significant regions that are at a distance
         # roughly equal to the shift between new and ref
         ra_peak[i], dec_peak[i] = wcs_new.all_pix2world(x_peak[i], y_peak[i], 1)
@@ -1731,11 +1782,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
             if (np.amax(np.abs(data_Scorr_ref)) >= 5 and 
                 data_Scorr_ref[index_minmax]*Scorr_peak[i] < 0):
                 continue
-            
-        # flux and fluxerr at peak values in Fpsf and Fpsferr images
-        flux_peak[i] = data_Fpsf[index_region][index_peak]
-        fluxerr_peak[i] = data_Fpsferr[index_region][index_peak]
-        
+
+        # keep this region
+        mask_keep[i] = True
 
         if False:
             ds9_arrays(new=data_new[index_bbox],
@@ -1750,8 +1799,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
            
             
 
-    # mask of regions to keep
-    mask_keep = (Scorr_peak != 0)
+    # number of transients
     ntrans = np.sum(mask_keep)
     log.info('ntrans after regions loop: {}'.format(ntrans))
             
@@ -1795,7 +1843,16 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                                      ycoords_ref=y_peak_ref[mk], 
                                      header_new=header_new, header_ref=header_ref,
                                      log=log))
-
+    
+    
+    # add mask_finite, checking if .._psf_D arrays contain finite values
+    mask_finite = (np.isfinite(flux_psf_D) & 
+                   np.isfinite(fluxerr_psf_D) & 
+                   np.isfinite(x_psf_D) & 
+                   np.isfinite(xerr_psf_D) & 
+                   np.isfinite(y_psf_D) & 
+                   np.isfinite(yerr_psf_D))
+        
     #print ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
 
     #if get_par(C.make_plots,tel):
@@ -1822,6 +1879,8 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # filter out transient candidates with high chi2 values
     chi2_max = get_par(C.chi2_red_max,tel)
     mask_keep &= (chi2_psf_D <= chi2_max)
+    # and candidates with non-finite values in PSF fit to D
+    mask_keep &= (mask_finite)
     ntrans = np.sum(mask_keep)
     log.info('ntrans after chi2 filter: {}'.format(ntrans))
 
@@ -1841,27 +1900,33 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     keywords = ['exptime', 'filter']
     exptime, filt = read_header(header_new, keywords, log)
     # get zeropoint from [header_new]
-    if 'PC-ZP' in header_new.keys():
+    if 'PC-ZP' in header_new:
         zp = header_new['PC-ZP']
     else:
         zp = get_par(C.zp_default,tel)[filt]
     # get airmass from [header_new]
-    if 'PC-AIRM' in header_new.keys():
+    if 'PC-AIRM' in header_new:
         airmass = header_new['PC-AIRM']
-    elif 'AIRMASSC' in header_new.keys():
+    elif 'AIRMASSC' in header_new:
         airmass = header_new['PC-AIRM']
-    # get magnitudes corresponding to absolute fluxes; fluxes with
-    # negative flux can be valid, e.g.  an object detected in the
-    # reference image but not in the new image
-    mag_peak, magerr_peak = apply_zp(np.abs(flux_peak), zp, airmass, exptime, 
+
+    # get magnitudes corresponding to absolute fluxes; fluxes, which
+    # can be negative for e.g. an object detected in the reference
+    # image but not in the new image, are first converted to positive
+    # fluxes. That it was a negative flux object is still clear from
+    # the sign of Scorr_peak.
+    flux_peak = np.abs(flux_peak)
+    mag_peak, magerr_peak = apply_zp(flux_peak, zp, airmass, exptime, 
                                      filt, log, fluxerr=np.abs(fluxerr_peak),
-                                     zp_std=None)    
-    mag_psf_D, magerr_psf_D = apply_zp(np.abs(flux_psf_D), zp, airmass, exptime, 
-                                     filt, log, fluxerr=np.abs(fluxerr_psf_D),
-                                     zp_std=None)    
-    mag_opt_D, magerr_opt_D = apply_zp(np.abs(flux_opt_D), zp, airmass, exptime, 
-                                     filt, log, fluxerr=np.abs(fluxerr_opt_D),
-                                     zp_std=None)    
+                                     zp_std=None)
+    flux_psf_D = np.abs(flux_psf_D)
+    mag_psf_D, magerr_psf_D = apply_zp(flux_psf_D, zp, airmass, exptime, 
+                                       filt, log, fluxerr=np.abs(fluxerr_psf_D),
+                                       zp_std=None)
+    flux_opt_D = np.abs(flux_opt_D)
+    mag_opt_D, magerr_opt_D = apply_zp(flux_opt_D, zp, airmass, exptime, 
+                                       filt, log, fluxerr=np.abs(fluxerr_opt_D),
+                                       zp_std=None)
 
     print ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
 
@@ -2183,11 +2248,11 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
             # setting image standard deviations and flux ratios to
             # unity; if values present in headers, use those instead
             sn, sr, fn, fr = 1, 1, 1, 1
-            if 'S-BKGSTD' in header_new.keys():
+            if 'S-BKGSTD' in header_new:
                 sn = header_new['S-BKGSTD']**2
-            if 'S-BKGSTD' in header_ref.keys():
+            if 'S-BKGSTD' in header_ref:
                 sr = header_new['S-BKGSTD']**2
-            if 'Z-FNR' in header_new.keys():
+            if 'Z-FNR' in header_new:
                 fn = header_new['S-BKGSTD']**2
 
             # now combine [psf_ima_config] and [psf_ima_config_ref]
@@ -3033,15 +3098,16 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         mask_low = ((data <=0) | (data <= 0.5*np.median(data_bkg)))
         data_mask[mask_low] += get_par(C.mask_value['bad'],tel)
         # mark edge as edge pixels
-        mask_edge = np.ones((ysize, xsize), dtype=bool)
+        ysize_mask, xsize_mask = np.shape(data)
+        mask_edge = np.ones((ysize_mask, xsize_mask), dtype=bool)
         npix_edge = 40
-        mask_edge[tuple([slice(npix_edge,ysize-npix_edge), 
-                         slice(npix_edge,xsize-npix_edge)])] = False
+        mask_edge[tuple([slice(npix_edge,ysize_mask-npix_edge), 
+                         slice(npix_edge,xsize_mask-npix_edge)])] = False
         data_mask[mask_edge] += get_par(C.mask_value['edge'],tel)
         
         return data_mask
     
-
+    
     # and read in mask image
     if fits_mask is not None:
         data_mask = read_hdulist (fits_mask, dtype='uint8')
@@ -3121,7 +3187,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     if imtype=='new':
         data_wcs = fixpix (data_wcs, data_bkg, log, satlevel=satlevel, data_mask=data_mask,
                            fwhm=fwhm, base=base, imtype=imtype)
-            
+
     if ref_fits_remap is not None:
         data_ref_remap *= gain
         data_ref_bkg_remap *= gain
@@ -3130,7 +3196,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_ref_remap = fixpix (data_ref_remap, data_ref_bkg_remap, log, satlevel=satlevel,
                                  data_mask=data_ref_remap_mask, fwhm=fwhm, base=base, 
                                  imtype=imtype)
-
+        if False:
+            ds9_arrays (data_ref_remap=data_ref_remap)
+        
+        
     # print warning if any pixel value is not finite
     # if np.any(~np.isfinite(data_wcs)):
     #    log.info('Warning: not all pixel values are finite')
@@ -3232,13 +3301,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             return limflux_median
 
 
-        limflux_3sigma = calc_limflux (3.)
+        #limflux_3sigma = calc_limflux (3.)
         limflux_5sigma = calc_limflux (5.)
 
         # add header keyword(s):
-        mask_neg = (flux_opt < 0.)
-        header['NOBJ-NEG'] = (np.sum(mask_neg), 'number of objects with negative optimal flux')
-        header['LIMFLUX3'] = (limflux_3sigma, '[e-] full-frame 3-sigma limiting flux')
+        #mask_neg = (flux_opt < 0.)
+        #header['NOBJ-NEG'] = (np.sum(mask_neg), 'number of objects with negative optimal flux')
+        #header['LIMFLUX3'] = (limflux_3sigma, '[e-] full-frame 3-sigma limiting flux')
         header['LIMFLUX5'] = (limflux_5sigma, '[e-] full-frame 5-sigma limiting flux')
         
         if get_par(C.timing,tel):
@@ -3351,7 +3420,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             data_cal = data_cal[mask_cal]
             
             # loop the the filter keys of [filt_req]
-            if filt in filt_req.keys():
+            if filt in filt_req:
                 # [mask_cal_filt] is mask for for entries in the
                 # updated [data_cal] for which all filters in
                 # [filt_req[current filter]] are present
@@ -3407,37 +3476,41 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 log_timing_memory (t0=t2, label='determining photometric calibration', log=log)
 
         else:
-            log.info('Warning: photometric calibration catalog {} not found!'.format(get_par(C.cal_cat,tel)))
+            log.info('Warning: photometric calibration catalog {} not found!'
+                     .format(get_par(C.cal_cat,tel)))
 
         # if there are no photometric calibration stars (either
         # because no photometric calibration catalog was provided, or
-        # no calibration stars could be found in this particular
-        # field), use the default zeropoints defined in the Settings
-        # module
-        if ncalstars==0:
+        # no matching calibration stars could be found in this
+        # particular field), use the default zeropoints defined in the
+        # Settings module
+        if ncalstars==0 or zp==0:
             header['PC-P'] = (False, 'successfully processed by phot. calibration?')
             zp = get_par(C.zp_default,tel)[filt]
             zp_std = 0.
-
+        else:
+            header['PC-P'] = (True, 'successfully processed by phot. calibration?')            
+            
         # apply the zeropoint
         mag_opt, magerr_opt = apply_zp(flux_opt, zp, airmass_sex, exptime, filt, log,
                                        fluxerr=fluxerr_opt, zp_std=None)
 
         # infer limiting magnitudes from corresponding limiting
         # fluxes using zeropoint and median airmass
-        [limmag_3sigma] = apply_zp([limflux_3sigma], zp, airmass_sex_median, exptime, filt, log)
-        log.info('3-sigma limiting magnitude: {}'.format(limmag_3sigma))
+        #[limmag_3sigma] = apply_zp([limflux_3sigma], zp, airmass_sex_median, exptime, filt, log)
+        #log.info('3-sigma limiting magnitude: {}'.format(limmag_3sigma))
         [limmag_5sigma] = apply_zp([limflux_5sigma], zp, airmass_sex_median, exptime, filt, log)
         log.info('5-sigma limiting magnitude: {}'.format(limmag_5sigma))
         
         # add header keyword(s):
-        header['PC-P'] = (True, 'successfully processed by phot. calibration?')
-        header['PC-ZPDEF'] = (get_par(C.zp_default,tel)[filt], '[mag] default filter zeropoint in settings file')
+        header['PC-ZPDEF'] = (get_par(C.zp_default,tel)[filt], 
+                              '[mag] default filter zeropoint in settings file')
         header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
         header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
-        header['PC-EXTCO'] = (get_par(C.ext_coeff,tel)[filt], '[mag] filter extinction coefficient (k)')
+        header['PC-EXTCO'] = (get_par(C.ext_coeff,tel)[filt], 
+                              '[mag] filter extinction coefficient (k)')
         header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
-        header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
+        #header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
         header['LIMMAG5'] = (limmag_5sigma, '[mag] full-frame 5-sigma limiting magnitude')
 
         # if these optimal fluxes and magnitudes already present in catalog,
@@ -3456,8 +3529,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # discard sources with flux S/N below get_par(C.source_nsigma,tel)
         # and with negative fluxes
         def get_mask (flux, fluxerr, nsigma):
-            return ((flux>0) & (fluxerr>0) & np.isfinite(flux/fluxerr) & 
-                    ((flux/fluxerr) >= nsigma))
+            # mask with same size as flux array, initialized to False
+            mask_all = np.zeros(flux.size, dtype=bool)
+            # mask where fluxerr is not equal to zero
+            mask_ok = (fluxerr!=0)
+            # where fluxerr is not equal to zero, determine mask of
+            # sources with positive fluxes and flux errors and sources
+            # with significant S/N (flux/fluxerr > nsigma)
+            mask_all[mask_ok] = ((flux[mask_ok]>0) & (fluxerr[mask_ok]>0) &
+                                 ((flux[mask_ok]/fluxerr[mask_ok]) >= nsigma))
+            return mask_all
+
+        
         if mypsffit:
             mask_nsigma = get_mask(flux_psf, fluxerr_psf, get_par(C.source_nsigma,tel))
         else:
@@ -3482,12 +3565,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # otherwise the potential replacement of the saturated pixels will
     # not be taken into account
 
-    # determine cutouts
-    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(get_par(C.subimage_size,tel),
-                                                                       ysize, xsize, log)
-    ysize_fft = get_par(C.subimage_size,tel) + 2*get_par(C.subimage_border,tel)
-    xsize_fft = get_par(C.subimage_size,tel) + 2*get_par(C.subimage_border,tel)
-
     if ref_fits_remap is not None:
         data = data_ref_remap
         data_bkg = data_ref_bkg_remap
@@ -3496,6 +3573,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     else:
         data = data_wcs
     
+    # determine cutouts; in case ref image has different size than new
+    # image, redefine [ysize] and [xsize] as until here they refer to
+    # the shape of the original ref image, while shape of remapped ref
+    # image should be used
+    ysize, xsize = np.shape(data)
+    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
+        get_par(C.subimage_size,tel), ysize, xsize, log)
+    
+
+    ysize_fft = get_par(C.subimage_size,tel) + 2*get_par(C.subimage_border,tel)
+    xsize_fft = get_par(C.subimage_size,tel) + 2*get_par(C.subimage_border,tel)
+        
     if get_par(C.timing,tel): t2 = time.time()
 
     fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
@@ -3515,7 +3604,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     if get_par(C.timing,tel):
         log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
 
-    if get_par(C.make_plots,tel):
+    if get_par(C.make_plots,tel) and 'FLUX_AUTO' in data_sex.dtype.names:
 
         # in case optimal flux block above was skipped, the SExtractor
         # catalogue with FLUX_OPT needs to be read in here to be able
@@ -3719,7 +3808,7 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
         base = base_ref
                     
     # maximum distance in degrees between sources to match
-    dist_max = 1./3600
+    dist_max = 3./3600
 
     # return zeropoints in array with same number of rows as ra_sex
     # allows to potentially build a zeropoint map as a function of x,y
@@ -3774,12 +3863,20 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
                 break
                 
                 
-    # determine median zeropoint
-    zp_mean, zp_std, zp_median = clipped_stats(zp_array, clip_zeros=True,
-                                               make_hist=get_par(C.make_plots,tel),
-                                               name_hist=base+'_zp_hist.pdf',
-                                               hist_xlabel=filt+' zeropoint (mag)',
-                                               log=log)
+    # determine median zeropoint, requiring at least 3 non-zero values
+    # in zp_array
+    if np.sum(zp_array != 0) >= 3:
+        zp_mean, zp_std, zp_median = clipped_stats(zp_array, clip_zeros=True,
+                                                   make_hist=get_par(C.make_plots,tel),
+                                                   name_hist=base+'_zp_hist.pdf',
+                                                   hist_xlabel=filt+' zeropoint (mag)',
+                                                   log=log)
+    else:
+        log.info('Warning: could not determine mean, std and/or median zeropoint; '
+                 'returning zeros')
+        zp_mean, zp_std, zp_median = 0, 0, 0
+        
+        
     if get_par(C.verbose,tel):
         log.info('zp_mean: {:.3f}, zp_median: {:.3f}, zp_std: {:.3f}'.
                  format(zp_mean, zp_median, zp_std))
@@ -3788,7 +3885,7 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
         log_timing_memory (t0=t, label='get_zp', log=log)
 
     return zp_median, zp_std, nmatch
-
+    
 
 ################################################################################
 
@@ -4478,8 +4575,10 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                      .format(time.time()-t_temp))
             
         try:
-            # selected catalog:
-            result = run_psfex(sexcat_ldac_selected, get_par(C.psfex_cfg,tel), psfexcat, imtype, log)
+            # run PSFEx on selected catalog:
+            nsnap = int(np.sqrt(nsubs))
+            result = run_psfex(sexcat_ldac_selected, get_par(C.psfex_cfg,tel), psfexcat, imtype, log,
+                               nsnap=nsnap)
             # full catalog:
             #result = run_psfex(sexcat_ldac, get_par(C.psfex_cfg,tel), psfexcat, imtype, log)
         except Exception as e:
@@ -5869,12 +5968,14 @@ def update_vignet_size (sex_par_in, sex_par_out, imtype, log):
         size_vignet = get_par(C.size_vignet_ref,tel)
     else:
         
-        # in case [C.psf_sampling] is set to zero, scale the size of the
-        # VIGNET output in the output catalog with 2*[C.psf_radius]*[fwhm]
-        # where fwhm is taken to be the largest of global parameters
-        # [fwhm_new] and [fwhm_ref]
+        # in case [C.psf_sampling] is set to zero, scale the size of
+        # the VIGNET output in the output catalog with
+        # 2*[C.psf_radius]*[fwhm] where fwhm is taken to be the
+        # largest of global parameters [fwhm_new] and [fwhm_ref],
+        # where the latter is scaled with the pixelscale ratio in case
+        # new and ref images have different scales
         if get_par(C.psf_sampling,tel) == 0.:
-            fwhm_vignet = np.amax([fwhm_new, fwhm_ref])
+            fwhm_vignet = np.amax([fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new)])
             size_vignet = np.int(np.ceil(2.*get_par(C.psf_radius,tel)*fwhm_vignet))
             # make sure it's odd
             if size_vignet % 2 == 0: size_vignet += 1
@@ -6004,7 +6105,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             # run sextractor from the unix command line
             cmd = ['sex', image, '-c', file_config, '-CATALOG_NAME', cat_out, 
                    '-PARAMETERS_NAME', file_params, '-PIXEL_SCALE', str(pixscale),
-                   '-SEEING_FWHM', str(seeing),'-PHOT_APERTURES',apphot_diams_str,
+                   '-SEEING_FWHM', str(seeing),'-PHOT_APERTURES', apphot_diams_str,
                    '-BACK_SIZE', str(get_par(C.bkg_boxsize,tel)), '-BACK_FILTERSIZE',
                    str(get_par(C.bkg_filtersize,tel)), 
                    '-BACKPHOTO_TYPE', 'GLOBAL', #'-BACKPHOTO_THICK', '24',
@@ -6139,7 +6240,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, imtype, log):
+def run_psfex(cat_in, file_config, cat_out, imtype, log, nsnap=11):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -6179,7 +6280,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
            '-SAMPLE_MINSN', str(get_par(C.psf_stars_s2n_min,tel)),
-           '-NTHREADS', str(nthreads)]
+           '-NTHREADS', str(nthreads), '-PSFVAR_NSNAP', str(nsnap)]
     #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
 
@@ -6189,9 +6290,9 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log):
                 '-CHECKPLOT_ANTIALIAS', 'N',
                 '-CHECKPLOT_NAME',
                 'psfex_fwhm, psfex_ellip, psfex_counts, psfex_countfrac, psfex_chi2, psfex_resi']
-        cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,BASIS',
+        cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,BASIS,MOFFAT,-MOFFAT,-SYMMETRICAL',
                 '-CHECKIMAGE_NAME',
-                'psfex_chi, psfex_proto, psfex_samp, psfex_resi, psfex_snap, psfex_basis']
+                'psfex_chi, psfex_proto, psfex_samp, psfex_resi, psfex_snap, psfex_basis, psfex_moffat, psfex_minmoffat, psfex_minsymmetrical']
 
     # log cmd executed
     cmd_str = ' '.join(cmd)
@@ -6365,7 +6466,7 @@ def zogy_subloop (nsub, data_ref, data_new,
 
     else:
 
-        log.warn('empty subimage; large shift between new and ref image?')
+        log.warning('empty subimage; large shift between new and ref image?')
         sn = 1
         sr = 1
 
