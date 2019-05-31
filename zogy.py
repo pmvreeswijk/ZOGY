@@ -1474,10 +1474,11 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         # number of thumbnail images to add
         nthumbnails = len(thumbnail_keys)
         
-        # coordinates to loop
-        xcoords = data['X_PEAK']
-        ycoords = data['Y_PEAK']
-        ncoords = len(xcoords)
+        if thumbnail_data is not None:
+            # coordinates to loop
+            xcoords = data['X_PEAK']
+            ycoords = data['Y_PEAK']
+            ncoords = len(xcoords)
 
         # loop thumbnails
         for i_tn in range(nthumbnails):
