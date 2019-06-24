@@ -57,7 +57,7 @@ warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.8.6'
+__version__ = '0.9'
 
 
 ################################################################################
@@ -737,22 +737,22 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                      .format(mean_Fpsferr, median_Fpsferr, std_Fpsferr))
 
         
-        # convert Fpsferr image to 3-sigma limiting magnitude image
+        # convert Fpsferr image to limiting magnitude image
         mask_zero = np.nonzero(data_Fpsferr_full==0)
         data_Fpsferr_full[mask_zero] = median_Fpsferr
-        if 'PC-ZP' in header_new and 'PC-AIRM' in header_new:
+        exptime, filt = read_header(header_new, ['exptime', 'filter'], log)
+        if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             zp = header_new['PC-ZP']
-            airm = header_new['PC-AIRM']
-            exptime, filt = read_header(header_new, ['exptime', 'filter'], log)
-        data_limmag = apply_zp(get_par(C.transient_nsigma,tel)*data_Fpsferr_full, 
-                               zp, airm, exptime, filt, log).astype('float32')
+            airm = header_new['AIRMASSC']
+            data_limmag = apply_zp(get_par(C.transient_nsigma,tel)*data_Fpsferr_full, 
+                                   zp, airm, exptime, filt, log).astype('float32')
         
         
         # add header keyword(s):
         header_zogy['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
         header_zogy['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
-        header_zogy['Z-FPEMED'] = (median_Fpsferr, '[e-] median Fpsferr full image')
-        header_zogy['Z-FPESTD'] = (std_Fpsferr, '[e-] sigma (STD) Fpsferr full image')
+        header_zogy['Z-FPEMED'] = (median_Fpsferr/exptime, '[e-/s] median Fpsferr full image')
+        header_zogy['Z-FPESTD'] = (std_Fpsferr/exptime, '[e-/s] sigma (STD) Fpsferr full image')
 
 
         # find transients using function [get_trans_alt], which
@@ -769,29 +769,20 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # add header keyword(s):
         header_zogy['T-NSIGMA'] = (get_par(C.transient_nsigma,tel),
                                    '[sigma] input transient detection threshold')
-        #lflux3 = 3.*median_Fpsferr
-        #lflux5 = 5.*median_Fpsferr
         lflux = float(get_par(C.transient_nsigma,tel)) * median_Fpsferr
-        #header_zogy['T-LFLUX3'] = (lflux3, '[e-] full-frame transient 3-sigma limiting flux')
-        #header_zogy['T-LFLUX5'] = (lflux5, '[e-] full-frame transient 5-sigma limiting flux')
-        header_zogy['T-LFLUX'] = (lflux, '[e-] full-frame transient {}-sigma limiting flux'
+        header_zogy['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient {}-sigma limit. flux'
                                   .format(get_par(C.transient_nsigma,tel)))
         header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)'
                                    .format(get_par(C.transient_nsigma,tel)))
 
         # infer limiting magnitudes from corresponding limiting
         # fluxes using zeropoint and median airmass
-        if 'PC-ZP' in header_new and 'PC-AIRM' in header_new:
+        if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             keywords = ['exptime', 'filter']
             exptime, filt = read_header(header_new, keywords, log)
             zeropoint = header_new['PC-ZP']
-            airmass = header_new['PC-AIRM']
-            #[lmag3, lmag5, lmag] = apply_zp([lflux3, lflux5, lflux],
-            #                                zeropoint, airmass, exptime, filt, log)
+            airmass = header_new['AIRMASSC']
             [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log)
-
-            #header_zogy['T-LMAG3'] = (lmag3, '[mag] full-frame transient 3-sigma limiting mag')
-            #header_zogy['T-LMAG5'] = (lmag5, '[mag] full-frame transient 5-sigma limiting mag')
             header_zogy['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma limiting mag' 
                                      .format(get_par(C.transient_nsigma,tel)))
 
@@ -872,13 +863,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         header_newzogy = header_new + header_zogy
         # header_newzogy.add_comment('many keywords, incl. WCS
         # solution, are from corresponding image')
+        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(base_newref+'_D.fits', data_D_full, header_newzogy, 
                      overwrite=True)
         #fits.writeto(base_newref+'_S.fits', data_S_full, header_newzogy, overwrite=True)
+        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(base_newref+'_Scorr.fits', data_Scorr_full, header_newzogy, 
                      overwrite=True)
+        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(base_newref+'_Fpsf.fits', data_Fpsf_full, header_newzogy, 
                      overwrite=True)
+        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(base_newref+'_Fpsferr.fits', data_Fpsferr_full, header_newzogy, 
                      overwrite=True)
 
@@ -891,6 +886,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         
         header_newzogy['COMMENT'] = ('transient limiting magnitude image threshold: {}-sigma'
                                      .format(get_par(C.transient_nsigma,tel)))
+
+        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         if limmag_range <= 7.5:
             data_type = 'uint8'
             hdu = fits.PrimaryHDU(data_limmag, header_newzogy)
@@ -906,9 +903,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                'Fpsferr fits images', log=log)
         
         if get_par(C.display,tel):
+            header_new['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
             fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
+            header_ref['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
             fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
+            header_new['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
             fits.writeto('new_mask.fits', data_new_mask_full, header_new, overwrite=True)
+            header_ref['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
             fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref, overwrite=True)
 
                                 
@@ -1371,6 +1372,15 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         'MAG_PSF_D':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PSF_D':   ['E', 'mag'  ], #, 'flt16' ],
         'CHI2_PSF_D':     ['E', ''     ], #, 'flt32' ],
+        'X_MOFFAT':       ['E', 'pix'  ], #, 'flt32' ],
+        'XERR_MOFFAT':    ['E', 'pix'  ], #, 'flt32' ],
+        'Y_MOFFAT':       ['E', 'pix'  ], #, 'flt32' ],
+        'YERR_MOFFAT':    ['E', 'pix'  ], #, 'flt32' ],
+        'RA_MOFFAT':      ['D', 'deg'  ], #, 'flt64' ],
+        'DEC_MOFFAT':     ['D', 'deg'  ], #, 'flt64' ],
+        'FWHM_MOFFAT':    ['E', 'arcsec'], #, 'flt32' ],
+        'ELONG_MOFFAT':   ['E', ''     ], #, 'flt32' ],
+        'CHI2_MOFFAT':    ['E', ''     ], #, 'flt32' ],
         'THUMBNAIL_RED':  [thumbnail_size2+'E', 'e-' ], #, 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_size2+'E', 'e-' ], #, 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_size2+'E', 'e-' ], #, 'flt16' ],
@@ -1413,9 +1423,11 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                           'RA_PSF_D', 'DEC_PSF_D',
                           'FLUX_PSF_D', 'FLUXERR_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D', 
-                          'CHI2_PSF_D']
-        
-        
+                          'CHI2_PSF_D',
+                          'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
+                          'RA_MOFFAT', 'DEC_MOFFAT', 
+                          'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT']
+
     def get_col (key, key_new, data_key=None):
 
         # function that returns column definition based on input
@@ -1474,10 +1486,11 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         # number of thumbnail images to add
         nthumbnails = len(thumbnail_keys)
         
-        # coordinates to loop
-        xcoords = data['X_PEAK']
-        ycoords = data['Y_PEAK']
-        ncoords = len(xcoords)
+        if thumbnail_data is not None:
+            # coordinates to loop
+            xcoords = data['X_PEAK']
+            ycoords = data['Y_PEAK']
+            ncoords = len(xcoords)
 
         # loop thumbnails
         for i_tn in range(nthumbnails):
@@ -1522,12 +1535,13 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
     
     # header keyword indicating 
-    header['DUMMYCAT'] = (dummy_cat, 'is this a dummy catalog without actual sources?')
+    header['DUMMYCAT'] = (dummy_cat, 'dummy catalog without actual sources?')
 
     #if get_par(C.timing,tel) and log is not None:
     #    log_timing_memory (t0=t, label='format_cat', log=log)
 
     hdu = fits.BinTableHDU.from_columns(columns)
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
     hdu.header += header
     hdu.writeto(cat_out, overwrite=True)
             
@@ -1661,12 +1675,14 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     x_peak, y_peak, x_peak_ref, y_peak_ref, npix_mask = [
         np.zeros(nregions, dtype=int) for _ in range(5)]
     #the peak values and the RA, DEC
-    Scorr_peak, ra_peak, dec_peak, flux_peak, fluxerr_peak, mag_peak, magerr_peak = [
-        np.zeros(nregions) for _ in range(7)]
+    Scorr_peak, ra_peak, dec_peak, flux_peak, fluxerr_peak, mag_peak, \
+        magerr_peak = [np.zeros(nregions) for _ in range(7)]
     # and the output arrays of the PSF fitting to D and Scorr
-    flux_opt_D, fluxerr_opt_D, flux_psf_D, fluxerr_psf_D, x_psf_D, y_psf_D, chi2_psf_D, \
-        xerr_psf_D, yerr_psf_D = [np.zeros(nregions) for _ in range(9)]
-    x_psf_Scorr, y_psf_Scorr, chi2_psf_Scorr = [np.zeros(nregions) for _ in range(3)]
+    flux_opt_D, fluxerr_opt_D, flux_psf_D, fluxerr_psf_D, x_psf_D, y_psf_D, \
+        chi2_psf_D, xerr_psf_D, yerr_psf_D = [np.zeros(nregions) for _ in range(9)]
+    x_moffat, xerr_moffat, y_moffat, yerr_moffat, fwhm_moffat, elong_moffat, \
+        chi2_moffat = [np.zeros(nregions) for _ in range(7)]
+    
     
     # initialize mask of regions to keep
     mask_keep = np.zeros(nregions, dtype=bool)
@@ -1830,51 +1846,29 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         noise = np.sqrt(header_new['S-BKGSTD']**2 + header_ref['S-BKGSTD']**2)
     else:
         noise = np.sqrt(readnoise_new**2 + readnoise_ref**2)
-      
+        
+    
+        
     # use [get_psfoptflux_xycoords] to perform a PSF fit to D
     mk = mask_keep
+    results = get_psfoptflux_xycoords (
+        psfex_bintable_new, data_D, 0.0, data_newref_mask, noise, x_peak[mk], 
+        y_peak[mk], psffit=True, moffat=False, psfex_bintable_ref=psfex_bintable_ref, 
+        xcoords_ref=x_peak_ref[mk], ycoords_ref=y_peak_ref[mk], 
+        header_new=header_new, header_ref=header_ref, log=log)
+     
     flux_opt_D[mk], fluxerr_opt_D[mk], flux_psf_D[mk], fluxerr_psf_D[mk], \
-        x_psf_D[mk], y_psf_D[mk], chi2_psf_D[mk], xerr_psf_D[mk], yerr_psf_D[mk] = (
-            get_psfoptflux_xycoords (psfex_bintable_new, data_D, 0.0, 
-                                     data_newref_mask, 
-                                     noise, x_peak[mk], y_peak[mk], psffit=True, 
-                                     psfex_bintable_ref=psfex_bintable_ref,
-                                     xcoords_ref=x_peak_ref[mk], 
-                                     ycoords_ref=y_peak_ref[mk], 
-                                     header_new=header_new, header_ref=header_ref,
-                                     log=log))
-    
-    
+        x_psf_D[mk], y_psf_D[mk], chi2_psf_D[mk], xerr_psf_D[mk], yerr_psf_D[mk] \
+        = results
+
     # add mask_finite, checking if .._psf_D arrays contain finite values
-    mask_finite = (np.isfinite(flux_psf_D) & 
-                   np.isfinite(fluxerr_psf_D) & 
-                   np.isfinite(x_psf_D) & 
-                   np.isfinite(xerr_psf_D) & 
-                   np.isfinite(y_psf_D) & 
-                   np.isfinite(yerr_psf_D))
-        
-    #print ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
-
-    #if get_par(C.make_plots,tel):
-    if False:
-
-        # add noise for data_Scorr
-        if 'Z-SCSTD' in header_new:
-            noise = header_new['Z-SCSTD']
-        else:
-            noise = 1
-        # use [get_psfoptflux_xycoords] to perform a PSF fit to Scorr
-        __, __, __, __, x_psf_Scorr[mk], y_psf_Scorr[mk], chi2_psf_Scorr[mk] = (
-            get_psfoptflux_xycoords (psfex_bintable_new, data_Scorr, 0.0, 
-                                     data_newref_mask, noise, 
-                                     x_peak[mk], y_peak[mk], psffit=True, 
-                                     psfex_bintable_ref=psfex_bintable_ref,
-                                     xcoords_ref=x_peak_ref[mk], 
-                                     ycoords_ref=y_peak_ref[mk], 
-                                     header_new=header_new, header_ref=header_ref, 
-                                     log=log))
-    
-    print ('[get_trans] time after PSF fit to Scorr: {}'.format(time.time()-t))
+    mask_finite = np.ones(nregions, dtype=bool)
+    list2check = [flux_psf_D, fluxerr_psf_D, x_psf_D, xerr_psf_D, y_psf_D, 
+                  yerr_psf_D]
+    for l in list2check:
+        mask_finite &= np.isfinite(l)
+   
+    print ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
 
     # filter out transient candidates with high chi2 values
     chi2_max = get_par(C.chi2_red_max,tel)
@@ -1882,16 +1876,45 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # and candidates with non-finite values in PSF fit to D
     mask_keep &= (mask_finite)
     ntrans = np.sum(mask_keep)
-    log.info('ntrans after chi2 filter: {}'.format(ntrans))
+    log.info('ntrans after PSF fit chi2 filter: {}'.format(ntrans))
 
+    
     if get_par(C.make_plots,tel):
         result = prep_ds9regions(base_newref+'_trans_ds9regions.txt',
                                  x_psf_D[mask_keep], y_psf_D[mask_keep], 
                                  radius=5., width=2, color='green')
-        
-    print ('[get_trans] time after discarding high chi2 entries: {}'.format(time.time()-t))
 
-    # try fittin 2D Gaussian or Moffat and discarding high/low values?
+
+    # use [get_psfoptflux_xycoords] to perform a Moffat fit to D
+    mk = mask_keep
+    results = get_psfoptflux_xycoords (
+        psfex_bintable_new, data_D, 0.0, data_newref_mask, noise, x_peak[mk], 
+        y_peak[mk], psffit=False, moffat=True, psfex_bintable_ref=psfex_bintable_ref, 
+        xcoords_ref=x_peak_ref[mk], ycoords_ref=y_peak_ref[mk], 
+        header_new=header_new, header_ref=header_ref, log=log)
+
+    flux_opt_D[mk], fluxerr_opt_D[mk], x_moffat[mk], xerr_moffat[mk], \
+        y_moffat[mk], yerr_moffat[mk], fwhm_moffat[mk], elong_moffat[mk], \
+        chi2_moffat[mk] = results
+
+    # add mask_finite, checking if .._moffat arrays contain finite values
+    mask_finite = np.ones(nregions, dtype=bool)
+    list2check = [x_moffat, xerr_moffat, y_moffat, yerr_moffat, 
+                  fwhm_moffat, elong_moffat]
+    for l in list2check:
+        mask_finite &= np.isfinite(l)
+   
+    print ('[get_trans] time after Moffat fit to D: {}'.format(time.time()-t))
+
+    # filter out transient candidates with high chi2 values
+    #mask_keep &= (chi2_moffat <= chi2_max)
+    # for the moment, only filter out extreme reduced chisquare values
+    mask_keep &= (chi2_moffat <= 100.)
+    # and candidates with non-finite values in Moffat fit to D
+    mask_keep &= (mask_finite)
+    ntrans = np.sum(mask_keep)
+    log.info('ntrans after Moffat fit chi2 filter: {}'.format(ntrans))
+
     
     # discard objects with flux below background in new or ref image?
     # this low flux could well be due to stars being present in master flat
@@ -1905,9 +1928,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     else:
         zp = get_par(C.zp_default,tel)[filt]
     # get airmass from [header_new]
-    if 'PC-AIRM' in header_new:
-        airmass = header_new['PC-AIRM']
-    elif 'AIRMASSC' in header_new:
+    if 'AIRMASSC' in header_new:
+        airmass = header_new['AIRMASSC']
+    elif 'PC-AIRM' in header_new:
         airmass = header_new['PC-AIRM']
 
     # get magnitudes corresponding to absolute fluxes; fluxes, which
@@ -1932,11 +1955,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
     # determine RA and DEC corresponding to x_psf_D and y_psf_D
     ra_psf_D, dec_psf_D = wcs_new.all_pix2world(x_psf_D, y_psf_D, 1)
-    
-    # add RA and DEC from psf fit to D?
-    #ra_psf_Scorr, dec_psf_Scorr = wcs_new.all_pix2world(x_psf_Scorr, y_psf_Scorr, 1)
-    #table['RA_PSF_SCORR'] = ra_psf_Scorr
-    #table['DEC_PSF_SCORR'] = dec_psf_Scorr
+
+    # determine RA and DEC corresponding to x_moffat and y_moffat
+    ra_moffat, dec_moffat = wcs_new.all_pix2world(x_moffat, y_moffat, 1)
 
     # create output Table; leaving these columns out for now:
     #'XWIN_IMAGE', 'YWIN_IMAGE', 
@@ -1949,7 +1970,10 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
              'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D', 
              'RA_PSF_D', 'DEC_PSF_D',
              'FLUX_PSF_D', 'FLUXERR_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D',
-             'CHI2_PSF_D')
+             'CHI2_PSF_D',
+             'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
+             'RA_MOFFAT', 'DEC_MOFFAT',
+             'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT')
              #'X_PSF_SCORR', 'Y_PSF_SCORR', 'CHI2_PSF_SCORR')
 
     table = Table([np.arange(nregions)+1, npix_mask,
@@ -1959,8 +1983,10 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                    x_psf_D, xerr_psf_D, y_psf_D, yerr_psf_D, 
                    ra_psf_D, dec_psf_D,
                    flux_psf_D, fluxerr_psf_D, mag_psf_D, magerr_psf_D,
-                   chi2_psf_D],
-                  #x_psf_Scorr, y_psf_Scorr, chi2_psf_Scorr], 
+                   chi2_psf_D,
+                   x_moffat, xerr_moffat, y_moffat, yerr_moffat, 
+                   ra_moffat, dec_moffat,
+                   fwhm_moffat, elong_moffat, chi2_moffat],
                   names=names)
 
     # keep relevant transients
@@ -2107,7 +2133,7 @@ def get_shape_parameters (x2, y2, xy, errx2, erry2, errxy):
 
 def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords,
                              satlevel=50000, replace_satdata=False, psf_oddsized=True, 
-                             psffit=False, get_limflux=False,
+                             psffit=False, moffat=False, get_limflux=False,
                              limflux_nsigma=5., psfex_bintable_ref=None,
                              xcoords_ref=None, ycoords_ref=None, 
                              header_new=None, header_ref=None, log=None):
@@ -2157,6 +2183,15 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
         chi2_psf = np.zeros(ncoords)
         xerr_psf = np.zeros(ncoords)
         yerr_psf = np.zeros(ncoords)
+
+    if moffat:
+        x_moffat = np.zeros(ncoords)
+        xerr_moffat = np.zeros(ncoords)
+        y_moffat = np.zeros(ncoords)
+        yerr_moffat = np.zeros(ncoords)
+        fwhm_moffat = np.zeros(ncoords)
+        elong_moffat = np.zeros(ncoords)
+        chi2_moffat = np.zeros(ncoords)
         
     # get dimensions of D
     ysize, xsize = np.shape(D)
@@ -2419,9 +2454,30 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
                 # xcoords and ycoords
                 xshift_psf[i] += xshift
                 yshift_psf[i] += yshift
-
+                
             #print ('[get_psfopt] inside loop after psf fit: {}'.format(time.time()-t_temp)) 
 
+            # if moffat=True, perform Moffat fit
+            if moffat:
+                
+                try: 
+                    D_sub_err = np.sqrt(np.abs(D_sub) + RON**2 + np.abs(S_sub))
+                    x_moffat[i], xerr_moffat[i], y_moffat[i], yerr_moffat[i], \
+                        fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
+                            fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
+                                               fit_gauss=False, fwhm=psf_fwhm, 
+                                               log=log)
+                    x_moffat[i] += index[1].start
+                    y_moffat[i] += index[0].start
+                    
+                except Exception as e:
+                    log.info('Warning: problem running [fit_moffat_single] on object '
+                             'at pixel coordinates: {}, {}; returning zeros'
+                             .format(xcoords[i], ycoords[i]))
+                    log.info(traceback.format_exc())
+                    return
+                
+                
                 
     if get_par(C.timing,tel): t1 = time.time()
     pool = ThreadPool(nthreads)
@@ -2430,17 +2486,25 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
     pool.join()
     if get_par(C.verbose,tel): log.info('ncoords: {}'.format(ncoords))
 
+    
     if get_par(C.timing,tel):
         log_timing_memory (t0=t, label='get_psfoptflux_xycoords', log=log)
 
+
+    list2return = [[flux_opt, fluxerr_opt]]
     if psffit:
         x_psf = xcoords + xshift_psf
         y_psf = ycoords + yshift_psf
-        return (flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, 
-                chi2_psf, xerr_psf, yerr_psf)
-    else:
-        return flux_opt, fluxerr_opt
-            
+        list2return.append([flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf, 
+                            xerr_psf, yerr_psf])
+    if moffat:
+        list2return.append([x_moffat, xerr_moffat, y_moffat, yerr_moffat,
+                            fwhm_moffat, elong_moffat, chi2_moffat])
+        
+    list2return = [elem for sublist in list2return for elem in sublist] 
+    print ('np.shape(list2return)', np.shape(list2return))
+    return list2return
+        
 
 ################################################################################
 
@@ -2590,7 +2654,7 @@ def flux_psffit(P, D, S, RON, flux_opt, xshift, yshift, mask_use=None, log=None)
     #minner = Minimizer(fcn2min, params, fcn_args=(P, D, S, RON, mask_use))
     #result = minner.minimize()
     # use minimize wrapper to combine above 2 lines into 1
-    result = minimize(fcn2min, params, method='leastsq', 
+    result = minimize(fcn2min, params, method='Leastsq', 
                       args=(P, D, RON, mask_use))
     
     xshift = result.params['xshift'].value
@@ -2836,11 +2900,11 @@ def flux_optimal (P, D, RON, S=None, nsigma_inner=10, P_noshift=None,
 def flux_optimal_s2n (P, S, RON, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
     
     """Similar to function [flux_optimal] above, but this function returns
-    the total flux required for the point source to have a particular
-    signal-to-noise ratio [s2n], given the PSF image [P], the sky
-    background [S] (can be image or scalar), and the read-out noise
-    [RON]. This function is used to estimate the flux of the fake
-    stars that are being added to the image with a required S/N
+    the total flux [in e-] required for the point source to have a
+    particular signal-to-noise ratio [s2n], given the PSF image [P],
+    the sky background [S] (can be image or scalar), and the read-out
+    noise [RON]. This function is used to estimate the flux of the
+    fake stars that are being added to the image with a required S/N
     [C.fakestar_s2n].
 
     Note that the image itself can be provided as the sky background
@@ -3143,6 +3207,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 
                 # update headers of fits image with that of the
                 # original wcs-corrected reference image
+                header2remap['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
                 fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
                 # project fits image to new image
                 fits_out = fits2remap.replace('.fits', '_remap.fits')
@@ -3244,22 +3309,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         erry2win = data_sex['ERRY2WIN_IMAGE']
         errxywin = data_sex['ERRXYWIN_IMAGE']
 
+        
         psfex_bintable = base+'_psf.fits'
+        results = get_psfoptflux_xycoords (psfex_bintable, data_wcs, data_bkg, 
+                                           data_mask, readnoise, xwin, ywin, 
+                                           satlevel=satlevel, replace_satdata=False, 
+                                           psffit=mypsffit, moffat=False, log=log)
+
 
         if mypsffit:
             flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf, \
-                xerr_psf, yerr_psf = (
-                    get_psfoptflux_xycoords (psfex_bintable, data_wcs, data_bkg, 
-                                             data_mask, readnoise, xwin, ywin, 
-                                             satlevel=satlevel, replace_satdata=False, 
-                                             psffit=mypsffit, log=log)
-            )
+                xerr_psf, yerr_psf = results
         else:
-            flux_opt, fluxerr_opt = (get_psfoptflux_xycoords (
-                psfex_bintable, data_wcs, data_bkg, data_mask, readnoise, xwin, 
-                ywin, satlevel=satlevel, replace_satdata=False, log=log)
-            )
-    
+            flux_opt, fluxerr_opt = results
+            
             
         if get_par(C.make_plots,tel):
             # make ds9 regions file with all detections
@@ -3277,6 +3340,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                      ywin[mask_s2n_lt5], 
                                      radius=2., width=1, color='red')
             
+        
         # determine 5-sigma limiting flux using
         # [get_psfoptflux_xycoords] with [get_limflux]=True for random
         # coordinates across the field
@@ -3300,15 +3364,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                          .format(nsigma, limflux_mean, limflux_std, limflux_median))
             return limflux_median
 
-
-        #limflux_3sigma = calc_limflux (3.)
-        limflux_5sigma = calc_limflux (5.)
-
-        # add header keyword(s):
-        #mask_neg = (flux_opt < 0.)
-        #header['NOBJ-NEG'] = (np.sum(mask_neg), 'number of objects with negative optimal flux')
-        #header['LIMFLUX3'] = (limflux_3sigma, '[e-] full-frame 3-sigma limiting flux')
-        header['LIMFLUX5'] = (limflux_5sigma, '[e-] full-frame 5-sigma limiting flux')
+        # limiting flux in e- (not per second), with nsigma determined
+        # by [source_nsigma] in settings file
+        nsigma = get_par(C.source_nsigma,tel)
+        limflux = calc_limflux (nsigma)
         
         if get_par(C.timing,tel):
             log_timing_memory (t0=t1, label='deriving optimal fluxes', log=log)
@@ -3320,7 +3379,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         exptime, filt, obsdate = read_header(header, keywords, log)
         if get_par(C.verbose,tel):
             log.info('exptime: {}, filter: {}, obsdate: {}'.format(exptime, filt, obsdate))
+            
 
+        # now that [exptime] is known, add n-sigma limiting flux in e-/s to header
+        header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
+        header['LIMFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma limiting flux'
+                             .format(nsigma))
+            
         # get airmasses for SExtractor catalog sources
         ra_sex = data_sex['ALPHAWIN_J2000']
         dec_sex = data_sex['DELTAWIN_J2000']
@@ -3495,12 +3560,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         mag_opt, magerr_opt = apply_zp(flux_opt, zp, airmass_sex, exptime, filt, log,
                                        fluxerr=fluxerr_opt, zp_std=None)
 
-        # infer limiting magnitudes from corresponding limiting
-        # fluxes using zeropoint and median airmass
-        #[limmag_3sigma] = apply_zp([limflux_3sigma], zp, airmass_sex_median, exptime, filt, log)
-        #log.info('3-sigma limiting magnitude: {}'.format(limmag_3sigma))
-        [limmag_5sigma] = apply_zp([limflux_5sigma], zp, airmass_sex_median, exptime, filt, log)
-        log.info('5-sigma limiting magnitude: {}'.format(limmag_5sigma))
+        # infer limiting magnitudes from limiting flux using zeropoint
+        # and median airmass
+        [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt, log)
+        log.info('{}-sigma limiting magnitude: {}'.format(nsigma, limmag))
         
         # add header keyword(s):
         header['PC-ZPDEF'] = (get_par(C.zp_default,tel)[filt], 
@@ -3510,8 +3573,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['PC-EXTCO'] = (get_par(C.ext_coeff,tel)[filt], 
                               '[mag] filter extinction coefficient (k)')
         header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
-        #header['LIMMAG3'] = (limmag_3sigma, '[mag] full-frame 3-sigma limiting magnitude')
-        header['LIMMAG5'] = (limmag_5sigma, '[mag] full-frame 5-sigma limiting magnitude')
+        header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
+                            .format(nsigma))
 
         # if these optimal fluxes and magnitudes already present in catalog,
         # delete them; this could happen in case [C.redo] is set to True
@@ -3542,9 +3605,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         
         if mypsffit:
-            mask_nsigma = get_mask(flux_psf, fluxerr_psf, get_par(C.source_nsigma,tel))
+            mask_nsigma = get_mask(flux_psf, fluxerr_psf, nsigma)
         else:
-            mask_nsigma = get_mask(flux_opt, fluxerr_opt, get_par(C.source_nsigma,tel))
+            mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
             
             
         # write updated catalog to file
@@ -4519,6 +4582,9 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     
     # determine image size from header
     xsize, ysize = header['NAXIS1'], header['NAXIS2']
+    subsize = get_par(C.subimage_size,tel)
+    nx = int(xsize / subsize)
+    ny = int(ysize / subsize)
     
     # run psfex on SExtractor output catalog
     #
@@ -4575,10 +4641,10 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                      .format(time.time()-t_temp))
             
         try:
+            nsnap = min(nx, ny)
             # run PSFEx on selected catalog:
-            nsnap = int(np.sqrt(nsubs))
-            result = run_psfex(sexcat_ldac_selected, get_par(C.psfex_cfg,tel), psfexcat, imtype, log,
-                               nsnap=nsnap)
+            result = run_psfex(sexcat_ldac_selected, get_par(C.psfex_cfg,tel), 
+                               psfexcat, imtype, nsnap, log)
             # full catalog:
             #result = run_psfex(sexcat_ldac, get_par(C.psfex_cfg,tel), psfexcat, imtype, log)
         except Exception as e:
@@ -4595,6 +4661,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         version = str(result.stdout.read()).split()[2]
         header['PSF-V'] = (version, 'PSFEx version used')
             
+        
             
     # If [C.psffit_sex] parameter is set, then again run SExtractor,
     # but now using output PSF from PSFEx, so that PSF-fitting can be
@@ -4616,8 +4683,6 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     # read in some header keyword values
     keys = ['POLZERO1', 'POLZERO2', 'POLSCAL1', 'POLSCAL2', 'POLDEG1', 'PSF_FWHM', 
             'PSF_SAMP', 'PSFAXIS1', 'CHI2', 'ACCEPTED']
-    # [psf_size_config] is the size of the PSF grid as defined in the
-    # PSFex configuration file ([PSF_SIZE] parameter)
     polzero1, polzero2, polscal1, polscal2, poldeg, psf_fwhm, psf_samp, \
         psf_size_config, psf_chi2, psf_nstars = ([header_psf[key] for key in keys])
 
@@ -4707,13 +4772,14 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         header['PSF-RAD'] = (get_par(C.psf_radius,tel), '[FWHM] radius in units of FWHM to build PSF')
         header['PSF-SIZE'] = (psf_size, '[pix] size PSF image')
         header['PSF-FRAC'] = (get_par(C.psf_samp_fwhmfrac,tel), '[FWHM] PSF sampling step in units of FWHM')
-        header['PSF-SAMP'] = (psf_samp_update, '[pix] PSF sampling step (~ PSF-FRAC x FWHM)')
+        header['PSF-SAMP'] = (psf_samp_update, '[pix] PSF sampling step (~ PSF-FRAC * FWHM)')
         header['PSF-CFGS'] = (psf_size_config, 'size PSF config. image (= PSF-SIZE / PSF-SAMP)')
         header['PSF-NOBJ'] = (psf_nstars, 'number of accepted PSF stars')
         header['PSF-FIX'] = (get_par(C.use_single_psf,tel), 'single fixed PSF used for entire image?')
         header['PSF-PLDG'] = (poldeg, 'degree polynomial used in PSFEx')
         header['PSF-CHI2'] = (psf_chi2, 'final reduced chi-squared PSFEx fit')
-        header['PSF-FWHM'] = (psf_fwhm, '[pix] image FWHM inferred by PSFEx')
+        # add PSF-FWHM in arcseconds using initial pixel scale
+        header['PSF-FWHM'] = (psf_fwhm*pixscale, '[arcsec] image FWHM inferred by PSFEx')
         #header['PSF-ELON'] = (psf_elon, 'median elongation of PSF stars')
         #header['PSF-ESTD'] = (psf_elon_std, 'elongation sigma (STD) of PSF stars')
         
@@ -4734,7 +4800,6 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
             psf_ima_config = data[0]
         else:
             psf_ima_config = calc_psf_config (data, poldeg, x, y)
-
 
         # resample PSF image at image pixel scale
         psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update)
@@ -4772,7 +4837,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                 base = base_new
             else:
                 base = base_ref
-            fits.writeto(base+'_psf_ima_config_sub'+str(nsub)+'.fits', psf_ima_config, overwrite=True)
+            fits.writeto(base+'_psf_ima_config_sub'+str(nsub)+'.fits', 
+                         psf_ima_config, overwrite=True)
             fits.writeto(base+'_psf_ima_resized_norm_sub'+str(nsub)+'.fits',
                          psf_ima_resized_norm.astype('float32'), overwrite=True)
             fits.writeto(base+'_psf_ima_center_sub'+str(nsub)+'.fits',
@@ -4787,12 +4853,411 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     pool.map(loop_psf_sub, range(nsubs))
     pool.close()
     pool.join()
+
     if get_par(C.timing,tel):
         log_timing_memory (t0=t1, label='loop_psf_sub pool', log=log)
+    
+        
+    # now that PSFEx is done, fit elliptical Moffat and Gauss
+    # functions to centers of subimages across the frame using the
+    # [fit_moffat] function
+    if get_par(C.make_plots,tel):
+        try:
+            fit_moffat(psf_ima, nx, ny, header, pixscale, base+'_psf', log,
+                       fit_gauss=False)
+            fit_moffat(psf_ima, nx, ny, header, pixscale, base+'_psf', log,
+                       fit_gauss=True)
+        except Exception as e:
+            log.info(traceback.format_exc())
+            log.info('exception was raised during [fit_moffat]: {}'.format(e))
+
+    
+    if get_par(C.timing,tel):
         log_timing_memory (t0=t, label='get_psf', log=log)
 
     return psf_ima_shift.astype('float32'), psf_ima.astype('float32')
 
+
+################################################################################
+
+def fit_moffat(psf_ima, nx, ny, header, pixscale, base_output, log, 
+               fit_gauss=False):
+    
+    if get_par(C.timing,tel): t = time.time()
+    
+    # arrays to be saved to output images; these are 1D and
+    # will be reshaped below
+    nsubs = nx * ny
+    psfpeak = np.zeros(nsubs)
+    amplitude = np.zeros(nsubs)
+    fwhm_min = np.zeros(nsubs)
+    fwhm_max = np.zeros(nsubs)
+    theta = np.zeros(nsubs)
+    elongation = np.zeros(nsubs)
+    ellipticity = np.zeros(nsubs)
+    chi2red = np.zeros(nsubs)
+    if not fit_gauss:
+        beta = np.zeros(nsubs)
+
+    # make 2D x,y grid of pixel coordinates corresponding to PSF data
+    # array to use in fit
+    psf_size = np.shape(psf_ima)[1]
+    xy = range(1,psf_size+1)
+    xx, yy = np.meshgrid(xy, xy, indexing='ij')
+    
+    # create a set of Parameters
+    params = Parameters()
+    center = (psf_size-1)/2+1
+    params.add('x0', value=center, min=center-5, max=center+5, vary=True)
+    params.add('y0', value=center, min=center-5, max=center+5, vary=True)
+    params.add('theta', value=0, min=-180, max=180, vary=True)
+    params.add('amplitude', value=np.amax(psf_ima[int(nsubs/2)]), min=0, vary=True)
+    params.add('background', value=0, min=-1, max=1, vary=True)
+        
+    if fit_gauss:
+        params.add('sigma1', value=5, min=0, max=psf_size, vary=True)
+        params.add('sigma2', value=5, min=0, max=psf_size, vary=True)
+    else:
+        params.add('beta', value=5, min=0, max=psf_size, vary=True)
+        params.add('alpha1', value=5, min=0, max=psf_size, vary=True)
+        params.add('alpha2', value=5, min=0, max=psf_size, vary=True)
+    
+        
+    for i in range(nsubs):
+    
+        # record peak of PSF
+        psfpeak[i] = np.amax(psf_ima[i])
+        
+        # do leastsq model fit
+        result = minimize(moffat2min, params, method='Leastsq', 
+                          args=(psf_ima[i], xx, yy, fit_gauss))
+
+        p = result.params.valuesdict()
+        chi2red[i] = result.redchi
+
+        # theta below is the angle corresponding to sigma1 or alpha1,
+        # which is the position angle of the minor axis instead of the
+        # major axis in the case that sigma1 < sigma2 (or alpha1 <
+        # alpha2). This function switches sigma1 and sigma2 (or alpha1
+        # and alpha2) around and determines the correct position
+        # angle, also if abs(theta>90). There must be a more elegant
+        # solution to this. Forcing fit parameter sigma1 >= sigma2
+        # could work, but apparently there is no way to tie fit
+        # parameter constraints in minimize.
+        def switch (sigma1, sigma2, theta):
+            if sigma1 < sigma2:
+                sigma1, sigma2 = sigma2, sigma1
+                if theta < 0:
+                    theta += 90
+                else:
+                    theta -= 90
+            if theta < -90:
+                theta %= 90
+            if theta > 90:
+                theta %= -90                    
+            return sigma1, sigma2, theta
+        
+        if fit_gauss:
+            sigma1, sigma2, theta[i] = switch(p['sigma1'], p['sigma2'], 
+                                              p['theta'])
+            fwhm_max[i] = sigma2fwhm(sigma1)
+            fwhm_min[i] = sigma2fwhm(sigma2)
+        else:
+            beta[i] = p['beta']
+            alpha1, alpha2, theta[i] = switch(p['alpha1'], p['alpha2'], 
+                                              p['theta'])
+            fwhm_max[i] = alpha2fwhm(alpha1, beta[i])
+            fwhm_min[i] = alpha2fwhm(alpha2, beta[i])
+            
+        B, A = fwhm_min[i], fwhm_max[i]
+        elongation[i] = A/B
+        ellipticity[i] = 1 - B/A
+        amplitude[i] = p['amplitude']
+        
+
+    # for Moffat fit, update original image header with some keywords
+    if not fit_gauss:
+        header['PSF-PMIN'] = (np.amin(psfpeak), '[sum(P)=1] min. peak value of subimage PSFs')
+        header['PSF-PMAX'] = (np.amax(psfpeak), '[sum(P)=1] max. peak value of subimage PSFs')
+        header['PSF-PMED'] = (np.median(psfpeak), '[sum(P)=1] median peak value of subimage PSFs')
+        header['PSF-PSTD'] = (np.std(psfpeak), '[sum(P)=1] sigma (STD) peak value of subimage PSFs')    
+        
+        header['PSF-BMIN'] = (np.amin(beta), '[pix] min. beta of Moffat fit to subimage PSFs')
+        header['PSF-BMAX'] = (np.amax(beta), '[pix] max. beta of Moffat fit to subimage PSFs')
+        header['PSF-BMED'] = (np.median(beta), '[pix] median beta of Moffat fit to subimage PSFs')
+        header['PSF-BSTD'] = (np.amax(beta), '[pix] sigma (STD) beta of Moffat fit to subimage PSFs')
+
+        header['PSF-EMIN'] = (np.amin(elongation), 'min. elongation of Moffat fit to subimage PSFs')
+        header['PSF-EMAX'] = (np.amax(elongation), 'max. elongation of Moffat fit to subimage PSFs')
+        header['PSF-EMED'] = (np.median(elongation), 'median elongation of Moffat fit to subimage PSFs')
+        header['PSF-ESTD'] = (np.std(elongation), 'sigma (STD) elongation of Moffat fit to subimage PSFs')
+
+        fwhm_ave = pixscale * (fwhm_max + fwhm_min) / 2
+        header['PSF-FMIN'] = (np.amin(fwhm_ave), '[arcsec] min. mean FWHM of Moffat fits')
+        header['PSF-FMAX'] = (np.amax(fwhm_ave), '[arcsec] max. mean FWHM of Moffat fits')
+        header['PSF-FMED'] = (np.median(fwhm_ave), '[arcsec] median mean FWHM of Moffat fits')
+        header['PSF-FSTD'] = (np.std(fwhm_ave), '[arcsec] sigma (STD) mean FWHM of Moffat fits')
+
+        #header['PSF-FMIN'] = (np.amin(fwhm_min)*pixscale, '[arcsec] min. FWHM of Moffat fit to subimage PSFs')
+        #header['PSF-FMAX'] = (np.amax(fwhm_max)*pixscale, '[arcsec] max. FWHM of Moffat fit to subimage PSFs')
+
+
+    if get_par(C.make_plots,tel):
+    
+        # reshape and transpose data arrays
+        psfpeak = psfpeak.reshape((nx, ny)).transpose()
+        amplitude = amplitude.reshape((nx, ny)).transpose()
+        fwhm_min = fwhm_min.reshape((nx, ny)).transpose()
+        fwhm_max = fwhm_max.reshape((nx, ny)).transpose()
+        elongation = elongation.reshape((nx, ny)).transpose()
+        ellipticity = ellipticity.reshape((nx, ny)).transpose()
+        theta = theta.reshape((nx, ny)).transpose()
+        chi2red = chi2red.reshape((nx, ny)).transpose()
+        if not fit_gauss:
+            beta = beta.reshape((nx, ny)).transpose()
+        
+        # output dictionary
+        output = {'psfpeak': psfpeak, 'amplitude': amplitude,
+                  'fwhm_min': fwhm_min, 'fwhm_max': fwhm_max,
+                  'elongation': elongation, 'ellipticity': ellipticity,
+                  'theta': theta, 'chi2red': chi2red}
+        if not fit_gauss:
+            output['beta'] = beta
+                
+        # name output multiple-extension fits file
+        if not fit_gauss:
+            fits_output = '{}{}'.format(base_output, '_moffat_pars.fits')
+        else:
+            fits_output = '{}{}'.format(base_output, '_gauss_pars.fits')
+
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU())
+        for key in output.keys():
+            hdulist.append(fits.ImageHDU(data=output[key], name=key))
+        # write image
+        hdulist.writeto(fits_output, overwrite=True)
+        
+
+    if get_par(C.timing,tel):
+        log_timing_memory (t0=t, label='fit_moffat', log=log)
+        
+
+################################################################################
+
+def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False, 
+                       fwhm=5, log=None):
+    
+    #if get_par(C.timing,tel): t = time.time()
+    
+    # make 2D x,y grid of pixel coordinates corresponding to PSF data
+    # array to use in fit
+    imsize_y, imsize_x = np.shape(image)
+    x = range(1, imsize_x+1)
+    y = range(1, imsize_y+1)
+    xx, yy = np.meshgrid(x, y, indexing='ij')
+    
+    # create a set of Parameters
+    params = Parameters()
+    xcenter = (imsize_x-1)/2 + 1
+    ycenter = (imsize_y-1)/2 + 1
+    mask_central = (np.sqrt((xx-xcenter)**2+(yy-ycenter)**2) < 10)
+    
+    params.add('x0', value=xcenter, min=xcenter-3, max=xcenter+3, vary=True)
+    params.add('y0', value=ycenter, min=ycenter-3, max=ycenter+3, vary=True)
+    params.add('theta', value=0, min=-180, max=180, vary=True)
+    val_min = np.amin(image[mask_central])
+    val_max = np.amax(image[mask_central])
+    params.add('amplitude', value=val_max, min=2*val_min, max=2*val_max, vary=True)
+    params.add('background', value=0, min=val_min, max=val_max, vary=True)
+    
+    if fit_gauss:
+        sigma = fwhm / sigma2fwhm(1.)
+        params.add('sigma1', value=sigma, min=0.01, max=2*sigma, vary=True)
+        params.add('sigma2', value=sigma, min=0.01, max=2*sigma, vary=True)
+    else:
+        params.add('beta', value=3, min=0.01, vary=True)
+        params.add('alpha1', value=3, min=0.01, vary=True)
+        params.add('alpha2', value=3, min=0.01, vary=True)
+    
+        
+    # do leastsq model fit
+    result = minimize(moffat2min, params, method='Leastsq', 
+                      args=(image, xx, yy, fit_gauss, image_err, mask_use))
+
+    p = result.params.valuesdict()
+    chi2red = result.redchi
+
+    # theta below is the angle corresponding to sigma1 or alpha1,
+    # which is the position angle of the minor axis instead of the
+    # major axis in the case that sigma1 < sigma2 (or alpha1 <
+    # alpha2). This function switches sigma1 and sigma2 (or alpha1
+    # and alpha2) around and determines the correct position
+    # angle, also if abs(theta>90). There must be a more elegant
+    # solution to this. Forcing fit parameter sigma1 >= sigma2
+    # could work, but apparently there is no way to tie fit
+    # parameter constraints in minimize.
+    def switch (sigma1, sigma2, theta):
+        if sigma1 < sigma2:
+            sigma1, sigma2 = sigma2, sigma1
+            if theta < 0:
+                theta += 90
+            else:
+                theta -= 90
+        if theta < -90:
+            theta %= 90
+        if theta > 90:
+            theta %= -90                    
+        return sigma1, sigma2, theta
+
+    
+    if fit_gauss:
+        sigma1, sigma2, theta = switch(p['sigma1'], p['sigma2'], 
+                                       p['theta'])
+        fwhm_max = sigma2fwhm(sigma1)
+        fwhm_min = sigma2fwhm(sigma2)
+    else:
+        beta = p['beta']
+        alpha1, alpha2, theta = switch(p['alpha1'], p['alpha2'], 
+                                       p['theta'])
+        fwhm_max = alpha2fwhm(alpha1, beta)
+        fwhm_min = alpha2fwhm(alpha2, beta)
+            
+    B, A = fwhm_min, fwhm_max
+    elongation = A/B
+    ellipticity = 1 - B/A
+    amplitude = p['amplitude']
+    fwhm_ave = (fwhm_min+fwhm_max)/2
+    
+    x0 = p['x0']
+    x0err = result.params['x0'].stderr
+    y0 = p['y0']
+    y0err = result.params['y0'].stderr
+
+    if False:
+    
+        if fit_gauss:
+        
+            print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red:',
+                   xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red)
+        
+            model_ima = EllipticalGauss2D (xx, yy, x0=x0, y0=y0,
+                                           sigma1=sigma1, sigma2=sigma2,
+                                           theta=theta, amplitude=amplitude,
+                                           background=p['background'])
+        else:
+        
+            print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta:',
+                   xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta)
+        
+            model_ima = EllipticalMoffat2D (xx, yy, x0=x0, y0=y0, beta=beta,
+                                            alpha1=alpha1, alpha2=alpha2,
+                                            theta=theta, amplitude=amplitude,
+                                            background=p['background'])
+
+        diff = image - model_ima
+        ds9_arrays(image=image, model_ima=model_ima, diff=diff, err=image_err)
+
+        
+    #if get_par(C.timing,tel):
+    #    log_timing_memory (t0=t, label='fit_moffat_single', log=log)
+
+    return x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red
+    
+        
+################################################################################
+
+# alternative from http://www.aspylib.com/doc/aspylib_fitting.html
+
+def EllipticalMoffat2D (x, y, x0=0, y0=0, beta=1, alpha1=1, alpha2=1, 
+                        theta=0, amplitude=1, background=0):
+    
+    # input theta is assumed to be in degrees
+    theta_rad = theta*np.pi/180
+    
+    A = ((np.cos(theta_rad) / alpha1)**2 + 
+         (np.sin(theta_rad) / alpha2)**2)
+    B = ((np.sin(theta_rad) / alpha1)**2 + 
+         (np.cos(theta_rad) / alpha2)**2)
+    C = 2 * np.sin(theta_rad) * np.cos(theta_rad) * (alpha1**-2 - alpha2**-2)
+    
+    xdiff = x - x0
+    ydiff = y - y0
+    S0 = background
+    S1 = amplitude
+    
+    return S0 + S1*(1 + A*xdiff**2 + B*ydiff**2 + C*xdiff*ydiff)**-beta
+    
+
+# function to convert Moffat alpha and beta to FWHM
+def alpha2fwhm (alpha, beta):
+    return alpha * 2 * np.sqrt(2**(1/beta)-1)
+
+
+################################################################################
+
+# see also http://www.aspylib.com/doc/aspylib_fitting.html
+
+def EllipticalGauss2D (x, y, x0=0, y0=0, sigma1=1, sigma2=1, 
+                       theta=0, amplitude=1, background=0):
+    
+    # input theta is assumed to be in degrees
+    theta_rad = theta*np.pi/180
+    
+    A = ((np.cos(theta_rad) / sigma1)**2 + 
+         (np.sin(theta_rad) / sigma2)**2)
+    B = ((np.sin(theta_rad) / sigma1)**2 + 
+         (np.cos(theta_rad) / sigma2)**2)
+    C = 2 * np.sin(theta_rad) * np.cos(theta_rad) * (sigma1**-2 - sigma2**-2)
+
+    xdiff = x - x0
+    ydiff = y - y0
+    S0 = background
+    S1 = amplitude
+    
+    return S0 + S1*np.exp(-0.5*(A*xdiff**2 + B*ydiff**2 + C*xdiff*ydiff))
+
+
+# function to convert Gaussian sigma to FWHM
+def sigma2fwhm (sigma):
+    return sigma * 2 * np.sqrt(2*np.log(2))
+
+
+################################################################################
+
+# define objective function: returns the array to be minimized
+def moffat2min (params, image, xx, yy, fit_gauss, 
+                image_err=None, mask_use=None):
+    
+    p = params.valuesdict()
+
+    if fit_gauss:
+        
+        model = EllipticalGauss2D (xx, yy, x0=p['x0'], y0=p['y0'], 
+                                   sigma1=p['sigma1'], sigma2=p['sigma2'], 
+                                   theta=p['theta'], amplitude=p['amplitude'],
+                                   background=p['background'])
+    else:
+        
+        model = EllipticalMoffat2D (xx, yy, x0=p['x0'], y0=p['y0'], 
+                                    beta=p['beta'],
+                                    alpha1=p['alpha1'], alpha2=p['alpha2'], 
+                                    theta=p['theta'], amplitude=p['amplitude'],
+                                    background=p['background'])
+    
+    # residuals
+    if image_err is not None:
+        err = image_err
+    else:
+        err = 1
+        
+    resid = np.abs(image - model) / err
+
+    if mask_use is not None:
+        resid = resid[mask_use]
+        
+    # return flattened array
+    return resid.flatten()
+    
 
 ################################################################################
 
@@ -5223,14 +5688,26 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     base = image_in.replace('.fits','')
     sexcat = base+'_cat.fits'
 
-    # feed Astrometry.net only with brightest sources; N.B.:
-    # keeping only objects with zero FLAGS does not work well in crowded fields
     # read SExtractor catalogue (this is also used further down below in this function)
     data_sexcat = read_hdulist (sexcat)
     nobjects = data_sexcat.shape[0]
     header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
+    log.info('number of objects detected by SExtractor: {}'.format(nobjects))
+    
+    # feed Astrometry.net only with brightest sources; N.B.:
+    # keeping only objects with zero FLAGS does not work well in crowded fields
     # select stars for finding WCS solution
-    mask_use = (data_sexcat['FLAGS']<=1)
+    #mask_use = (data_sexcat['FLAGS']<=1)
+    # the above selection is not working well for crowded images; Danielle
+    # found the following to work well for both non-crowded as crowded
+    # images, i.e. use all objects that are not masked according to the
+    # input mask (any pixel within the isophotal area of an object):
+
+    if 'IMAFLAGS_ISO' in data_sexcat.dtype.names:
+        mask_use = (data_sexcat['IMAFLAGS_ISO']==0)
+    else:
+        mask_use = (data_sexcat['FLAGS']<=3)
+        
     # sort in brightness (FLUX_AUTO)
     index_sort = np.argsort(data_sexcat['FLUX_AUTO'][mask_use])
     # select the brightest objects
@@ -5295,16 +5772,14 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # solved the image
     data_match = read_hdulist (base+'.match')
         
-    if os.path.exists("%s.solved"%base) and status==0:
-        os.remove("%s.solved"%base)
-        #os.remove("%s.match"%base)
-        #os.remove("%s.rdls"%base)
-        #os.remove("%s.corr"%base)
-        #os.remove("%s-indx.xyls"%base)
+    if os.path.exists('{}.solved'.format(base)) and status==0:
+        for ext in ['.solved', '.match', '.rdls', '.corr', '-indx.xyls', '.axy']:
+            os.remove('{}{}'.format(base, ext))
     else:
-        log.error("Solving WCS failed.")
-        return 'error'
-
+        log.error('solve-field (Astrometry.net) failed with exit code {}'.format(status))
+        raise Exception('solve-field (Astrometry.net) failed with exit code {}'.format(status))
+    
+    
     if get_par(C.timing,tel): t2 = time.time()
 
     # read image_in
@@ -5491,6 +5966,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         data_cal = None
 
     # write image_out including header
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
     fits.writeto(image_out, data, header, overwrite=True)
 
     if get_par(C.timing,tel):
@@ -5658,7 +6134,7 @@ def fits2ldac (header4ext2, data4ext3, fits_ldac_out, doSort=True):
     prihdu.header['FILTNAME'] = header4ext2['FILTNAME']
     # prihdu.header['SEEING'] = header4ext2['SEEING'] #need to calculte and add
     prihdu.header['BKGSIG'] = header4ext2['SEXBKDEV']
-
+    prihdu.header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
     
     # write hdulist to output LDAC fits table
     hdulist = fits.HDUList([prihdu, ext2, ext3])
@@ -5789,7 +6265,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     log.info(stderrstr)
     if status != 0:
         log.error('SWarp failed with exit code {}'.format(status))
-        return 'error'
+        raise Exception('SWarp failed with exit code {}'.format(status))
 
     if run_alt:
         image_resample = image_out.replace('_remap.fits', resample_suffix)
@@ -5828,6 +6304,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         # same for different new images, this if condition needs to
         # go: 
         #if not os.path.isfile(image_out) or get_par(C.redo,tel):
+        header_out['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(image_out, data_remap, header_out, overwrite=True)
     
     if get_par(C.timing,tel):
@@ -5975,7 +6452,11 @@ def update_vignet_size (sex_par_in, sex_par_out, imtype, log):
         # where the latter is scaled with the pixelscale ratio in case
         # new and ref images have different scales
         if get_par(C.psf_sampling,tel) == 0.:
-            fwhm_vignet = np.amax([fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new)])
+            try: 
+                # fwhm_ref not present if no reference image is provided
+                fwhm_vignet = np.amax([fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new)])
+            except:
+                fwhm_vignet = fwhm_new
             size_vignet = np.int(np.ceil(2.*get_par(C.psf_radius,tel)*fwhm_vignet))
             # make sure it's odd
             if size_vignet % 2 == 0: size_vignet += 1
@@ -6056,7 +6537,9 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
         # write small image to fits
         image_fraction = base+'_fraction.fits'
-        fits.writeto(image_fraction, data_fraction.astype('float32'), header, overwrite=True)
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        fits.writeto(image_fraction, data_fraction.astype('float32'), header, 
+                     overwrite=True)
 
         # make image point to image_fraction
         image = image_fraction
@@ -6193,7 +6676,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             fits.writeto(base+'_bkg_std_mini.fits', data_bkg_std_mini, 
                          overwrite=True)
             # and update headers with [C.bkg_boxsize]
-            fits.setval(base+'_bkg_mini.fits', 'BKG_SIZE', 
+            fits.setval(base+'_bkg_mini.fits', 'BKG_SIZE',
                         value=get_par(C.bkg_boxsize,tel))
             fits.setval(base+'_bkg_std_mini.fits', 'BKG_SIZE', 
                         value=get_par(C.bkg_boxsize,tel))
@@ -6240,7 +6723,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, imtype, log, nsnap=11):
+def run_psfex(cat_in, file_config, cat_out, imtype, nsnap, log):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -6275,7 +6758,6 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log, nsnap=11):
     # Need to check whether the VIGNET size from the SExtractor run is
     # sufficient large compared to [psf_samp] and [psf_size_config].
     
-
     # run psfex from the unix command line
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
@@ -6308,21 +6790,46 @@ def run_psfex(cat_in, file_config, cat_out, imtype, log, nsnap=11):
     psf_in = cat_in.replace('.fits', '.psf')
     psf_out = base+'_psf.fits'
     os.rename (psf_in, psf_out)
+    
 
-    cwd = os.getcwd()
-    file_list = glob.glob('{}/psfex*'.format(cwd))
-    for name in file_list:
-        # DP: replaced tabs for this section with 8 spaces (gave
-        # inconsistancy error in Tabs and spaces)
-        short = name.split('/')[-1]
-        prefix = '_'.join(short.split('_')[0:2])
-        name_new = short.replace('ldac_4psfex', prefix)
-        name_new = name_new.replace(prefix+'_','')
-        name_new = '{}/{}'.format(cwd, name_new)
-        log.info ('name: {}, name_new: {}'.format(name, name_new))
-        os.rename (name, name_new)
+    # record the PSFEx output check images defined above, into
+    # extensions of a single fits file    
+    if get_par(C.make_plots,tel):
+
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU())
+    
+        cwd = os.getcwd()
+        file_list = glob.glob('{}/psfex*'.format(cwd))
+        for name in file_list:
         
+            short = name.split('/')[-1]
+            prefix = '_'.join(short.split('_')[0:2])
+
+            if 'fits' in name:
+                # read image data and header
+                data, header = read_hdulist (name, get_header=True)
+                # add extension to hdulist with extname=prefix
+                hdulist.append(fits.ImageHDU(data=data, header=header, 
+                                             name=prefix))
+                # remove individual image
+                os.remove(name)
+                log.info ('added fits image {} to multi-extension fits file'
+                          .format(name))
+                
+            else:
+                # if not a fits file, rename it
+                name_new = short.replace('ldac_4psfex', prefix)
+                name_new = name_new.replace(prefix+'_','')
+                name_new = '{}/{}'.format(cwd, name_new)
+                log.info ('name: {}, name_new: {}'.format(name, name_new))
+                os.rename (name, name_new)
+                
+        # write image
+        fits_output = base+'_psf_checkimages.fits'
+        hdulist.writeto(fits_output, overwrite=True)
         
+
     if get_par(C.timing,tel):
         log_timing_memory (t0=t, label='run_psfex', log=log)
 
@@ -6697,19 +7204,6 @@ def run_ZOGY_backup(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, log=None):
     dSrdy = Sr - np.roll(Sr,1,axis=0)
     dSrdx = Sr - np.roll(Sr,1,axis=1)
     VSr_ast = dx2 * dSrdx**2 + dy2 * dSrdy**2
-
-    #if get_par(C.display,tel):
-    #    base = base_newref
-    #    fits.writeto(base+'_Pn_hat.fits', np.real(Pn_hat).astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_Pr_hat.fits', np.real(Pr_hat).astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_kr.fits', np.real(kr).astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_kn.fits', np.real(kn).astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_Sr.fits', Sr.astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_Sn.fits', Sn.astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_VSr.fits', VSr.astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_VSn.fits', VSn.astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_VSr_ast.fits', VSr_ast.astype('float32'), overwrite=True)
-    #    fits.writeto(base+'_VSn_ast.fits', VSn_ast.astype('float32'), overwrite=True)
 
     # and finally S_corr
     V_S = VSr + VSn

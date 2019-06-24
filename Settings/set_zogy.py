@@ -153,7 +153,9 @@ psffit_sex = False            # perform PSF fitting using SExtractor
 
 source_nsigma = 5             # required S/N in total flux (optimal or psffit)
                               # for source to be included in output catalog
-
+                              # this also determines level of limiting flux
+                              # and magnitudes of images
+                              
 # Photometric calibration
 # telescope latitude in degrees (North)
 obs_lat = {'ML1': -32.37989, 'BG': -29.25747}  
