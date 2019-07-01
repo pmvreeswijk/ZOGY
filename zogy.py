@@ -57,7 +57,7 @@ warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.9'
+__version__ = '0.9.1'
 
 
 ################################################################################
@@ -589,7 +589,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         finally:
             # add header keyword(s):
             header_zogy['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
-            header_zogy['Z-V'] = (__version__, 'ZOGY version used')
             header_zogy['Z-REF'] = (base_ref.split('/')[-1]+'.fits', 'name reference image')
             header_zogy['Z-SIZE'] = (get_par(C.subimage_size,tel), '[pix] size of (square) ZOGY subimages')
             header_zogy['Z-BSIZE'] = (get_par(C.subimage_border,tel), '[pix] size of ZOGY subimage borders')
@@ -2502,7 +2501,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
                             fwhm_moffat, elong_moffat, chi2_moffat])
         
     list2return = [elem for sublist in list2return for elem in sublist] 
-    print ('np.shape(list2return)', np.shape(list2return))
+
     return list2return
         
 
@@ -4915,12 +4914,12 @@ def fit_moffat(psf_ima, nx, ny, header, pixscale, base_output, log,
     params.add('background', value=0, min=-1, max=1, vary=True)
         
     if fit_gauss:
-        params.add('sigma1', value=5, min=0, max=psf_size, vary=True)
-        params.add('sigma2', value=5, min=0, max=psf_size, vary=True)
+        params.add('sigma1', value=1, min=0.01, max=psf_size/4, vary=True)
+        params.add('sigma2', value=1, min=0.01, max=psf_size/4, vary=True)
     else:
-        params.add('beta', value=5, min=0, max=psf_size, vary=True)
-        params.add('alpha1', value=5, min=0, max=psf_size, vary=True)
-        params.add('alpha2', value=5, min=0, max=psf_size, vary=True)
+        params.add('beta', value=1, min=0.01, vary=True)
+        params.add('alpha1', value=1, min=0.01, max=psf_size/4, vary=True)
+        params.add('alpha2', value=1, min=0.01, max=psf_size/4, vary=True)
     
         
     for i in range(nsubs):
@@ -5133,27 +5132,22 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     y0 = p['y0']
     y0err = result.params['y0'].stderr
 
+    # this block is to display the images related to the best-fit model
     if False:
-    
         if fit_gauss:
-        
             print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red:',
                    xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red)
-        
             model_ima = EllipticalGauss2D (xx, yy, x0=x0, y0=y0,
                                            sigma1=sigma1, sigma2=sigma2,
                                            theta=theta, amplitude=amplitude,
                                            background=p['background'])
         else:
-        
             print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta:',
                    xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta)
-        
             model_ima = EllipticalMoffat2D (xx, yy, x0=x0, y0=y0, beta=beta,
                                             alpha1=alpha1, alpha2=alpha2,
                                             theta=theta, amplitude=amplitude,
                                             background=p['background'])
-
         diff = image - model_ima
         ds9_arrays(image=image, model_ima=model_ima, diff=diff, err=image_err)
 
@@ -5166,27 +5160,38 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
         
 ################################################################################
 
-# alternative from http://www.aspylib.com/doc/aspylib_fitting.html
-
-def EllipticalMoffat2D (x, y, x0=0, y0=0, beta=1, alpha1=1, alpha2=1, 
-                        theta=0, amplitude=1, background=0):
+def Elliptical2D_abc (x0, y0, x, y, xstd, ystd, theta_rad):
     
-    # input theta is assumed to be in degrees
-    theta_rad = theta*np.pi/180
+    # these a,b,c defintions are consistent with info on Gaussian 2D
+    # in astropy:
+    # https://docs.astropy.org/en/stable/api/astropy.modeling.functional_models.Gaussian2D.html
+    # this function can be used for both the Moffat and Gauss 2D functions
+    #
+    # with sin (2*theta) = 2 * sin(theta) * cos(theta), and switching
+    # around B and C, these are identical same as the definitions at:
+    # http://www.aspylib.com/doc/aspylib_fitting.html
     
-    A = ((np.cos(theta_rad) / alpha1)**2 + 
-         (np.sin(theta_rad) / alpha2)**2)
-    B = ((np.sin(theta_rad) / alpha1)**2 + 
-         (np.cos(theta_rad) / alpha2)**2)
-    C = 2 * np.sin(theta_rad) * np.cos(theta_rad) * (alpha1**-2 - alpha2**-2)
-    
+    cost2 = np.cos(theta_rad) ** 2
+    sint2 = np.sin(theta_rad) ** 2
+    sin2t = np.sin(2 * theta_rad)
+    xstd2 = xstd ** 2
+    ystd2 = ystd ** 2
     xdiff = x - x0
     ydiff = y - y0
-    S0 = background
-    S1 = amplitude
     
-    return S0 + S1*(1 + A*xdiff**2 + B*ydiff**2 + C*xdiff*ydiff)**-beta
+    a = ((cost2 / xstd2) + (sint2 / ystd2))
+    b = ((sin2t / xstd2) - (sin2t / ystd2))
+    c = ((sint2 / xstd2) + (cost2 / ystd2))
     
+    return a * xdiff**2 + b * xdiff * ydiff + c * ydiff**2
+
+    
+def EllipticalMoffat2D (x, y, x0=0, y0=0, beta=1, alpha1=1, alpha2=1,
+                        theta=0, amplitude=1, background=0):
+    
+    rr_gg = Elliptical2D_abc (x0, y0, x, y, alpha1, alpha2, theta*np.pi/180)
+    return background + amplitude * (1 + rr_gg) ** (-beta)
+
 
 # function to convert Moffat alpha and beta to FWHM
 def alpha2fwhm (alpha, beta):
@@ -5195,26 +5200,14 @@ def alpha2fwhm (alpha, beta):
 
 ################################################################################
 
-# see also http://www.aspylib.com/doc/aspylib_fitting.html
+# similar function for Gaussian 2D as for EllipticalMoffat function above
 
 def EllipticalGauss2D (x, y, x0=0, y0=0, sigma1=1, sigma2=1, 
                        theta=0, amplitude=1, background=0):
     
-    # input theta is assumed to be in degrees
-    theta_rad = theta*np.pi/180
-    
-    A = ((np.cos(theta_rad) / sigma1)**2 + 
-         (np.sin(theta_rad) / sigma2)**2)
-    B = ((np.sin(theta_rad) / sigma1)**2 + 
-         (np.cos(theta_rad) / sigma2)**2)
-    C = 2 * np.sin(theta_rad) * np.cos(theta_rad) * (sigma1**-2 - sigma2**-2)
-
-    xdiff = x - x0
-    ydiff = y - y0
-    S0 = background
-    S1 = amplitude
-    
-    return S0 + S1*np.exp(-0.5*(A*xdiff**2 + B*ydiff**2 + C*xdiff*ydiff))
+    # note: theta input is assumed to be in degrees
+    abc = Elliptical2D_abc (x0, y0, x, y, sigma1, sigma2, theta*np.pi/180)
+    return background + amplitude * np.exp(-0.5*abc)
 
 
 # function to convert Gaussian sigma to FWHM
