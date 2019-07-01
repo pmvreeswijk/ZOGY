@@ -158,11 +158,11 @@ source_nsigma = 5             # required S/N in total flux (optimal or psffit)
                               
 # Photometric calibration
 # telescope latitude in degrees (North)
-obs_lat = {'ML1': -32.37989, 'BG': -29.25747}  
+obs_lat = {'ML1': -32.3799, 'BG': -29.2575}  
 # telescope longitude in degrees (East); BlackGEM: -70.73797
-obs_lon = {'ML1': 20.81122, 'BG': -70.73797}
+obs_lon = {'ML1': 20.8112, 'BG': -70.7380}
 # telescope height in meters above sealevel; BlackGEM: 2343.
-obs_height = {'ML1': 1802, 'BG': 2348}
+obs_height = {'ML1': 1803, 'BG': 2348}
 # observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
 obs_timezone = {'ML1': 'Africa/Johannesburg', 'BG': 'America/Santiago'}
 # these [ext_coeff] are mean extinction estimates for Sutherland in
