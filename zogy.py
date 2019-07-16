@@ -5734,6 +5734,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            #'--no-verify', 
            #'--verbose',
            #'--verbose',
+           '--crpix-center',
            #'--parity', 'neg',
            #'--code-tolerance', str(0.01), 
            #'--quad-size-min', str(0.1),
@@ -5891,7 +5892,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         index_field = np.where(mask_field)[0]
         # N.B.: this [data_cal] array is returned by this function
         # [run_wcs] and also by [run_wcs] so that it can be re-used
-        # for the the photometric calibration in [prep_optimal_subtraction]
+        # for the photometric calibration in [prep_optimal_subtraction]
         data_cal = data_cal[index_field]
         ra_ast = data_cal['ra']
         dec_ast = data_cal['dec']
