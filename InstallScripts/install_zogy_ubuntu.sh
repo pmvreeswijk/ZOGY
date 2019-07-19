@@ -106,7 +106,7 @@ sudo ${packman} -y install saods9
 # download calibration catalog
 # ================================================================================
 
-url="https://storage.googleapis.com/meerlicht-cal"
+url="https://storage.googleapis.com/blackbox-auxdata"
 
 # with Kurucz templates
 sudo wget -nc $url/photometry/ML_calcat_kur_allsky_ext1deg_20181115.fits.gz -P ${ZOGYHOME}/CalFiles/
