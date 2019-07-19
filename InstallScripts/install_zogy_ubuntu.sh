@@ -78,6 +78,31 @@ git clone ${zogy_branch} https://github.com/pmvreeswijk/ZOGY
 sudo -H ${pip} install git+git://github.com/pmvreeswijk/ZOGY${v_zogy_git}
 
 
+# packages used by ZOGY
+# ================================================================================
+
+# Astrometry.net
+sudo ${packman} -y install astrometry.net
+
+# SExtractor (although it seems already installed automatically)
+sudo ${packman} -y install sextractor
+# the executable for this installation is 'sextractor' while ZOGY
+# expects 'sex'; make a symbolic link
+sudo ln -s /usr/bin/sextractor /usr/bin/sex
+
+# SWarp
+sudo ${packman} -y install swarp
+# the executable for this installation is 'SWarp' while ZOGY expects
+# 'swarp'; make a symbolic link
+sudo ln -s /usr/bin/SWarp /usr/bin/swarp
+
+# PSFEx - this basic install does not allow multi-threading
+sudo ${packman} -y install psfex
+
+# ds9
+sudo ${packman} -y install saods9
+
+
 # download calibration catalog
 # ================================================================================
 
@@ -117,31 +142,6 @@ sudo wget -nc $url/astrometry/index-500{4..6}-0{0..9}.fits -P ${dir_save}
 sudo wget -nc $url/astrometry/index-500{4..6}-1{0..1}.fits -P ${dir_save}
 
 
-# packages used by ZOGY
-# ================================================================================
-
-# Astrometry.net
-sudo ${packman} -y install astrometry.net
-
-# SExtractor (although it seems already installed automatically)
-sudo ${packman} -y install sextractor
-# the executable for this installation is 'sextractor' while ZOGY
-# expects 'sex'; make a symbolic link
-sudo ln -s /usr/bin/sextractor /usr/bin/sex
-
-# SWarp
-sudo ${packman} -y install swarp
-# the executable for this installation is 'SWarp' while ZOGY expects
-# 'swarp'; make a symbolic link
-sudo ln -s /usr/bin/SWarp /usr/bin/swarp
-
-# PSFEx - this basic install does not allow multi-threading
-sudo ${packman} -y install psfex
-
-# ds9
-sudo ${packman} -y install saods9
-
-
 # set environent variables:
 # ================================================================================
 
@@ -163,6 +163,9 @@ then
     echo "else"
     echo "    export PYTHONPATH=\${PYTHONPATH}:${zogyhome}:${zogyhome}/Settings"
     echo "fi"
+    echo
+    echo "# python alias"
+    echo "alias python=python${v_python}"
 fi
 
 if [[ ${SHELL} == *"csh"* ]]
@@ -173,16 +176,11 @@ then
     echo "else"
     echo "    setenv PYTHONPATH ${zogyhome}:${zogyhome}/Settings"
     echo "endif"
+    echo 
+    echo "# python alias"
+    echo "alias python python${v_python}"
 fi
 
-echo "To make this the default Python or Python 3 (i.e., the version run by"
-echo "the python or python3 commands), run one or both of:"
-echo
-echo "    sudo port select --set python python${v_python/./}"
-echo "    sudo port select --set python3 python${v_python/./}"
 echo
 echo "======================================================================"
 echo
-
-
-
