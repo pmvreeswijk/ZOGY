@@ -39,16 +39,17 @@ Suggested steps to get started:
 
 (6) some examples how to run it:
 
-    - run it on a "new.fits" and "reference.fits" using the default MeerLICHT settings:
-      python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits
+    --> run it on a "new.fits" and "reference.fits" using the default MeerLICHT settings:
 
-    - instead of MeerLICHT, use the dictionary keys corresponding to "mytelescope" defined in the settings file:
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits
+
+    --> instead of MeerLICHT, use the dictionary keys corresponding to "mytelescope" defined in the settings file:
     
-      python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope mytelescope
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope mytelescope
       
-    - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images (depending on whether copy does contains dictionaries for some parameters or not, the telescope input parameter should be provided or not):
+    --> instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images (depending on whether copy does contains dictionaries for some parameters or not, the telescope input parameter should be provided or not):
     
-      python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope mytelescope]
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope mytelescope]
 
 
 This project is licensed under the terms of the MIT license.
