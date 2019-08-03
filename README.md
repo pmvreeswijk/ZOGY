@@ -39,22 +39,28 @@ Suggested steps to get started:
 
 (6) some examples how to run it:
 
-    - run it on a "new.fits" and "reference.fits" using the default MeerLICHT settings:
+    - run it on a "new.fits" and "ref.fits" using the default MeerLICHT settings:
 
-    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
     
 
     - instead of MeerLICHT, use the dictionary keys corresponding to "my_tel" defined in the settings file:
     
-    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope my_tel
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --telescope my_tel
       
 
     - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images
       (depending on whether copy does contains dictionaries for some parameters or not, the telescope input 
        parameter should be provided or not):
     
-    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope my_tel]
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
 
+
+    - if you have mask images available (settings parameters [transient_mask_max] and [mask_value]
+      should be updated if your masks contain different values for the mask pixel type; 
+      the keys cannot be changed):
+
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --new_fits_mask new_mask.fits --ref_fits ref.fits --ref_fits_mask ref_mask.fits --set_file mycopy [--telescope my_tel]
 
 
 This project is licensed under the terms of the MIT license.
