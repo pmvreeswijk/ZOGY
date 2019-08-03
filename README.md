@@ -56,9 +56,8 @@ Suggested steps to get started:
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
 
 
-    - if you have mask images available (settings parameters [transient_mask_max] and [mask_value]
-      should be updated if your masks contain different values for the mask pixel type; 
-      the keys cannot be changed):
+    - if you have mask images available (settings parameters [transient_mask_max] and [mask_value] should be
+      updated if your masks contain different values for the mask pixel type; the keys cannot be changed):
 
     python [some path]/ZOGY/zogy.py --new_fits new.fits --new_fits_mask new_mask.fits --ref_fits ref.fits --ref_fits_mask ref_mask.fits --set_file mycopy [--telescope my_tel]
 
