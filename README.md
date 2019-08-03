@@ -44,16 +44,16 @@ Suggested steps to get started:
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits
     
 
-    - instead of MeerLICHT, use the dictionary keys corresponding to "mytelescope" defined in the settings file:
+    - instead of MeerLICHT, use the dictionary keys corresponding to "my_tel" defined in the settings file:
     
-    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope mytelescope
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope my_tel
       
 
     - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images
       (depending on whether copy does contains dictionaries for some parameters or not, the telescope input 
        parameter should be provided or not):
     
-    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope mytelescope]
+    python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope my_tel]
 
 
 
