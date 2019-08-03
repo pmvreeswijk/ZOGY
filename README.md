@@ -20,4 +20,35 @@ In InstallScripts you will find bash scripts to help with the full installation 
 
 Warning: this module is still being developed and has so far been tested on KMTNet and MeerLICHT images. It is designed specifically to be included in the MeerLICHT and BlackGEM pipelines, but we hope that it will be useful to apply to images of other telescopes as well.
 
+
+Suggested steps to get started:
+
+(1) download one of the install scripts, e.g. for mac OS:
+
+    wget https://raw.githubusercontent.com/pmvreeswijk/ZOGY/master/InstallScripts/install_zogy_macos.sh
+
+(2) read through the install script to make sure that it won't interfere with your present set-up, e.g. the python version
+
+(3) execute the script in a folder where you'd like the ZOGY folder with python modules and settings/configuration subfolders to be created
+
+(4) edit the settings file located in [some path]/ZOGY/Settings/set_zogy.py to adapt it to your images and their headers. For telescope-dependent parameters, you could add your telescope name to the keys with the corresponding value for that parameter, which will then be used if the telescope input parameter (see below) is set (default: "ML1" - MeerLICHT). If a parameter is not a dictionary but a single value, that will be used regardless of the telescope input parameter.
+
+(5) check out the main input parameters:
+
+    python [some path]/ZOGY/zogy.py -h
+
+(6) some examples how to run it:
+
+    - run it on a "new.fits" and "reference.fits" using the default MeerLICHT settings:
+      python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits
+
+    - instead of MeerLICHT, use the dictionary keys corresponding to "mytelescope" defined in the settings file:
+    
+      python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope mytelescope
+      
+    - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images (depending on whether copy does contains dictionaries for some parameters or not, the telescope input parameter should be provided or not):
+    
+      python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope mytelescope]
+
+
 This project is licensed under the terms of the MIT license.
