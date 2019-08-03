@@ -31,7 +31,7 @@ Suggested steps to get started:
 
 (3) execute the script in a folder where you'd like the ZOGY folder with python modules and settings/configuration subfolders to be created
 
-(4) edit the settings file located in [some path]/ZOGY/Settings/set_zogy.py to adapt it to your images and their headers. For telescope-dependent parameters, you could add your telescope name to the keys with the corresponding value for that parameter, which will then be used if the telescope input parameter (see below) is set (default: "ML1" - MeerLICHT). If a parameter is not a dictionary but a single value, that will be used regardless of the telescope input parameter.
+(4) edit the settings file located in [some path]/ZOGY/Settings/set_zogy.py to adapt it to your images and their headers. For telescope-dependent parameters, you could add your telescope name to the keys with the corresponding value for that parameter, which will then be used if the telescope input parameter (see below) is set (default: "ML1" for MeerLICHT). If a parameter is not a dictionary but a single value, that value will be used regardless of the telescope input parameter.
 
 (5) check out the main input parameters:
 
@@ -49,7 +49,9 @@ Suggested steps to get started:
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --telescope mytelescope
       
 
-    - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images (depending on whether copy does contains dictionaries for some parameters or not, the telescope input parameter should be provided or not):
+    - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images
+      (depending on whether copy does contains dictionaries for some parameters or not, the telescope input 
+       parameter should be provided or not):
     
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits reference.fits --set_file mycopy [--telescope mytelescope]
 
