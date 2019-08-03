@@ -50,7 +50,7 @@ Suggested steps to get started:
       
 
     - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images
-      (depending on whether copy does contains dictionaries for some parameters or not, the telescope input 
+      (depending on whether copy contains dictionaries for some parameters or not, the telescope input 
        parameter should be provided or not):
     
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
