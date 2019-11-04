@@ -1,9 +1,12 @@
 
+
 import argparse
 import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
 from astropy.table import Table
+from astropy.stats import sigma_clipped_stats
+#import bottleneck as bn
 import numpy as np
 #import numpy.fft as fft
 import matplotlib
@@ -57,7 +60,7 @@ warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 #from memory_profiler import profile
 #import objgraph
 
-__version__ = '0.9.1'
+__version__ = '0.9.2'
 
 
 ################################################################################
@@ -407,7 +410,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             result = run_remap(base_new+'.fits', base_ref+'.fits', ref_fits_remap,
                                [ysize_new, xsize_new], gain=gain_new, log=log,
                                config=get_par(C.swarp_cfg,tel),
-                               resampling_type=resampling_type, resample='Y')
+                               resampling_type=resampling_type, resample='Y',
+                               timing=get_par(C.timing,tel))
         except Exception as e:
             log.info(traceback.format_exc())
             log.error('exception was raised during [run_remap]: {}'.format(e))  
@@ -2483,7 +2487,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
     pool.map(loop_psfoptflux_xycoords, range(ncoords), chunksize=1000)
     pool.close()
     pool.join()
-    if get_par(C.verbose,tel): log.info('ncoords: {}'.format(ncoords))
+    #if get_par(C.verbose,tel): log.info('ncoords: {}'.format(ncoords))
 
     
     if get_par(C.timing,tel):
@@ -2958,17 +2962,22 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0
 
     mean_old = float('inf')
     for i in range(max_iters):
-        if not use_median:
-            mean = array.mean()
+        if array.size > 0:
+            if not use_median:
+                mean = array.mean()
+            else:
+                mean = np.median(array)
+            std = array.std()
+            if abs(mean_old-mean)/abs(mean) < epsilon:
+                break
+            mean_old = mean
+            index = ((array>(mean-nsigma*std)) & (array<(mean+nsigma*std)))
+            array = array[index]
         else:
-            mean = np.median(array)
-        std = array.std()
-        if abs(mean_old-mean)/abs(mean) < epsilon:
+            array = np.zeros(1)
             break
-        mean_old = mean
-        index = ((array>(mean-nsigma*std)) & (array<(mean+nsigma*std)))
-        array = array[index]
-    
+
+            
     # make sure to calculate mean if median was used in clipping
     if use_median:
         mean = array.mean()
@@ -3132,7 +3141,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_bkg_mini = read_hdulist (fits_bkg_mini, dtype='float32')
         data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
                               order_interp=2, 
-                              bkg_boxsize=get_par(C.bkg_boxsize,tel))
+                              bkg_boxsize=get_par(C.bkg_boxsize,tel),
+                              timing=get_par(C.timing,tel))
 
     # same for background std image
     fits_bkg_std = base+'_bkg_std.fits'
@@ -3143,7 +3153,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         fits_bkg_std_mini = base+'_bkg_std_mini.fits'
         data_bkg_std_mini = read_hdulist (fits_bkg_std_mini, dtype='float32')
         data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape, log,
-                                  order_interp=1, bkg_boxsize=get_par(C.bkg_boxsize,tel))
+                                  order_interp=1,
+                                  bkg_boxsize=get_par(C.bkg_boxsize,tel),
+                                  timing=get_par(C.timing,tel))
 
     # function to create a minimal mask of saturated pixels and the
     # adjacent pixels from input data, in case mask image is not
@@ -3221,7 +3233,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                    config=get_par(C.swarp_cfg,tel),
                                    resampling_type='NEAREST',
                                    dtype=data2remap.dtype.name,
-                                   value_edge=value_edge)
+                                   value_edge=value_edge,
+                                   timing=get_par(C.timing,tel))
                 data_remapped = read_hdulist (fits_out)
                 return data_remapped
                 
@@ -4387,9 +4400,10 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
 
 ################################################################################
 
-def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
+def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None,
+               timing=True):
     
-    if get_par(C.timing,tel): t = time.time()
+    if timing: t = time.time()
     log.info('Executing mini2back ...')
 
     # resize low-resolution meshes, with order [order_interp], where
@@ -4397,7 +4411,7 @@ def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
     # order=1: bilinear spline interpolation
     # order=2: quadratic spline interpolation
     # order=3: cubic spline interpolation
-    background = ndimage.zoom(mini_filt, get_par(C.bkg_boxsize,tel), order=order_interp)
+    background = ndimage.zoom(mini_filt, bkg_boxsize, order=order_interp)
 
     # if shape of the background is not equal to input [data]
     # then pad the background images
@@ -4414,8 +4428,8 @@ def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None):
         #                                                                   ysize, xsize, log,
         #                                                                   get_remainder=True)
         # these now include the remaining patches
-                        
-    if get_par(C.timing,tel):
+        
+    if timing:
         log_timing_memory (t0=t, label='mini2back', log=log)
         
     return background
@@ -4450,9 +4464,11 @@ def get_median_std (nsub, cuts_ima, data, mask_use, mask_minsize, clip, log=None
     if np.sum(mask_sub) > mask_minsize:
         if clip:
             # get clipped_stats mean, std and median 
-            mean, std, median = clipped_stats(
-                data_sub[mask_sub], clip_upper_frac=0,
-                nsigma=get_par(C.bkg_nsigma,tel), log=log)
+            mean, median, std = sigma_clipped_stats (
+                data_sub[mask_sub], sigma=get_par(C.bkg_nsigma,tel))
+            #mean, std, median = clipped_stats(
+            #    data_sub[mask_sub], clip_upper_frac=0,
+            #    nsigma=get_par(C.bkg_nsigma,tel), log=log)
         else:
             median = np.median(data_sub[mask_sub])
             std = np.std(data_sub[mask_sub])
@@ -6193,7 +6209,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
               gain, log, config=None, resample='Y', resampling_type='LANCZOS3',
               projection_err=0.001, mask=None, header_only='N',
               resample_suffix='_resamp.fits', resample_dir='.', dtype='float32',
-              value_edge=0):
+              value_edge=0, timing=True):
         
     """Function that remaps [image_ref] onto the coordinate grid of
        [image_new] and saves the resulting image in [image_out] with
@@ -6208,7 +6224,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     # needs some further testing
     run_alt = True
     
-    if get_par(C.timing,tel): t = time.time()
+    if timing: t = time.time()
     log.info('Executing run_remap ...')
 
     header_new = read_hdulist (image_new, get_data=False, get_header=True)
@@ -6301,7 +6317,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         header_out['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(image_out, data_remap, header_out, overwrite=True)
     
-    if get_par(C.timing,tel):
+    if timing:
         log_timing_memory (t0=t, label='run_remap', log=log)
 
     return
@@ -6679,10 +6695,12 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             # and std of backgroun regions into full background image and
             # its standard deviation
             data_bkg = mini2back (data_bkg_mini, data.shape, log, order_interp=2, 
-                                  bkg_boxsize=get_par(C.bkg_boxsize,tel))
+                                  bkg_boxsize=get_par(C.bkg_boxsize,tel),
+                                  timing=get_par(C.timing,tel))
             data_bkg_std = mini2back (data_bkg_std_mini, data.shape, log,
                                       order_interp=1, 
-                                      bkg_boxsize=get_par(C.bkg_boxsize,tel))
+                                      bkg_boxsize=get_par(C.bkg_boxsize,tel),
+                                      timing=get_par(C.timing,tel))
             
             # if [npasses] greater than 1, subtract the background
             # from the image and save this to feed to SExtractor
