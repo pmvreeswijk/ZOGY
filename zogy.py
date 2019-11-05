@@ -35,6 +35,7 @@ from sip_tpv import sip_to_pv
 
 import resource
 from skimage import restoration, measure
+from skimage.util.shape import view_as_windows, view_as_blocks
 #import inpaint
 
 import logging
@@ -4310,137 +4311,99 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
         data_mask = read_hdulist (fits_mask, dtype='uint8')
         mask_reject |= (data_mask > 0)
 
-
-    # old method of looping over subimages, which is very slow if
-    # background box is small
-    if False:
-
-        # mask to use (opposite of mask_reject)
-        mask_use = ~mask_reject
+    # reshape the input image in a 3D array of shape (nysubs, nxsubs,
+    # number of pixels in background box), such that when taking
+    # median along last axis, the mini image with the medians of the
+    # subimages are immediately obtained; this needs to be done in a
+    # masked array to be able to discard pixels in the object mask
+    # (note that masked arrays consider mask values of True to be
+    # invalid, i.e. are not used)
+    data_masked = np.ma.masked_array(data, mask=mask_reject)
     
-        # loop through subimages the size of C.bkg_boxsize, and
-        # determine median from the masked data
-        ysize, xsize = data.shape
-        centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(get_par(C.bkg_boxsize,tel),
-                                                                           ysize, xsize, log)        
-        nsubs = centers.shape[0]
-
-        # loop subimages
-        if ysize % get_par(C.bkg_boxsize,tel) != 0 or xsize % get_par(C.bkg_boxsize,tel) !=0:
-            log.info('Warning: [C.bkg_boxsize] does not fit integer times in image')
-            log.info('         remaining pixels will be edge-padded')
-        nysubs = int(ysize / get_par(C.bkg_boxsize,tel))
-        nxsubs = int(xsize / get_par(C.bkg_boxsize,tel))
-        # prepare output median and std output arrays
-        mini_median = np.ndarray(nsubs, dtype='float32')
-        mini_std = np.ndarray(nsubs, dtype='float32')
-
-        # minimum fraction of background subimage pixels not to be
-        # affected by the object mask
-        mask_minsize = 0.5*get_par(C.bkg_boxsize,tel)**2
-    
-        # loop over background subimages and determine
-        # their median and standard deviation
-        for nsub in range(nsubs):
-            mini_median[nsub], mini_std[nsub] = get_median_std(
-                nsub, cuts_ima, data, mask_use, mask_minsize, clip, log=None)
-    
-        # reshape and transpose
-        mini_median = mini_median.reshape((nxsubs, nysubs)).transpose()
-        mini_std = mini_std.reshape((nxsubs, nysubs)).transpose()
-
-
-    if True:
-
-        print ('time spent at start of new method: {}'.format(time.time()-t))
+    # image size and number of background boxes along x and y
+    ysize, xsize = data.shape
+    boxsize = get_par(C.bkg_boxsize,tel)
+    if ysize % boxsize != 0 or xsize % boxsize !=0:
+        log.info('Warning: [C.bkg_boxsize] does not fit integer times in image')
+        log.info('         remaining pixels will be edge-padded')
+    nysubs = int(ysize / boxsize)
+    nxsubs = int(xsize / boxsize)
         
-        # new method to reshape the input image in a 3D array of shape
-        # (nysubs, nxsubs, #pixels in background box), such that when
-        # taking median along last axis, the mini image with the medians
-        # of the subimages are immediately obtained; this needs to be done
-        # in a masked array to be able to discard pixels in the object
-        # mask (note that masked arrays consider mask values of True to be
-        # invalid and are not used)
-        data_masked = np.ma.masked_array(data, mask=mask_reject)
-
-        # image size and number of background boxes along x and y
-        ysize, xsize = data.shape
-        boxsize = get_par(C.bkg_boxsize,tel)
-        if ysize % boxsize != 0 or xsize % boxsize !=0:
-            log.info('Warning: [C.bkg_boxsize] does not fit integer times in image')
-            log.info('         remaining pixels will be edge-padded')
-        nysubs = int(ysize / boxsize)
-        nxsubs = int(xsize / boxsize)
-        print ('bkg_boxsize: {}, nxsubs: {}, nysubs: {}'
-               .format(boxsize, nxsubs, nysubs))
-        
-        # reshape
-        data_masked_reshaped = data_masked.reshape(
-            nysubs,boxsize,-1,boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
-        print ('data_masked_reshaped.shape: {}'.format(data_masked_reshaped.shape))
-
-        # get clipped statistics
-        mini_mean, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped, sigma=get_par(C.bkg_nsigma,tel), axis=2)
-
-        # minimum fraction of background subimage pixels not to be
-        # affected by the or combination of object mask and image mask
-        mask_minsize = 0.5*get_par(C.bkg_boxsize,tel)**2
-        # if number of valid pixels along axis 2 is less than [mask_minsize]
-        # then set that background box' median to zero
-        sum_bad_pixels = np.sum(data_masked_reshaped.mask, axis=2)
-        mask_zero = (sum_bad_pixels >= mask_minsize)
-        mini_median[mask_zero] = 0
-        mini_std[mask_zero] = 0
-        # set any possible nans to zero
-        #mini_median[~np.isfinite(mini_median)] = 0
-        #mini_std[~np.isfinite(mini_std)] = 0
-
-
-
-    # function to use in ndimage.filters.generic_filter below
-    def filt_median(array):
-        mask_nonzero = (array != 0)
-        if np.sum(mask_nonzero) > 0:
-            return np.median(array[mask_nonzero])
-        else:
-            return 0
-
-
-    mini_median_orig = np.copy(mini_median)
-    mini_std_orig = np.copy(mini_std)
+    # reshape
+    data_masked_reshaped = data_masked.reshape(
+        nysubs,boxsize,-1,boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
+    # could also use skimage.util.shape.view_as_blocks:
+    #block_shape = (boxsize, boxsize)
+    #data_masked_reshaped = view_as_blocks(data_masked, block_shape).reshape(
+    #    nysubs, nxsubs, -1)
     
-    # for subimages with zero values for medians and stds, adopt the
-    # corresponding values of their surrounding subimages (rather than
-    # the median of the full image as done previously)
-    struct = ndimage.generate_binary_structure(2, 1)
+    # get clipped statistics
+    mini_mean, mini_median, mini_std = sigma_clipped_stats (
+        data_masked_reshaped, sigma=get_par(C.bkg_nsigma,tel), axis=2)
+
+    # minimum fraction of background subimage pixels not to be
+    # affected by the OR combination of object mask and image mask
+    mask_minsize = 0.5*get_par(C.bkg_boxsize,tel)**2
+    # if number of valid pixels along axis 2 is less than [mask_minsize]
+    # then set that background box median to zero
+    sum_bad_pixels = np.sum(data_masked_reshaped.mask, axis=2)
+    mask_zero = (sum_bad_pixels >= mask_minsize)
+    mini_median[mask_zero] = 0
+    mini_std[mask_zero] = 0
+    # set any possible nans to zero
+    #mini_median[~np.isfinite(mini_median)] = 0
+    #mini_std[~np.isfinite(mini_std)] = 0
+
+
+    # helper function to return median filter, with size
+    # [filter_size], of array with mask (True=valid pixels)
+    def median_filter (array, mask, filter_size=3):
+        
+        # array shape
+        ysize, xsize = array.shape
+
+        # pad array with (filter_size-1)//2 pixels with value 0
+        dpix = int(filter_size-1)//2
+        array_pad = np.pad(array, (dpix,dpix), 'constant')
+        # and mask with value False
+        mask_pad = np.pad(mask, (dpix,dpix), 'constant')
+        
+        # using skimage.util.shape.view_as_windows to construct cubes
+        window_shape = (filter_size, filter_size)
+        array_cube = view_as_windows (array_pad, window_shape).reshape(
+            array.shape[0], array.shape[1], -1)
+        mask_cube = view_as_windows (mask_pad, window_shape).reshape(
+            mask.shape[0], mask.shape[1], -1)
+    
+        # create masked array
+        array_masked = np.ma.masked_array(array_cube, mask=~mask_cube)
+    
+        # return median filtered array
+        return np.ma.median(array_masked, axis=2)
+
+    
+    # fill zeros in mini_median with median of surrounding 3x3
+    # pixels, until no more zeros left
     while (np.sum(mini_median == 0) != 0):
+        mask_zero = (mini_median == 0)
+        mini_median_filt = median_filter (mini_median, ~mask_zero)
+        mini_median[mask_zero] = mini_median_filt[mask_zero]
         
-        # grow [mask_mini_nonzero] with 1 'pixel', such that subimages
-        # surrounded by zero subimages do not end up being zero after
-        # the median filtering
-        mask_mini_2replace = ndimage.binary_dilation((mini_median != 0), 
-                                                     structure=struct)
-        # set nonzero squares to False, such that [mask_mini_2replace]
-        # only contains subimages to be replaced
-        mask_mini_2replace[mini_median != 0] = False
+    # same for mini_std
+    while (np.sum(mini_std == 0) != 0):
+        mask_zero = (mini_std == 0)
+        mini_std_filt = median_filter (mini_std, ~mask_zero)
+        mini_std[mask_zero] = mini_std_filt[mask_zero]
 
-        # median filter 
-        mini_median_filt = ndimage.filters.generic_filter(mini_median, filt_median, 
-                                                          size=3, mode='reflect')
-        mini_std_filt = ndimage.filters.generic_filter(mini_std, filt_median, 
-                                                       size=3, mode='reflect')
-
-        # insert replaced values into original mini array
-        mini_median[mask_mini_2replace] = mini_median_filt[mask_mini_2replace]
-        mini_std[mask_mini_2replace] = mini_std_filt[mask_mini_2replace]
         
-        
-    # median filter the meshes with filter of size [C.bkg_filtersize]
+    # now that zeros are gone, median filter full images with
+    # filtersize defined in settings file
     size_filter = get_par(C.bkg_filtersize,tel)
+    # median filter the meshes with filter of size [C.bkg_filtersize]
     mini_median_filt = ndimage.filters.median_filter(mini_median, size_filter)
     mini_std_filt = ndimage.filters.median_filter(mini_std, size_filter)
-
+    
+            
     # estimate median and std of entire image from the values of the subimages
     bkg_median = np.median(mini_median_filt)
     bkg_std = np.median(mini_std_filt)
@@ -6745,7 +6708,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                         value=get_par(C.bkg_boxsize,tel))
             
             # now use function [mini2back] to turn filtered mesh of median
-            # and std of backgroun regions into full background image and
+            # and std of background regions into full background image and
             # its standard deviation
             data_bkg = mini2back (data_bkg_mini, data.shape, log, order_interp=2, 
                                   bkg_boxsize=get_par(C.bkg_boxsize,tel),
