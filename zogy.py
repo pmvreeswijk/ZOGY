@@ -1,4 +1,4 @@
-
+M
 
 import argparse
 import astropy.io.fits as fits
@@ -1432,6 +1432,12 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'RA_MOFFAT', 'DEC_MOFFAT', 
                           'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT']
 
+
+    # rename any of the keys using this dictionary, such as the
+    # pre-defined SExtractor column names
+    keys2rename = {'ALPHAWIN_J2000': 'RA_ICRS', 'DELTAWIN_J2000': 'DEC_ICRS'}
+    
+
     def get_col (key, key_new, data_key=None):
 
         # function that returns column definition based on input
@@ -1477,11 +1483,18 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 else:
                     columns.append(get_col (key, key_new))
         else:
+
+            # check if key needs to be renamed
+            if key in keys2rename.keys():
+                key_new = keys2rename[key]
+            else:
+                key_new = key
+                
             if cat_in is not None:
                 if key in data.dtype.names:
-                    columns.append(get_col (key, key, data[key]))
+                    columns.append(get_col (key, key_new, data[key]))
             else:
-                columns.append(get_col (key, key))
+                columns.append(get_col (key, key_new))
                 
 
     # add [thumbnails]
