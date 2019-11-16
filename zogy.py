@@ -1,4 +1,3 @@
-M
 
 import argparse
 import astropy.io.fits as fits
