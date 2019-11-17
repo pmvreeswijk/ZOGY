@@ -12,9 +12,7 @@ import matplotlib
 #matplotlib.use('PDF')
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import os
-import glob
-import subprocess
+import os, glob, subprocess, tempfile, shutil
 from scipy import ndimage
 import time
 import importlib
@@ -261,7 +259,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         return fwhm, fwhm_std, elong, elong_std
             
     # if [new_fits] is not defined, [fwhm_new]=None ensures that code
-    # does not crash in function [update_vignet_size] which uses both
+    # does not crash in function [get_vignet_size] which uses both
     # [fwhm_new] and [fwhm_max]
     fwhm_new = 0
     if new:
@@ -6479,7 +6477,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
 ################################################################################
 
-def update_vignet_size (sex_par_in, sex_par_out, imtype, log):
+def get_vignet_size (imtype, log):
 
     if imtype=="ref":
         # set vignet size to the value defined in [set_zogy.size_vignet_ref]
@@ -6509,18 +6507,6 @@ def update_vignet_size (sex_par_in, sex_par_out, imtype, log):
         else:
             # otherwise set it to the value defined for the ref image
             size_vignet = get_par(set_zogy.size_vignet_ref,tel)
-
-    # append the VIGNET size to the SExtractor parameter file
-    # [sex_par_in] and write it to a temporary file [sex_par_out] to
-    # be used by SExtractor
-    size_vignet_str = str((size_vignet, size_vignet))
-    with open(sex_par_in, 'rt') as file_in:
-        with open(sex_par_out, 'wt') as file_out:
-            for line in file_in:
-                file_out.write(line)
-            file_out.write('VIGNET'+size_vignet_str+'\n')
-        if get_par(set_zogy.verbose,tel):
-            log.info('VIGNET size: ' + str(size_vignet_str))
 
     return size_vignet
 
@@ -6598,25 +6584,32 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
     apphot_diams = np.array(get_par(set_zogy.apphot_radii,tel)) * 2 * fwhm
     apphot_diams_str = ",".join(apphot_diams.astype(str))
 
-    # update size of VIGNET
-    if update_vignet:
-        size_vignet = update_vignet_size (file_params, file_params+'_temp', imtype, log)
-        file_params = file_params+'_temp'
-        # write vignet_size to header
-        header['S-VIGNET'] = (size_vignet, '[pix] size square VIGNET used in SExtractor')
-        
-    if fits_mask is not None:
-        # and add line in parameter file to include IMAFLAG_ISO
-        if 'temp' in file_params:
-            with open(file_params, 'a') as myfile:
+    if update_vignet or fits_mask is not None:
+        # create named temporary file
+        f = tempfile.NamedTemporaryFile()
+        file_params_edited = f.name
+        f.close()
+        # copy original parameter file to temporary file
+        shutil.copy2(file_params, file_params_edited)
+    
+        # update size of VIGNET
+        if update_vignet:
+            size_vignet = get_vignet_size (imtype, log)
+            # write vignet_size to header
+            header['S-VIGNET'] = (size_vignet, '[pix] size square VIGNET used in SExtractor')
+            # append the VIGNET size to the temporary SExtractor
+            # parameter file created above
+            size_vignet_str = str((size_vignet, size_vignet))
+            with open(file_params_edited, 'a') as myfile:
+                myfile.write('VIGNET'+size_vignet_str+'\n')
+
+        if fits_mask is not None:
+            # and add line in parameter file to include IMAFLAG_ISO
+            with open(file_params_edited, 'a') as myfile:
                 myfile.write('IMAFLAGS_ISO\n')
-        else:
-            with open(file_params, 'rt') as file_in:
-                with open(file_params+'_temp', 'wt') as file_out:
-                    for line in file_in:
-                        file_out.write(line)
-                    file_out.write('IMAFLAGS_ISO\n')
-            file_params = file_params+'_temp'
+
+        # use edited version for parameter file
+        file_params = file_params_edited
 
 
     for npass in range(npasses):
@@ -6904,7 +6897,7 @@ def get_samp_PSF_config_size():
     # throughout this function, the maximum of [fwhm_new] and
     # [fwhm_ref] is used for the FWHM, so that for both the new and
     # ref image the [psf_size_config] is the same, which results in a
-    # better subtraction; see also the function [update_vignet_size]
+    # better subtraction; see also the function [get_vignet_size]
     # where this is also done
     
     # determine [psf_size_config] based on [set_zogy.psf_radius], which is
