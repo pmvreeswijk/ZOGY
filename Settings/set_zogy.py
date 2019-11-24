@@ -155,7 +155,13 @@ source_nsigma = 5             # required S/N in total flux (optimal or psffit)
                               # for source to be included in output catalog
                               # this also determines level of limiting flux
                               # and magnitudes of images
-                              
+
+# use measured background variance (True) or sky background level +
+# readnoise**2 (False) for background noise estimate, used in e.g.
+# optimal subtraction and photometry
+use_bkg_var = True
+
+
 # Photometric calibration
 # telescope latitude in degrees (North)
 obs_lat = {'ML1': -32.3799, 'BG': -29.2575}  
