@@ -159,7 +159,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     header_temp = hdulist[0].header
                 if header_temp['NAXIS'] != 2:
                     log.critical('input images need to be uncompressed')
-                    raise SystemExit
+                    raise RuntimeError
             else:
                 log.info('file {} does not exist'.format(image_fits))
         return ima_bool
@@ -169,7 +169,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     ref = set_bool (ref_fits)
     if not new and not ref:
         log.critical('no valid input image(s) provided')
-        raise SystemExit
+        raise RuntimeError
 
     # global parameters
     if new:
@@ -197,17 +197,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         for filename in filelist:
             if not os.path.isfile(filename):
                 log.critical('{} does not exist'.format(filename))
-                raise SystemExit
-            # modified date in log not really needed
-            #else:
-            #    # write date modified to log
-            #    with open(filename) as f:
-            #        lines = f.readlines()
-            #    for line in lines:
-            #        if '#' in line and 'date' in line.lower():
-            #            log.info('date stamp of {}: {}'
-            #                     .format(filename, line.strip().split()[-1]))
-            #            break
+                raise RuntimeError
+
 
     check_files([get_par(set_zogy.sex_cfg,tel), get_par(set_zogy.psfex_cfg,tel),
                  get_par(set_zogy.swarp_cfg,tel)], log)
@@ -443,8 +434,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     else:
         xsize = xsize_ref
         ysize = ysize_ref
-    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(get_par(set_zogy.subimage_size,tel),
-                                                                       ysize, xsize, log)
+
+    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(get_par(
+        set_zogy.subimage_size,tel), ysize, xsize, log)
+
     nxsubs = xsize/get_par(set_zogy.subimage_size,tel)
     nysubs = ysize/get_par(set_zogy.subimage_size,tel)
     
@@ -567,7 +560,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.timing,tel):
             t_zogypool = time.time()
 
-        log.info('Executing run_ZOGY on subimages ...')
+        log.info('executing run_ZOGY on subimages ...')
 
         # tried to use multithreading using Pool, but ran into error:
         # 'IOError: bad message length'
@@ -610,7 +603,26 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_zogypool, label='ZOGY pool', log=log)
-        
+
+
+        # reshape data cubes and write to fits
+        #border = get_par(set_zogy.subimage_border,tel)
+        #subsize = get_par(set_zogy.subimage_size,tel)
+        #nxsubs = xsize / subsize
+        #nysubs = ysize / subsize
+        #x1, y1 = border, border
+        #x2, y2 = x1+subsize, y1+subsize
+
+        #def reshape_write (data_cube):
+        #    n_ima = data_cube.shape[0]
+        #    if n_ima != nxsubs * nysubs:
+        #        log.error('number of images in cube: {} not equal to '
+        #                  'nxsubs x nysubs: {}'.format(n_ima, nxsubs*nysubs))
+        #    index_extract = tuple([slice(n_ima), slice(y1,y2), slice(x1,x2)])
+        #    return data_cube[index_extract].reshape(nysubs, nxsubs, subsize, subsize) \
+        #                                   .swapaxes(1,2).reshape(ysize, xsize)
+
+            
         # loop over results from pool and paste subimages
         # into output images
 
@@ -1898,20 +1910,26 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     #     and Fpsferr, which should be possible as the PSF is
     #     better sampled than the image pixels   
     
-    # use [get_psfoptflux_xycoords] to perform a PSF fit to D
+    def help_psffit_D (mk, psffit, moffat):
+
+        # use [get_psfoptflux_xycoords] to perform a PSF fit to D
+        results = get_psfoptflux_xycoords (
+            psfex_bintable_new, data_D, 0.0, data_newref_mask, readnoise,
+            x_peak[mk], y_peak[mk], bkg_var=bkg_var,
+            psffit=psffit, moffat=moffat,
+            psfex_bintable_ref=psfex_bintable_ref, 
+            xcoords_ref=x_peak_ref[mk], ycoords_ref=y_peak_ref[mk], 
+            header_new=header_new, header_ref=header_ref, log=log)
+
+        return results
+
+
+    # PSF fit to D
     mk = mask_keep
-    results = get_psfoptflux_xycoords (
-        psfex_bintable_new, data_D, 0.0, data_newref_mask, readnoise,
-        x_peak[mk], y_peak[mk], bkg_var=bkg_var,
-        psffit=True, moffat=False,
-        psfex_bintable_ref=psfex_bintable_ref, 
-        xcoords_ref=x_peak_ref[mk], ycoords_ref=y_peak_ref[mk], 
-        header_new=header_new, header_ref=header_ref, log=log)
-     
     flux_opt_D[mk], fluxerr_opt_D[mk], flux_psf_D[mk], fluxerr_psf_D[mk], \
         x_psf_D[mk], y_psf_D[mk], chi2_psf_D[mk], xerr_psf_D[mk], yerr_psf_D[mk] \
-        = results
-
+        = help_psffit_D (mk, True, False)
+    
     # add mask_finite, checking if .._psf_D arrays contain finite values
     mask_finite = np.ones(nregions, dtype=bool)
     list2check = [flux_psf_D, fluxerr_psf_D, x_psf_D, xerr_psf_D, y_psf_D, 
@@ -1920,6 +1938,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         mask_finite &= np.isfinite(l)
    
     print ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
+
 
     # filter out transient candidates with high chi2 values
     chi2_max = get_par(set_zogy.chi2_red_max,tel)
@@ -1936,19 +1955,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                                  radius=5., width=2, color='green')
 
 
-    # use [get_psfoptflux_xycoords] to perform a Moffat fit to D
+    # Moffat fit to D
     mk = mask_keep
-    results = get_psfoptflux_xycoords (
-        psfex_bintable_new, data_D, 0.0, data_newref_mask, readnoise,
-        x_peak[mk], y_peak[mk], bkg_var=bkg_var,
-        psffit=False, moffat=True,
-        psfex_bintable_ref=psfex_bintable_ref, 
-        xcoords_ref=x_peak_ref[mk], ycoords_ref=y_peak_ref[mk], 
-        header_new=header_new, header_ref=header_ref, log=log)
-
     flux_opt_D[mk], fluxerr_opt_D[mk], x_moffat[mk], xerr_moffat[mk], \
         y_moffat[mk], yerr_moffat[mk], fwhm_moffat[mk], elong_moffat[mk], \
-        chi2_moffat[mk] = results
+        chi2_moffat[mk] = help_psffit_D (mk, False, True)
 
     # add mask_finite, checking if .._moffat arrays contain finite values
     mask_finite = np.ones(nregions, dtype=bool)
@@ -2216,7 +2227,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
 
     """
         
-    log.info('Executing get_psfoptflux_xycoords ...')
+    log.info('executing get_psfoptflux_xycoords ...')
     if get_par(set_zogy.timing,tel): t = time.time()
 
     # make sure x and y have same length
@@ -2555,8 +2566,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, S, D_mask, RON, xcoords, ycoords
                         D_sub_err = np.sqrt(np.abs(D_sub) + bkg_var_sub)
                     else:
                         D_sub_err = np.sqrt(np.abs(D_sub) + RON**2 + np.abs(S_sub))
-                        
-                    # fit moffoat
+
+                    # fit moffat
                     x_moffat[i], xerr_moffat[i], y_moffat[i], yerr_moffat[i], \
                         fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
                             fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
@@ -3076,7 +3087,7 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0
                   use_median=False, log=None):
 
     if verbose and get_par(set_zogy.timing,tel) and log is not None:
-        log.info('Executing clipped_stats ...')
+        log.info('executing clipped_stats ...')
         t = time.time()
 
     # remove zeros
@@ -3173,9 +3184,9 @@ def read_header(header, keywords, log):
     # loop keywords
     for key in keywords:
         # use function [get_keyvalue] (see below) to return the value
-        # from either the variable defined in Constants module, or
-        # from the fits header using the keyword name defined in the
-        # Constants module
+        # from either the variable defined in settings file, or from
+        # the fits header using the keyword name defined in the
+        # settings file
         values.append(get_keyvalue(key, header, log))
 
     if len(values)==1:
@@ -3188,25 +3199,25 @@ def read_header(header, keywords, log):
 
 def get_keyvalue (key, header, log):
     
-    # check if [key] is defined in Constants module
+    # check if [key] is defined in settings file
     var = 'set_zogy.'+key
     try:
         value = eval(var)
     except:
         # if it does not work, try using the value of the keyword name
-        # (defined in Constants module) from the fits header instead
+        # (defined in settings file) from the fits header instead
         try:
             key_name = eval('set_zogy.key_'+key)
         except:
             log.critical('either [{}] or [{}] needs to be defined in [settings_file]'.
                          format(key, 'key_'+key))
-            raise SystemExit
+            raise RuntimeError
         else:
             if key_name in header:
                 value = header[key_name]
             else:
                 log.critical('keyword {} not present in header'.format(key_name))
-                raise SystemExit
+                raise RuntimeError
 
     if get_par(set_zogy.verbose,tel):
         log.info('keyword: {}, adopted value: {}'.format(key, value))
@@ -3241,7 +3252,7 @@ def get_remap_name(new_name, ref_name, remap_name):
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                              fits_mask=None, ref_fits_remap=None, data_cal=None):
 
-    log.info('Executing prep_optimal_subtraction ...')
+    log.info('executing prep_optimal_subtraction ...')
     t = time.time()
        
     if imtype=='new':
@@ -4005,7 +4016,7 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
             ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, imtype, log, data_cal):
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing get_zp ...')
+    log.info('executing get_zp ...')
 
     if imtype=='new':
         base = base_new
@@ -4106,7 +4117,7 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
     elements as the input flux."""
     
     if get_par(set_zogy.timing,tel): t = time.time()
-    #log.info('Executing apply_zp ...')
+    #log.info('executing apply_zp ...')
 
     # make sure input fluxes are numpy arrays
     flux = np.asarray(flux)
@@ -4181,7 +4192,7 @@ def field_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
 def find_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    #log.info('Executing find_stars ...')
+    #log.info('executing find_stars ...')
 
     # find entries in [ra_cat] and [dec_cat] within [dist] of
     # [ra] and [dec]
@@ -4260,7 +4271,7 @@ def get_zone_indices (dec_center, fov_half_deg, zone_size=60):
 def get_airmass (ra, dec, obsdate, lat, lon, height, log=None):
 
     if log is not None:
-        log.info('Executing get_airmass ...')
+        log.info('executing get_airmass ...')
 
     location = EarthLocation(lat=lat, lon=lon, height=height)
     coords = SkyCoord(ra, dec, frame='icrs', unit='deg')
@@ -4275,7 +4286,7 @@ def fixpix (data, data_bkg, log, satlevel=60000., data_mask=None, base=None,
             imtype=None, mask_value=None, timing=True):
 
     if timing: t = time.time()
-    log.info('Executing fixpix ...')
+    log.info('executing fixpix ...')
 
     data_fixed = np.copy(data)
     
@@ -4426,7 +4437,7 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing get_back ...')
+    log.info('executing get_back ...')
     
     # use the SExtractor '-OBJECTS' image, which is a (SExtractor)
     # background-subtracted image with all pixels where objects were
@@ -4550,7 +4561,7 @@ def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None,
                timing=True):
     
     if timing: t = time.time()
-    log.info('Executing mini2back ...')
+    log.info('executing mini2back ...')
 
     # resize low-resolution meshes, with order [order_interp], where
     # order=0: nearest
@@ -4732,7 +4743,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing get_psf ...')
+    log.info('executing get_psf ...')
 
     global psf_size_new
 
@@ -5453,7 +5464,7 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
     image pixels to pixels in the new image."""
     
     t = time.time()
-    log.info('Executing get_fratio_dxdy ...')
+    log.info('executing get_fratio_dxdy ...')
     
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
@@ -5645,7 +5656,7 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
 
 ################################################################################
 
-def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
+def get_fratio_radec (psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log=None):
 
     """Function that takes in output catalogs of stars used in the PSFex
     runs on the new and the ref image, and returns the arrays with
@@ -5656,7 +5667,8 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     """
     
     t = time.time()
-    log.info('Executing get_fratio_radec ...')
+    if log is not None:
+        log.info('executing get_fratio_radec ...')
     
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
@@ -5681,7 +5693,7 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
     # read psfcat_ref
     number_ref, x_ref, y_ref, norm_ref = readcat(psfcat_ref)
 
-    if get_par(set_zogy.verbose,tel):
+    if log is not None and get_par(set_zogy.verbose,tel):
         log.info('new: number of PSF stars with zero FLAGS: {}'.format(len(x_new)))
         log.info('ref: number of PSF stars with zero FLAGS: {}'.format(len(x_ref)))
     
@@ -5731,11 +5743,16 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
             # append ratio of normalized counts to fratios
             fratio.append(norm_new[i_new] / norm_ref[i_ref])
                         
-    if get_par(set_zogy.verbose,tel):
-        log.info('fraction of PSF stars that match: ' + str(float(nmatch)/len(x_new)))
+
+    if log is not None:
+
+        if get_par(set_zogy.verbose,tel):
+            log.info('fraction of PSF stars that match: {}'
+                     .format(float(nmatch)/len(x_new)))
+
+        if get_par(set_zogy.timing,tel):
+            log_timing_memory (t0=t, label='get_fratio_radec', log=log)
             
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_fratio_radec', log=log)
 
     return (np.array(x_new_match), np.array(y_new_match), np.array(fratio),
             np.array(dra_match), np.array(ddec_match))
@@ -5743,7 +5760,7 @@ def get_fratio_radec(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log):
 
 ################################################################################
 
-def centers_cutouts(subsize, ysize, xsize, log, get_remainder=False):
+def centers_cutouts(subsize, ysize, xsize, log=None, get_remainder=False):
     
     """Function that determines the input image indices (!) of the centers
     (list of nsubs x 2 elements) and cut-out regions (list of nsubs x
@@ -5767,7 +5784,8 @@ def centers_cutouts(subsize, ysize, xsize, log, get_remainder=False):
             remainder_y = False
 
     nsubs = nxsubs * nysubs
-    log.info('nxsubs, nysubs, nsubs: ' + str(nxsubs) + ', ' + str(nysubs) + ', ' + str(nsubs))
+    if log is not None:
+        log.info('nxsubs: {}, nysubs: {}, nsubs: {}'.format(nxsubs, nysubs, nsubs))
 
     centers = np.ndarray((nsubs, 2), dtype=int)
     cuts_ima = np.ndarray((nsubs, 4), dtype=int)
@@ -5804,6 +5822,7 @@ def centers_cutouts(subsize, ysize, xsize, log, get_remainder=False):
             
     return centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes
 
+
 ################################################################################
 
 def show_image(image):
@@ -5812,6 +5831,7 @@ def show_image(image):
                     interpolation='nearest')
     plt.show(im)
 
+    
 ################################################################################
 
 def ds9_arrays(regions=None, **kwargs):
@@ -5835,7 +5855,7 @@ def ds9_arrays(regions=None, **kwargs):
 def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing run_wcs ...')
+    log.info('executing run_wcs ...')
     
     scale_low = (1.-get_par(set_zogy.pixscale_varyfrac,tel)) * pixscale
     scale_high = (1.+get_par(set_zogy.pixscale_varyfrac,tel)) * pixscale
@@ -6139,7 +6159,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 def calc_offsets (ra_sex, dec_sex, ra_ast, dec_ast, log):
     
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing calc_offsets ...')
+    log.info('executing calc_offsets ...')
 
     # number of astrometry comparison sources
     n_ast = np.shape(ra_ast)[0]
@@ -6191,7 +6211,7 @@ def calc_offsets (ra_sex, dec_sex, ra_ast, dec_ast, log):
 def calc_offsets_alt (ra_sex, dec_sex, ra_ast, dec_ast, log):
     
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing calc_offsets ...')
+    log.info('executing calc_offsets ...')
 
     # number of astrometry comparison sources
     n_ast = np.shape(ra_ast)[0]
@@ -6306,7 +6326,7 @@ def ldac2fits (cat_ldac, cat_fits, log):
     to a common binary FITS table (that can be read by Astrometry.net) """
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing ldac2fits ...')
+    log.info('executing ldac2fits ...')
 
     # read input table and write out primary header and 2nd extension
     columns = []
@@ -6371,7 +6391,7 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     run_alt = True
     
     if timing: t = time.time()
-    log.info('Executing run_remap ...')
+    log.info('executing run_remap ...')
 
     header_new = read_hdulist (image_new, get_data=False, get_header=True)
     header_ref = read_hdulist (image_ref, get_data=False, get_header=True)
@@ -6487,7 +6507,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     """
  
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing get_fwhm ...')
+    log.info('executing get_fwhm ...')
 
     data = read_hdulist (cat_ldac)
 
@@ -6658,7 +6678,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('Executing run_sextractor ...')
+    log.info('executing run_sextractor ...')
 
     base = image.replace('.fits','')
     
@@ -6729,49 +6749,64 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         file_params = file_params_edited
 
 
+    # check if background was already subtracted from image
+    if 'BKG-SUB' in header:
+        bkg_sub = header['BKG-SUB']
+        
+            
     for npass in range(npasses):
             
         # name for background-subtracted image
         fits_bkgsub = base+'_bkgsub.fits'
 
         if npass==0:        
-        
+
+            if bkg_sub:
+                back_type = 'MANUAL'
+            else:
+                back_type = 'AUTO'
+                
             # run sextractor from the unix command line
-            cmd = ['sex', image, '-c', file_config, '-CATALOG_NAME', cat_out, 
-                   '-PARAMETERS_NAME', file_params, '-PIXEL_SCALE', str(pixscale),
-                   '-SEEING_FWHM', str(seeing),'-PHOT_APERTURES', apphot_diams_str,
-                   '-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)), '-BACK_FILTERSIZE',
-                   str(get_par(set_zogy.bkg_filtersize,tel)), 
-                   '-BACKPHOTO_TYPE', 'GLOBAL', #'-BACKPHOTO_THICK', '24',
-                   '-NTHREADS', str(nthreads), '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
-                   '-STARNNW_NAME', get_par(set_zogy.cfg_dir,tel)+'default.nnw']
+            cmd = ['sex', image,
+                   '-c', file_config,
+                   '-BACK_TYPE', back_type,
+                   '-BACK_VALUE', str(0.0), # neglected if back_type = 'AUTO'
+                   '-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)),
+                   '-BACK_FILTERSIZE', str(get_par(set_zogy.bkg_filtersize,tel)),
+                   '-BACKPHOTO_TYPE', 'GLOBAL']
             
         else:
             
             # for FWHM estimate, or if background method is set to 1
-            # (SExtractor method) no need to do multiple passes
-            if fraction < 1 or get_par(set_zogy.bkg_method,tel) == 1:            
+            # (SExtractor method) or background had already been
+            # subtracted no need to do multiple passes
+            if fraction < 1 or get_par(set_zogy.bkg_method,tel) == 1 or bkg_sub:
                 break
 
             print ('running 2nd pass of SExtractor')
             
             # run sextractor from the unix command line
-            cmd = ['sex', fits_bkgsub, image, '-c', file_config, '-CATALOG_NAME', cat_out, 
-                   '-PARAMETERS_NAME', file_params, '-PIXEL_SCALE', str(pixscale),
-                   '-SEEING_FWHM', str(seeing),'-PHOT_APERTURES',apphot_diams_str,
-                   '-BACK_TYPE', 'MANUAL', '-BACK_VALUE', str(bkg_median),
-                   #'-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)), '-BACK_FILTERSIZE',
-                   #str(get_par(set_zogy.bkg_filtersize,tel)),
-                   '-BACKPHOTO_TYPE', 'GLOBAL', #'-BACKPHOTO_THICK', '24',
-                   '-NTHREADS', str(nthreads), '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
-                   '-STARNNW_NAME', get_par(set_zogy.cfg_dir,tel)+'default.nnw']
+            cmd = ['sex', fits_bkgsub, image, '-c', file_config,
+                   '-BACK_TYPE', 'MANUAL',
+                   '-BACK_VALUE', str(bkg_median),
+                   '-BACKPHOTO_TYPE', 'GLOBAL']
 
-        
+
+        # add commands relevant for any pass
+        cmd += ['-CATALOG_NAME', cat_out,
+                '-PARAMETERS_NAME', file_params,
+                '-PIXEL_SCALE', str(pixscale),
+                '-SEEING_FWHM', str(seeing),
+                '-PHOT_APERTURES',apphot_diams_str,
+                '-NTHREADS', str(nthreads),
+                '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
+                '-STARNNW_NAME', get_par(set_zogy.cfg_dir,tel)+'default.nnw']
+
         # add commands to produce BACKGROUND, BACKGROUND_RMS and
         # background-subtracted image with all pixels where objects were
         # detected set to zero (-OBJECTS). These are used to build an
         # improved background map. 
-        if save_bkg:
+        if save_bkg and not bkg_sub:
             fits_bkg = base+'_bkg.fits'
             fits_bkg_std = base+'_bkg_std.fits'
             fits_objmask = base+'_objmask.fits'
@@ -6788,7 +6823,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         if fits_mask is not None:
             log.info('mask: {}'.format(fits_mask))
             cmd += ['-FLAG_IMAGE', fits_mask, '-FLAG_TYPE', 'OR']
-        
+
         # log cmd executed
         cmd_str = ' '.join(cmd)
         log.info('SExtractor command executed:\n{}'.format(cmd_str))
@@ -6803,9 +6838,10 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)   
             
-        # improve background estimate if [set_zogy.bkg_method] not set to 1 (= use
-        # background determined by SExtractor)
-        if save_bkg and get_par(set_zogy.bkg_method,tel) == 2:
+        # improve background estimate if [set_zogy.bkg_method] not set
+        # to 1 (= use background determined by SExtractor) and
+        # background had not already been subtracted
+        if save_bkg and get_par(set_zogy.bkg_method,tel) == 2 and not bkg_sub:
 
             # read in SExtractor's object mask created above
             data_objmask = read_hdulist (fits_objmask)
