@@ -72,11 +72,12 @@ key_ron = 'RDNOISE'
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
-#key_pixscale = 'PIXSCALE'
+key_pixscale = 'A-PSCALE'
 pixscale = 0.563	# in arcsec/pixel
 key_exptime = 'EXPTIME'
 key_filter = 'FILTER'
 key_obsdate = 'DATE-OBS'
+
 
 #===============================================================================
 # Initial seeing estimate
