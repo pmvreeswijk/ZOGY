@@ -6752,8 +6752,12 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
     # check if background was already subtracted from image
     if 'BKG-SUB' in header:
         bkg_sub = header['BKG-SUB']
+    else:
+        bkg_sub = False
+
+    log.info('background already subtracted: {}'.format(bkg_sub))
+    
         
-            
     for npass in range(npasses):
             
         # name for background-subtracted image
