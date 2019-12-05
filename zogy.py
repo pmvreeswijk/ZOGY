@@ -1093,7 +1093,6 @@ def add_fakestars (psf, data, bkg, bkg_std, readnoise, fwhm, log):
     ypos[0] = int(ysize_fft/2)
     flux_fakestar = np.zeros(get_par(set_zogy.nfakestars,tel))
 
-
     for nstar in range(get_par(set_zogy.nfakestars,tel)):
             
         index_temp = tuple([slice(ypos[nstar]-psf_hsize, ypos[nstar]+psf_hsize+1),
@@ -1362,6 +1361,8 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         #'ERRBWIN_IMAGE':  ['E', 'pix'  ], #, 'flt16' ],
         #'ERRTHETAWIN_IMAGE': ['E', 'deg'  ], #, 'flt16' ],
         'ELONGATION':     ['E', ''     ], #, 'flt16' ],
+        # N.B.: column names alphawin and deltawin are changed to
+        # ra_icrs and dec_icrs below
         'ALPHAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
         'DELTAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
         'FLAGS':          ['I', ''     ], #, 'uint8' ],
@@ -2822,30 +2823,49 @@ def get_optflux (P, D, S, V):
     296, 339.
 
     """
-    if P.ndim!=1:
-        P = P.ravel()
-        D = D.ravel()
-        V = V.ravel()
-        if not np.isscalar(S):
-            S = S.ravel()
 
-    # and optimal flux and its error
-    P_over_V = P/V
-    denominator = np.dot(P, P_over_V)
-    if denominator>0:
-        optflux = np.dot(P_over_V, (D-S)) / denominator
-        optfluxerr = 1./np.sqrt(denominator)
-    else:
-        optflux = 0.
-        optfluxerr = 0.
-        
-    # previously the optimal flux and error were calculated as follows
-    # (a bit slower than above):
-    #denominator = np.sum(P**2/V)
-    #optflux = np.sum((P*(D-S)/V)) / denominator
-    #optfluxerr = 1./np.sqrt(denominator)
-    
+    # avoid zeros in V
+    mask_zero = (V==0)
+    if np.any(mask_zero):
+        P = P[~mask_zero]
+        D = D[~mask_zero]
+        V = V[~mask_zero]
+        if not np.isscalar(S):
+            S = S[~mask_zero]
+
+    # the following is a bit slower than alternative calculation
+    # below, but less complicated:
+    optflux = 0.
+    optfluxerr = 0.
+    if np.sum(~mask_zero != 0):
+        denominator = np.sum(P**2/V)
+        if denominator > 0:
+            optflux = np.sum((P*(D-S)/V)) / denominator
+            optfluxerr = 1./np.sqrt(denominator)
+
     return optflux, optfluxerr
+
+
+    if False:
+
+        if P.ndim!=1:
+            P = P.flatten()
+            D = D.flatten()
+            V = V.flatten()
+            if not np.isscalar(S):
+                S = S.flatten()
+
+        # and optimal flux and its error
+        P_over_V = P/V
+        denominator = np.dot(P, P_over_V)
+        if denominator>0:
+            optflux = np.dot(P_over_V, (D-S)) / denominator
+            optfluxerr = 1./np.sqrt(denominator)
+        else:
+            optflux = 0.
+            optfluxerr = 0.
+
+    
 
 
 ################################################################################
@@ -2980,7 +3000,7 @@ def flux_optimal (P, D, RON, S=None, bkg_var=None, nsigma_inner=10, P_noshift=No
                         
         # optimal flux
         #flux_opt, fluxerr_opt = get_optflux_Eran(P[mask], P_noshift[mask], D[mask], S[mask], V[mask])
-        flux_opt, fluxerr_opt = get_optflux(P[mask_use], D[mask_use], S[mask_use], V[mask_use])
+        flux_opt, fluxerr_opt = get_optflux (P[mask_use], D[mask_use], S[mask_use], V[mask_use])
                     
         #print ('i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt,
         #       abs(flux_opt_old-flux_opt)/flux_opt, abs(flux_opt_old-flux_opt)/fluxerr_opt)
@@ -3069,10 +3089,14 @@ def flux_optimal_s2n (P, S, RON, bkg_var, s2n, fwhm=5., max_iters=10,
         # new estimate of D
         D = S + flux_opt * P
 
-        # get optimal flux
-        flux_opt, fluxerr_opt = get_optflux (P, D, S, V)
-
-        # break out of loop if S/N sufficiently close
+        # get optimal flux, avoiding zeros in V
+        index = np.nonzero(V)
+        if len(index) != 0:
+            flux_opt, fluxerr_opt = get_optflux (P[index], D[index], S[index], V[index])
+        else:
+            break
+        
+        # also break out of loop if S/N sufficiently close
         if abs(flux_opt/fluxerr_opt - s2n) / s2n < epsilon:
             break
         
@@ -3540,6 +3564,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                              .format(nsigma))
             
         # get airmasses for SExtractor catalog sources
+        # N.B.: column names alphawin and deltawin are changed to
+        # ra_icrs and dec_icrs when writing the final catalogs in
+        # function [format_cat]
         ra_sex = data_sex['ALPHAWIN_J2000']
         dec_sex = data_sex['DELTAWIN_J2000']
         flags_sex = data_sex['FLAGS']
@@ -3551,7 +3578,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                   lat, lon, height, log=log)
         airmass_sex_median = float(np.median(airmass_sex))
         log.info('median airmass: {}'.format(airmass_sex_median))
-        
+
+
         # use WCS solution in input [header] to get RA, DEC of central pixel
         wcs = WCS(header)
         ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
@@ -3564,6 +3592,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # determine airmass at image center
         airmass_center = get_airmass(ra_center, dec_center, obsdate,
                                      lat, lon, height, log=log)
+        # in case of reference image and header airmass==1 (set to
+        # unity in refbuild module used for ML/BG) then force
+        # airmasses calculated above to be unity.  If the reference
+        # image is a combination of multiple images, the airmass
+        # calculation above will not be correct. It is assumed that
+        # the fluxes in the combined reference image have been scaled
+        # to an airmass of 1.
+        if imtype=='ref' and header['AIRMASS']==1:
+            airmass_sex[:] = 1
+            airmass_sex_median = 1
+            airmass_center = 1
+
         header['AIRMASSC'] = (float(airmass_center), 'airmass at image center')
 
         # determine image zeropoint if ML/BG calibration catalog exists
@@ -5502,6 +5542,9 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
 
         # read SExtractor fits table
         data = read_hdulist (sexcat)
+        # N.B.: column names alphawin and deltawin are changed to
+        # ra_icrs and dec_icrs when writing the final catalogs in
+        # function [format_cat]
         ra_sex = data['ALPHAWIN_J2000']
         dec_sex = data['DELTAWIN_J2000']
         # loop numbers and record in ra, dec
@@ -5706,6 +5749,9 @@ def get_fratio_radec (psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log=None):
 
         # read SExtractor fits table
         data = read_hdulist (sexcat)
+        # N.B.: column names alphawin and deltawin are changed to
+        # ra_icrs and dec_icrs when writing the final catalogs in
+        # function [format_cat]
         ra_sex = data['ALPHAWIN_J2000']
         dec_sex = data['DELTAWIN_J2000']
         # loop numbers and record in ra, dec
@@ -6037,6 +6083,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                                       1)
 
     # replace old ra and dec with new ones
+    # N.B.: column names alphawin and deltawin are changed to
+    # ra_icrs and dec_icrs when writing the final catalogs in
+    # function [format_cat]
     data_sexcat['ALPHAWIN_J2000'] = newra
     data_sexcat['DELTAWIN_J2000'] = newdec
     # replace catalog with RA and DEC columns
