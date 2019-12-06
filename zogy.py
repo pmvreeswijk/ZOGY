@@ -3577,7 +3577,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, 
                                   lat, lon, height, log=log)
         airmass_sex_median = float(np.median(airmass_sex))
-        log.info('median airmass: {}'.format(airmass_sex_median))
 
 
         # use WCS solution in input [header] to get RA, DEC of central pixel
@@ -3599,13 +3598,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # calculation above will not be correct. It is assumed that
         # the fluxes in the combined reference image have been scaled
         # to an airmass of 1.
-        if imtype=='ref' and header['AIRMASS']==1:
-            airmass_sex[:] = 1
-            airmass_sex_median = 1
-            airmass_center = 1
+        if imtype=='ref' and 'AIRMASS' in header:
+            if header['AIRMASS']==1:
+                airmass_sex[:] = 1
+                airmass_sex_median = 1
+                airmass_center = 1
 
         header['AIRMASSC'] = (float(airmass_center), 'airmass at image center')
 
+        log.info('median airmass calibration stars: {}'.format(airmass_sex_median))
+        log.info('airmass at image center: {}'.format(airmass_center))
+
+        
         # determine image zeropoint if ML/BG calibration catalog exists
         ncalstars=0
         if os.path.isfile(get_par(set_zogy.cal_cat,tel)):
