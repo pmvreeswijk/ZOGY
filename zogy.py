@@ -484,7 +484,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # the subimages below in the function [zogy_subloop]
         x_fratio, y_fratio, fratio, dx, dy, fratio_sub, dx_sub, dy_sub = (
             get_fratio_dxdy(base_new+'_psfex.cat', base_ref+'_psfex.cat',
-                            base_new+'_cat.fits', base_ref+'_cat.fits',
                             header_new, header_ref, 
                             nsubs, cuts_ima, log, header_zogy, pixscale_new))
         
@@ -1713,7 +1712,8 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
     if get_par(set_zogy.verbose,tel):
         log.info('nregions: {}'.format(nregions))
-        
+
+
     # using skimage.measure.regionprops; see
     # http://scikit-image.org/docs/dev/api/skimage.measure.html#skimage.measure.regionprops
     # for list of attributes of [props]
@@ -4823,46 +4823,20 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
             if get_par(set_zogy.verbose,tel):
                 log.info('Skipping run_psfex for image: '+image)
                         
+
     if not skip_psfex:
         psfexcat = base+'_psfex.cat'
         sexcat_ldac = base+'_ldac.fits'
         log.info('sexcat_ldac: {}'.format(sexcat_ldac))
         log.info('psfexcat: {}'.format(psfexcat))
-
-        if True:
-            t_temp = time.time()
-            # feed PSFEx only with selected sources
-            sexcat_ldac_selected = base+'_ldac_4psfex.fits'
-            with fits.open(sexcat_ldac) as hdulist:
-                data_ldac = hdulist[2].data
-                mask_ok = ((data_ldac['FLAGS']<=1) & 
-                           (data_ldac['SNR_WIN']>=get_par(set_zogy.psf_stars_s2n_min,tel)))
-                # sort by FLUX_AUTO
-                #index_sort = np.argsort(data_ldac['FLUX_AUTO'][mask_ok])
-                # select the faintest 20,000 above the s2n cut-off
-                #data_ldac = data_ldac[:][mask_ok] #[index_sort][0:20000]
-                data_ldac = data_ldac[mask_ok] #[index_sort][0:20000]
-                hdulist[2].data = data_ldac
-                hdulist_new = fits.HDUList(hdulist)
-                hdulist_new.writeto(sexcat_ldac_selected, overwrite=True)
-                hdulist_new.close()
-
-                if get_par(set_zogy.make_plots,tel):
-                    result = prep_ds9regions(base+'_psfstars_ds9regions.txt',
-                                             data_ldac['XWIN_IMAGE'],
-                                             data_ldac['YWIN_IMAGE'],
-                                             radius=5., width=2, color='red')
-                            
-            log.info('time to create selection of LDAC catalog for PSFEx: {}'
-                     .format(time.time()-t_temp))
-            
         try:
+            # size of axes of PSF output snap image; does not need to
+            # be same as number of subimage
             nsnap = min(nx, ny)
-            # run PSFEx on selected catalog:
-            result = run_psfex(sexcat_ldac_selected, get_par(set_zogy.psfex_cfg,tel), 
-                               psfexcat, imtype, nsnap, log)
-            # full catalog:
-            #result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel), psfexcat, imtype, log)
+            # run PSFEx:
+            result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel), 
+                               psfexcat, imtype, nsnap=nsnap, limit_ldac=True,
+                               log=log)
         except Exception as e:
             PSFEx_processed = False
             log.info(traceback.format_exc())
@@ -5496,9 +5470,8 @@ def calc_psf_config (data, poldeg, x, y):
 
 ################################################################################
 
-def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
-                    header_new, header_ref, nsubs, cuts_ima, log, header,
-                    pixscale):
+def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
+                    nsubs, cuts_ima, log, header, pixscale):
     
     """Function that takes in output catalogs of stars used in the PSFex
     runs on the new and the ref image, and returns the arrays with
@@ -5509,61 +5482,40 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
     
     t = time.time()
     log.info('executing get_fratio_dxdy ...')
-    
+
+
+    # helper function to read PSFEx output ASCII catalog and extract
+    # x, y and normalisation factor from the PSF stars
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
-        # In PSFEx version 3.17.1 (last stable version), only stars
-        # with zero flags are recorded in the output catalog. However,
-        # in PSFEx version 3.18.2 all objects from the SExtractor
-        # catalog are recorded, and in that case the entries with
-        # FLAGS_PSF=0 need to be selected to speed up this function
-        # significantly in case SExtractor detects many sources.
+        # In PSFEx version 3.18.2 all objects from the input
+        # SExtractor catalog are recorded, and in that case the
+        # entries with FLAGS_PSF=0 need to be selected.
         if 'FLAGS_PSF' in table.colnames:
-            mask_zero = (table['FLAGS_PSF']==0)
+            mask_psfstars = (table['FLAGS_PSF']==0)
+        # In PSFEx version 3.17.1 (last stable version), only stars
+        # with zero flags are recorded in the output catalog, so use
+        # the entire table
         else:
-            mask_zero = np.ones(len(table), dtype=bool)
-        number = table['SOURCE_NUMBER'][mask_zero]
-        x = table['X_IMAGE'][mask_zero]
-        y = table['Y_IMAGE'][mask_zero]
-        norm = table['NORM_PSF'][mask_zero]
-        return number, x, y, norm
-        
+            mask_psfstars = np.ones(len(table), dtype=bool)
+
+        x = table['X_IMAGE'][mask_psfstars]
+        y = table['Y_IMAGE'][mask_psfstars]
+        norm = table['NORM_PSF'][mask_psfstars]
+        return x, y, norm
+
+    
     # read psfcat_new
-    number_new, x_new, y_new, norm_new = readcat(psfcat_new)
+    x_new, y_new, norm_new = readcat(psfcat_new)
     # read psfcat_ref
-    number_ref, x_ref, y_ref, norm_ref = readcat(psfcat_ref)
+    x_ref, y_ref, norm_ref = readcat(psfcat_ref)
 
     if get_par(set_zogy.verbose,tel):
         log.info('new: number of PSF stars with zero FLAGS: {}'.format(len(x_new)))
         log.info('ref: number of PSF stars with zero FLAGS: {}'.format(len(x_ref)))
     
-    def xy2radec (number, sexcat):
-
-        '''Function to return the RA and DEC from the binary fits SExtractor
-        catalog [sexcat] using the columns ALPHAWIN_J2000 and
-        DELTAWIN_J2000.  [number] is an array of integers, indicating
-        the source number in the SExtractor catalog [sexcat].'''
-
-        # read SExtractor fits table
-        data = read_hdulist (sexcat)
-        # N.B.: column names alphawin and deltawin are changed to
-        # ra_icrs and dec_icrs when writing the final catalogs in
-        # function [format_cat]
-        ra_sex = data['ALPHAWIN_J2000']
-        dec_sex = data['DELTAWIN_J2000']
-        # loop numbers and record in ra, dec
-        ra = []
-        dec = []
-        for n in number:
-            ra.append(ra_sex[n-1])
-            dec.append(dec_sex[n-1])
-        return np.array(ra), np.array(dec)
-
-
-    # get reference ra, dec corresponding to x, y
-    #ra_new, dec_new = xy2radec(number_new, sexcat_new)
-    #ra_ref, dec_ref = xy2radec(number_ref, sexcat_ref)
-    # instead use wcs.all_pix2world
+    # get reference ra, dec corresponding to x, y using
+    # wcs.all_pix2world
     wcs = WCS(header_ref)
     ra_ref, dec_ref = wcs.all_pix2world(x_ref, y_ref, 1)
 
@@ -5573,6 +5525,25 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
 
     # these can be compared to x_new and y_new
     # to find matching entries
+
+    if False:
+        # tried rewriting the matching block below without a loop, but
+        # the following is much slower than the loop method; first 3
+        # lines take a lot of time
+        dx = x_new - x_ref2new.reshape(-1,1) # latter array is a column
+        dy = y_new - y_ref2new.reshape(-1,1) # latter array is a column
+        dist2 = dx**2 + dy**2
+        dist_max = 3./pixscale #pixels
+        mask_match = (dist2 <= dist_max**2)
+        fratio = norm_new / norm_ref.reshape(-1,1)
+    
+        x_new_match = np.broadcast_to(x_new, dx.shape)[mask_match]
+        y_new_match = np.broadcast_to(y_new, dy.shape)[mask_match]
+        dx_match = dx[mask_match]
+        dy_match = dy[mask_match]
+        fratio_match = fratio[mask_match]
+    
+        
     x_new_match = []
     y_new_match = []
     dx_match = []
@@ -5604,7 +5575,7 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
     dx_match = np.asarray(dx_match)
     dy_match = np.asarray(dy_match)
     fratio_match = np.asarray(fratio_match)
-        
+    
     # now also determine arrays for fratio, dx and dy to be used in
     # function [zogy_subloop]:
     fratio_sub = np.zeros(nsubs)
@@ -5699,113 +5670,6 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, sexcat_new, sexcat_ref,
 
     return x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
         fratio_sub, dx_sub, dy_sub
-
-
-################################################################################
-
-def get_fratio_radec (psfcat_new, psfcat_ref, sexcat_new, sexcat_ref, log=None):
-
-    """Function that takes in output catalogs of stars used in the PSFex
-    runs on the new and the ref image, and returns the arrays with
-    pixel coordinates (!) x, y (in the new frame) and fratios for the
-    matching stars. In addition, it provides the difference in stars'
-    RAs and DECs in arcseconds between the two catalogs.
-
-    """
-    
-    t = time.time()
-    if log is not None:
-        log.info('executing get_fratio_radec ...')
-    
-    def readcat (psfcat):
-        table = ascii.read(psfcat, format='sextractor')
-        # In PSFEx version 3.17.1 (last stable version), only stars
-        # with zero flags are recorded in the output catalog. However,
-        # in PSFEx version 3.18.2 all objects from the SExtractor
-        # catalog are recorded, and in that case the entries with
-        # FLAGS_PSF=0 need to be selected to speed up this function
-        # significantly in case SExtractor detects many sources.
-        if 'FLAGS_PSF' in table.colnames:
-            mask_zero = (table['FLAGS_PSF']==0)
-        else:
-            mask_zero = np.ones(len(table), dtype=bool)
-        number = table['SOURCE_NUMBER'][mask_zero]
-        x = table['X_IMAGE'][mask_zero]
-        y = table['Y_IMAGE'][mask_zero]
-        norm = table['NORM_PSF'][mask_zero]
-        return number, x, y, norm
-        
-    # read psfcat_new
-    number_new, x_new, y_new, norm_new = readcat(psfcat_new)
-    # read psfcat_ref
-    number_ref, x_ref, y_ref, norm_ref = readcat(psfcat_ref)
-
-    if log is not None and get_par(set_zogy.verbose,tel):
-        log.info('new: number of PSF stars with zero FLAGS: {}'.format(len(x_new)))
-        log.info('ref: number of PSF stars with zero FLAGS: {}'.format(len(x_ref)))
-    
-    def xy2radec (number, sexcat):
-
-        '''Function to return the RA and DEC from the binary fits SExtractor
-        catalog [sexcat] using the columns ALPHAWIN_J2000 and
-        DELTAWIN_J2000.  [number] is an array of integers, indicating
-        the source number in the SExtractor catalog [sexcat].'''
-
-        # read SExtractor fits table
-        data = read_hdulist (sexcat)
-        # N.B.: column names alphawin and deltawin are changed to
-        # ra_icrs and dec_icrs when writing the final catalogs in
-        # function [format_cat]
-        ra_sex = data['ALPHAWIN_J2000']
-        dec_sex = data['DELTAWIN_J2000']
-        # loop numbers and record in ra, dec
-        ra = []
-        dec = []
-        for n in number:
-            ra.append(ra_sex[n-1])
-            dec.append(dec_sex[n-1])
-        return np.array(ra), np.array(dec)
-    
-    # get ra, dec corresponding to x, y
-    ra_new, dec_new = xy2radec(number_new, sexcat_new)
-    ra_ref, dec_ref = xy2radec(number_ref, sexcat_ref)
-
-    # now find matching entries
-    x_new_match = []
-    y_new_match = []
-    dra_match = []
-    ddec_match = []
-    fratio = []
-    nmatch = 0
-    for i_new in range(len(x_new)):
-        # calculate distance to ref objects
-        dra = 3600.*(ra_new[i_new]-ra_ref)*np.cos(dec_new[i_new]*np.pi/180.)
-        ddec = 3600.*(dec_new[i_new]-dec_ref)
-        dist = np.sqrt(dra**2 + ddec**2)
-        # minimum distance and its index
-        dist_min, i_ref = np.amin(dist), np.argmin(dist)
-        if dist_min < 3.:
-            nmatch += 1
-            x_new_match.append(x_new[i_new])
-            y_new_match.append(y_new[i_new])
-            dra_match.append(dra[i_ref])
-            ddec_match.append(ddec[i_ref])
-            # append ratio of normalized counts to fratios
-            fratio.append(norm_new[i_new] / norm_ref[i_ref])
-                        
-
-    if log is not None:
-
-        if get_par(set_zogy.verbose,tel):
-            log.info('fraction of PSF stars that match: {}'
-                     .format(float(nmatch)/len(x_new)))
-
-        if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t, label='get_fratio_radec', log=log)
-            
-
-    return (np.array(x_new_match), np.array(y_new_match), np.array(fratio),
-            np.array(dra_match), np.array(ddec_match))
 
 
 ################################################################################
@@ -5975,6 +5839,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            # number of field objects to look at:
            '--depth', '50,150,200,250,300,350,400,450,500',
            #'--scamp', scampcat,
+           # give up solving after the specified number of seconds of CPU time
+           #'--cpulimit', '60',
            sexcat_bright,
            '--tweak-order', str(get_par(set_zogy.astronet_tweak_order,tel)), '--scale-low', str(scale_low),
            '--scale-high', str(scale_high), '--scale-units', 'app',
@@ -6969,19 +6835,54 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, imtype, nsnap, log):
+def run_psfex(cat_in, file_config, cat_out, imtype, nsnap=11,
+              limit_ldac=True, log=None):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
        [file_config]"""
 
+
     if get_par(set_zogy.timing,tel): t = time.time()
 
+    
     if imtype=='new':
         base = base_new
     else:
         base = base_ref
 
+        
+    # select a subset of entries in the input ldac catalog to speed up
+    # psfex
+    if limit_ldac:
+
+        with fits.open(cat_in, mode='update') as hdulist:
+            data_ldac = hdulist[2].data
+            # SExtractor flags 0 or 1 and S/N larger than value
+            # defined in settings file
+            mask_ok = ((data_ldac['FLAGS']<=1) & 
+                       (data_ldac['SNR_WIN']>=get_par(set_zogy.psf_stars_s2n_min,tel)))
+            # sort by FLUX_AUTO
+            #index_sort = np.argsort(data_ldac['FLUX_AUTO'][mask_ok])
+            # select the faintest 20,000 above the s2n cut-off
+            #data_ldac = data_ldac[:][mask_ok] #[index_sort][0:20000]
+            # could try random selection of sources to limit the
+            # input if still >~ 10-20,000 sources
+            hdulist[2].data = data_ldac[mask_ok]
+            
+
+        if get_par(set_zogy.make_plots,tel):
+            result = prep_ds9regions(base+'_psfstars_ds9regions.txt',
+                                     data_ldac['XWIN_IMAGE'][mask_ok],
+                                     data_ldac['YWIN_IMAGE'][mask_ok],
+                                     radius=5., width=2, color='red')
+                
+        if get_par(set_zogy.timing,tel):
+            log_timing_memory (
+                t0=t,label='limiting entries in LDAC input catalog for PSFEx',
+                log=log)
+
+        
     # use function [get_samp_PSF_config_size] to determine [psf_samp]
     # and [psf_size_config] required to run PSFEx
     psf_samp, psf_size_config = get_samp_PSF_config_size()
@@ -7036,7 +6937,29 @@ def run_psfex(cat_in, file_config, cat_out, imtype, nsnap, log):
     psf_in = cat_in.replace('.fits', '.psf')
     psf_out = base+'_psf.fits'
     os.rename (psf_in, psf_out)
+
     
+    # for the reference image, limit the size of the ldac catalog fits
+    # file to be saved with only those catalog entries used by PSFEx
+    if imtype=='ref':
+        psfexcat = base+'_psfex.cat'
+        table = ascii.read(psfexcat, format='sextractor')
+        # In PSFEx version 3.18.2 all objects from the input
+        # SExtractor catalog are recorded, and in that case the
+        # entries with FLAGS_PSF=0 need to be selected.
+        if 'FLAGS_PSF' in table.colnames:
+            mask_psfstars = (table['FLAGS_PSF']==0)
+        # In PSFEx version 3.17.1 (last stable version), only stars
+        # with zero flags are recorded in the output catalog, so need
+        # to pick the source number of the input catalog minus 1.
+        else:
+            mask_psfstars = table['SOURCE_NUMBER']-1
+
+        # overwrite the input catalog with these selected stars
+        with fits.open(cat_in, mode='update') as hdulist:
+            data_ldac = hdulist[2].data[mask_psfstars]
+            hdulist[2].data = data_ldac
+
 
     # record the PSFEx output check images defined above, into
     # extensions of a single fits file    
@@ -7065,7 +6988,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, nsnap, log):
                 
             else:
                 # if not a fits file, rename it
-                name_new = short.replace('ldac_4psfex', prefix)
+                name_new = short.replace('ldac', prefix)
                 name_new = name_new.replace(prefix+'_','')
                 name_new = '{}/{}'.format(cwd, name_new)
                 log.info ('name: {}, name_new: {}'.format(name, name_new))
