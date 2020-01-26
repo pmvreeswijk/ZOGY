@@ -301,7 +301,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # add header keyword(s):
                 header['S-P'] = (SE_processed, 'successfully processed by SExtractor?')
                 # SExtractor version
-                cmd = ['sex', '-v']
+                cmd = ['source-extractor', '-v']
                 result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
                 version = str(result.stdout.read()).split()[2]
                 header['S-V'] = (version, 'SExtractor version used')
@@ -1737,11 +1737,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # to scale the reference image and its variance
     sn, sr, fratio = 1, 1, 1
     if 'Z-FNR' in header_zogy:
-        fratio = header_new['Z-FNR']
+        fratio = header_zogy['Z-FNR']
     if 'S-BKGSTD' in header_new:
         sn = header_new['S-BKGSTD']
     if 'S-BKGSTD' in header_ref:
-        sr = header_new['S-BKGSTD']
+        sr = header_ref['S-BKGSTD']
         
     # use sum of variances of new and ref images (where ref image
     # needs to be scaled with flux ratio fn/fr) as variance image to
@@ -6671,7 +6671,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                 back_type = 'AUTO'
                 
             # run sextractor from the unix command line
-            cmd = ['sex', image,
+            cmd = ['source-extractor', image,
                    '-c', file_config,
                    '-BACK_TYPE', back_type,
                    '-BACK_VALUE', str(0.0), # neglected if back_type = 'AUTO'
@@ -6690,7 +6690,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             print ('running 2nd pass of SExtractor')
             
             # run sextractor from the unix command line
-            cmd = ['sex', fits_bkgsub, image, '-c', file_config,
+            cmd = ['source-extractor', fits_bkgsub, image, '-c', file_config,
                    '-BACK_TYPE', 'MANUAL',
                    '-BACK_VALUE', str(bkg_median),
                    '-BACKPHOTO_TYPE', 'GLOBAL']
