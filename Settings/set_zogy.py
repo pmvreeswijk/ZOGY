@@ -19,7 +19,7 @@ subimage_border = 32     # border around subimage to avoid edge effects
 fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
-chi2_red_max = 2         # maximum chi2 in PSF fit to D to filter transients
+chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter transients
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
 transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
@@ -68,7 +68,6 @@ key_naxis1 = 'NAXIS1'
 key_naxis2 = 'NAXIS2'
 key_gain = 'GAIN'
 gain = 1.0
-key_ron = 'RDNOISE'
 key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
@@ -157,12 +156,6 @@ source_nsigma = 5             # required S/N in total flux (optimal or psffit)
                               # this also determines level of limiting flux
                               # and magnitudes of images
 
-# use measured background variance (True) or sky background level +
-# readnoise**2 (False) for background noise estimate, used in e.g.
-# optimal subtraction and photometry
-use_bkg_var = True
-
-
 # Photometric calibration
 # telescope latitude in degrees (North)
 obs_lat = {'ML1': -32.3799, 'BG': -29.2575}  
@@ -213,5 +206,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = False       # make diagnostic plots and save them as pdf
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
