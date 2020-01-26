@@ -6010,9 +6010,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         header['A-NAMAX'] = (get_par(set_zogy.ast_nbright,tel), 'input max. number of stars to use for WCS')
         
         # calculate means, stds and medians
-        dra_mean, dra_std, dra_median = sigma_clipped_stats(dra_array, sigma=5)
+        dra_mean, dra_median, dra_std = sigma_clipped_stats(dra_array, sigma=5)
         # ,make_hist=set_zogy.make_plots, name_hist=base+'_dra_hist.pdf', hist_xlabel='delta RA [arcsec]')
-        ddec_mean, ddec_std, ddec_median = sigma_clipped_stats(ddec_array, sigma=5)
+        ddec_mean, ddec_median, ddec_std = sigma_clipped_stats(ddec_array, sigma=5)
         # ,make_hist=set_zogy.make_plots, name_hist=base+'_ddec_hist.pdf', hist_xlabel='delta DEC [arcsec]')
         
         log.info('dra_mean [arcsec]: {:.3f}, dra_std: {:.3f}, dra_median: {:.3f}'
