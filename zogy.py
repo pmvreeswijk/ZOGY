@@ -2477,7 +2477,10 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
 
         # determine optimal or psf or limiting flux
         if get_limflux:
-            # determine limiting flux at this position using flux_optimal_s2n
+            # determine limiting flux at this position using
+            # flux_optimal_s2n; if Poisson noise of objects should be
+            # taken into account, then add background-subtracted image
+            # to the background variance: bkg_var_sub + D_sub
             flux_opt[i] = flux_optimal_s2n (P_shift, bkg_var_sub,
                                             limflux_nsigma, fwhm=psf_fwhm)
 
@@ -2994,9 +2997,10 @@ def flux_optimal_s2n (P, bkg_var, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
     the total flux [in e-] required for the point source to have a
     particular signal-to-noise ratio [s2n], given the PSF image [P]
     and the background variance [bkg_var] (=sky background + RN**2).
-    This function is used to estimate the flux of the fake stars that
-    are being added to the image with a required S/N
-    [set_zogy.fakestar_s2n].
+    This function is used to estimate the limiting magnitude of an
+    image at a set of coordinates (in get_psfoptflux_xycoords), and
+    also to estimate the flux of the fake stars that are being added
+    to the image with a required S/N [set_zogy.fakestar_s2n].
 
     Note that the background-subtracted image itself should be added
     to [bkg_var] in order to calculate the flux required to reach the
@@ -5273,15 +5277,15 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
 
     # create model image
     if fit_gauss:
-        print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red:',
-               xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red)
+        #print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red:',
+        #       xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red)
         model_ima = EllipticalGauss2D (xx, yy, x0=x0, y0=y0,
                                        sigma1=sigma1, sigma2=sigma2,
                                        theta=theta, amplitude=amplitude,
                                        background=p['background'])
     else:
-        print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta:',
-               xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta)
+        #print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta:',
+        #       xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta)
         model_ima = EllipticalMoffat2D (xx, yy, x0=x0, y0=y0, beta=beta,
                                         alpha1=alpha1, alpha2=alpha2,
                                         theta=theta, amplitude=amplitude,
@@ -5307,7 +5311,7 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
         log.info('average fwhm  {}'.format(fwhm_ave))
 
         log.info('chi2red:      {}'.format(chi2red))
-        log.info('chi2red_inner:{}'.format(chi2red_inner))
+        log.info('chflat_20190629_q.fitsi2red_inner:{}'.format(chi2red_inner))
         log.info('nfev:         {}'.format(result.nfev))
         log.info('success:      {}'.format(result.success))
         
@@ -5994,12 +5998,12 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         dec_ast_bright = dec_ast[index_sort_ast][0:nbright]
         
         # calculate array of offsets between astrometry comparison
-        # stars and any non-saturated SExtractor source; no match or
-        # multiple matches will return a zero offset for that star.
+        # stars and any non-saturated SExtractor source
         newra_bright = newra[mask_use][index_sort][-nbright:]
         newdec_bright = newdec[mask_use][index_sort][-nbright:]        
         dra_array, ddec_array = calc_offsets (newra_bright, newdec_bright,
                                               ra_ast, dec_ast, log=log)
+
         # convert to arcseconds
         dra_array *= 3600.
         ddec_array *= 3600.
@@ -6028,6 +6032,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
         if get_par(set_zogy.make_plots,tel):
             dr = np.sqrt(dra_std**2+ddec_std**2)
+            dr = max(dr, 0.05)
             limits = 5. * np.array([-dr,dr,-dr,dr])
             mask_nonzero = ((dra_array!=0.) & (ddec_array!=0.))
             label1 = 'dRA={:.3f}$\pm${:.3f}"'.format(dra_median, dra_std)
@@ -6103,7 +6108,8 @@ def calc_offsets (ra_sex, dec_sex, ra_ast, dec_ast, log):
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='calc_offsets', log=log)
 
-    return dra_array, ddec_array
+    mask_nonzero = ((dra_array != 0) & (ddec_array != 0))
+    return dra_array[mask_nonzero], ddec_array[mask_nonzero]
     
     
 ################################################################################
@@ -6156,7 +6162,8 @@ def calc_offsets_alt (ra_sex, dec_sex, ra_ast, dec_ast, log):
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='calc_offsets', log=log)
 
-    return dra_array, ddec_array
+    mask_nonzero = ((dra_array != 0) & (ddec_array != 0))
+    return dra_array[mask_nonzero], ddec_array[mask_nonzero]
     
     
 ################################################################################
