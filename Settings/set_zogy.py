@@ -45,7 +45,7 @@ fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                          # clipped (method 2 only)
-bkg_boxsize = 30         # size of region used to determine
+bkg_boxsize = 120        # size of region used to determine
                          # background (both methods)
 bkg_filtersize = 5       # size of filter used for smoothing the above
                          # regions (both methods)
@@ -133,7 +133,11 @@ pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
 # calibration catalog used for both astrometry and photometry
 
 cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
-           .format(os.environ['ZOGYHOME'])}
+           .format(os.environ['ZOGYHOME']),
+           'BG': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+           .format(os.environ['ZOGYHOME']),
+           }
+
 ast_nbright = 1000       # brightest no. of objects in the field to
                          # use for astrometry solution and crosscheck
                          # of positions obtained against calibration
@@ -167,7 +171,8 @@ obs_height = {'ML1': 1803, 'BG': 2348}
 obs_timezone = {'ML1': 'Africa/Johannesburg', 'BG': 'America/Santiago'}
 # these [ext_coeff] are mean extinction estimates for Sutherland in
 # the MeerLICHT filters:
-ext_coeff = {'ML1': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}}
+ext_coeff = {'ML1': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06},
+             'BG': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}}
 # and the same for La Silla in the BlackGEM filters:
 #ext_coeff = {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}
 # name of the photometric calibration catalog (in binary fits format)
@@ -178,7 +183,8 @@ phot_ncal_max = 100 # max no. of calibration stars used for a given field
 phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
-zp_default = {'ML1': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}}
+zp_default = {'ML1': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41},
+              'BG': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}}
 
 #===============================================================================
 # Configuration
