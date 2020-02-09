@@ -4453,7 +4453,7 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     # (note that masked arrays consider mask values of True to be
     # invalid, i.e. are not used)
     data_masked = np.ma.masked_array(data, mask=mask_reject)
-    
+
     # image size and number of background boxes along x and y
     ysize, xsize = data.shape
     boxsize = get_par(set_zogy.bkg_boxsize,tel)
@@ -4462,7 +4462,7 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
         log.info('         remaining pixels will be edge-padded')
     nysubs = int(ysize / boxsize)
     nxsubs = int(xsize / boxsize)
-        
+
     # reshape
     data_masked_reshaped = data_masked.reshape(
         nysubs,boxsize,-1,boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
@@ -4471,9 +4471,11 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     #data_masked_reshaped = view_as_blocks(data_masked, block_shape).reshape(
     #    nysubs, nxsubs, -1)
     
+
     # get clipped statistics
     mini_mean, mini_median, mini_std = sigma_clipped_stats (
         data_masked_reshaped, sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2)
+
 
     # minimum fraction of background subimage pixels not to be
     # affected by the OR combination of object mask and image mask
@@ -4515,7 +4517,7 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
         # return median filtered array
         return np.ma.median(array_masked, axis=2)
 
-    
+
     # fill zeros in mini_median with median of surrounding 3x3
     # pixels, until no more zeros left
     while (np.sum(mini_median == 0) != 0):
@@ -4541,11 +4543,17 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     # estimate median and std of entire image from the values of the subimages
     bkg_median = np.median(mini_median_filt)
     bkg_std = np.median(mini_std_filt)
-        
+
+
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_back', log=log)
 
-    return mini_median_filt, mini_std_filt, bkg_median, bkg_std
+    # mini_median_filt and mini_std_filt are float64 (which is what
+    # sigma_clipped_stats returns); return them as float32 below to
+    # avoid the data type of the full background and its std image
+    # being float64 as well
+    return (mini_median_filt.astype('float32'), mini_std_filt.astype('float32'),
+            bkg_median, bkg_std)
 
 
 ################################################################################
@@ -6766,7 +6774,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             # before remapping
                 
             data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
-                get_back(data, objmask, log, fits_mask=fits_mask))
+                get_back (data, objmask, log, fits_mask=fits_mask))
                 
             # write these filtered meshes to fits
             fits.writeto(base+'_bkg_mini.fits', data_bkg_mini, 
@@ -6788,8 +6796,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             data_bkg_std = mini2back (data_bkg_std_mini, data.shape, log,
                                       order_interp=1, 
                                       bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                                      timing=get_par(set_zogy.timing,tel))
-            
+                                      timing=get_par(set_zogy.timing,tel)) 
+
             # if [npasses] greater than 1, subtract the background
             # from the image and save this to feed to SExtractor
             # in the next pass
