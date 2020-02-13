@@ -87,8 +87,8 @@ sudo ${packman} -y install astrometry.net
 # SExtractor (although it seems already installed automatically)
 sudo ${packman} -y install sextractor
 # the executable for this installation is 'sextractor' while ZOGY
-# expects 'sex'; make a symbolic link
-sudo ln -s /usr/bin/sextractor /usr/bin/sex
+# expects 'source-extractor'; make a symbolic link
+sudo ln -s /usr/bin/sextractor /usr/bin/source-extractor
 
 # SWarp
 sudo ${packman} -y install swarp
@@ -111,7 +111,7 @@ url="https://storage.googleapis.com/blackbox-auxdata"
 # with Kurucz templates
 sudo wget -nc $url/photometry/ML_calcat_kur_allsky_ext1deg_20181115.fits.gz -P ${ZOGYHOME}/CalFiles/
 # with Pickles templates
-sudo wget -nc $url/photometry/ML_calcat_pick_allsky_ext1deg_20181201.fits.gz -P ${ZOGYHOME}/CalFiles/
+#sudo wget -nc $url/photometry/ML_calcat_pick_allsky_ext1deg_20181201.fits.gz -P ${ZOGYHOME}/CalFiles/
 sudo gunzip ${ZOGYHOME}/CalFiles/ML_calcat*.gz
 
 

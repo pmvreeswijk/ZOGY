@@ -84,7 +84,7 @@ sudo -H ${pip} install git+git://github.com/pmvreeswijk/ZOGY${v_zogy_git}
 # ================================================================================
 
 # SExtractor
-sudo ${packman} install sextractor
+sudo ${packman} install source-extractor
 
 # PSFEx
 # gcc8 is needed for atlas
@@ -135,7 +135,7 @@ url="https://storage.googleapis.com/blackbox-auxdata"
 # with Kurucz templates
 sudo wget -nc $url/photometry/ML_calcat_kur_allsky_ext1deg_20181115.fits.gz -P ${ZOGYHOME}/CalFiles/
 # with Pickles templates
-sudo wget -nc $url/photometry/ML_calcat_pick_allsky_ext1deg_20181201.fits.gz -P ${ZOGYHOME}/CalFiles/
+#sudo wget -nc $url/photometry/ML_calcat_pick_allsky_ext1deg_20181201.fits.gz -P ${ZOGYHOME}/CalFiles/
 sudo gunzip ${ZOGYHOME}/CalFiles/ML_calcat*.gz
 
 
