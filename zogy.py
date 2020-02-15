@@ -276,6 +276,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = sex_fraction(
             base_ref, sexcat_ref, pixscale_ref, 'ref', header_ref, log)
 
+
     # function to run SExtractor on full image, followed by Astrometry.net
     # to find the WCS solution, applied below to new and/or ref image
     def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet, imtype,
@@ -375,57 +376,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # again for the reference image.
 
 
-    # initialise [ref_fits_remap] here to None; this is used below in
-    # call to [prep_image_subtraction] if either [new_fits] or
-    # [ref_fits] are not defined
-    ref_fits_remap = None
     if new and ref:
+        remap = True
         # initialize header to be recorded for keywords related to the
         # comparison of new and ref
         header_zogy = fits.Header()
+    else:
+        remap = False
+        
 
-        # remap ref to new
-        ref_fits_remap = base_ref+'_remap.fits'
-        ref_fits_remap = get_remap_name(base_new, base_ref, ref_fits_remap)
-            
-        # since name of remapped reference image will currently be the
-        # same for different new images, this if condition needs to go:
-        #
-        #if not os.path.isfile(ref_fits_remap) or get_par(set_zogy.redo,tel):
-        #
-        # if reference image is poorly sampled, could use bilinear
-        # interpolation for the remapping using SWarp - this removes
-        # artefacts around bright stars (see Fig.6 in the SWarp User's
-        # Guide). However, despite these artefacts, the Scorr image
-        # still appears to be better with LANCZOS3 than when BILINEAR
-        # is used.
-        resampling_type='LANCZOS3'
-        # if fwhm_ref <= 2: resampling_type='BILINEAR'
-        try:
-            remap_processed = False
-            result = run_remap(base_new+'.fits', base_ref+'.fits', ref_fits_remap,
-                               [ysize_new, xsize_new], gain=gain_new, log=log,
-                               config=get_par(set_zogy.swarp_cfg,tel),
-                               resampling_type=resampling_type, resample='Y',
-                               timing=get_par(set_zogy.timing,tel))
-        except Exception as e:
-            log.info(traceback.format_exc())
-            log.error('exception was raised during [run_remap]: {}'.format(e))  
-        else:
-            remap_processed = True
-        finally:
-            header_zogy['SWARP-P'] = (remap_processed, 'reference image successfully SWarped?')
-            # SWarp version
-            cmd = ['swarp', '-v']
-            result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-            version = str(result.stdout.read()).split()[2]
-            header_zogy['SWARP-V'] = (version, 'SWarp version used')
-            # if exception occurred, leave
-            if not remap_processed:
-                header_newzogy = header_new + header_zogy
-                return header_newzogy
-
-            
     # determine cutouts
     if new:
         xsize = xsize_new
@@ -434,14 +393,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         xsize = xsize_ref
         ysize = ysize_ref
 
-    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(get_par(
-        set_zogy.subimage_size,tel), ysize, xsize, log)
-
-    nxsubs = xsize/get_par(set_zogy.subimage_size,tel)
-    nysubs = ysize/get_par(set_zogy.subimage_size,tel)
-    
-    ysize_fft = get_par(set_zogy.subimage_size,tel) + 2*get_par(set_zogy.subimage_border,tel)
-    xsize_fft = get_par(set_zogy.subimage_size,tel) + 2*get_par(set_zogy.subimage_border,tel)
+    centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
+        get_par(set_zogy.subimage_size,tel), ysize, xsize, log)
     nsubs = centers.shape[0]
     if get_par(set_zogy.verbose,tel):
         log.info('nsubs ' + str(nsubs))
@@ -451,23 +404,38 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         #    log.info('cuts_ima_fft[i] ' + str(cuts_ima_fft[i]))
         #    log.info('cuts_fft[i] ' + str(cuts_fft[i]))
             
+
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
-    # ref, psf and background images
+    # psf and background images
     if new:
         data_new, psf_new, psf_orig_new, data_new_bkg_std, data_new_mask = (
             prep_optimal_subtraction(base_new+'.fits', nsubs, 'new', fwhm_new, header_new,
                                      log, fits_mask=new_fits_mask, data_cal=data_cal_new)
         )
 
-    # same for [ref_fits]; if either [new_fits] or [ref_fits] was not
-    # defined, [ref_fits_remap] will be None
-    if ref_fits is not None:
+    # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with ref,
+    # psf and background images; if new and ref are provided, then
+    # these images will be remapped to the new frame
+    if ref:
         data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std, data_ref_mask = (
             prep_optimal_subtraction(base_ref+'.fits', nsubs, 'ref', fwhm_ref, header_ref,
                                      log, fits_mask=ref_fits_mask, data_cal=data_cal_ref,
-                                     ref_fits_remap=ref_fits_remap)
+                                     remap=remap)
         )
 
+        if remap:
+            # for now set the value header below to True by hand;
+            # should be checked properly, e.g. by try-except the
+            # prep_optimal_subtraction function above, or by
+            # try-except the swarp part inside it and let it pass
+            # along the remap_processed variable to here
+            header_zogy['SWARP-P'] = (True, 'reference image successfully SWarped?')
+            # SWarp version
+            cmd = ['swarp', '-v']
+            result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            version = str(result.stdout.read()).split()[2]
+            header_zogy['SWARP-V'] = (version, 'SWarp version used')
+                
 
     if get_par(set_zogy.verbose,tel) and new:
         log.info('data_new.dtype {}'.format(data_new.dtype))
@@ -677,7 +645,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             data_ref_full[index_subcut] = data_ref[nsub][index_extract]
             data_new_mask_full[index_subcut] = data_new_mask[nsub][index_extract]
             data_ref_mask_full[index_subcut] = data_ref_mask[nsub][index_extract]
-            
+
+            nysubs = ysize/get_par(set_zogy.subimage_size,tel)
             if get_par(set_zogy.display,tel) and (nsub==0 or nsub==nysubs-1 or nsub==int(nsubs/2) or
                                                   nsub==nsubs-nysubs or nsub==nsubs-1):
 
@@ -3216,8 +3185,8 @@ def get_remap_name(new_name, ref_name, remap_name):
 ################################################################################
 
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
-                             fits_mask=None, ref_fits_remap=None, data_cal=None):
-
+                             fits_mask=None, data_cal=None, remap=False):
+    
     log.info('executing prep_optimal_subtraction ...')
     t = time.time()
        
@@ -3227,8 +3196,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         base = base_ref
 
     # read input_fits
-    data_wcs, header_wcs = read_hdulist (input_fits, get_header=True, 
-                                         dtype='float32')
+    data_wcs = read_hdulist (input_fits, dtype='float32')
     
     # get gain, pixscale and saturation level from header
     keywords = ['gain', 'pixscale', 'satlevel']
@@ -3237,29 +3205,41 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     
 
     # check if background was already subtracted from input_fits
-    if 'BKG-SUB' in header_wcs:
+    if 'BKG-SUB' in header:
         bkg_sub = header['BKG-SUB']
     else:
         bkg_sub = False
+
+    log.info('background already subtracted from {}?: {}'
+             .format(input_fits, bkg_sub))
         
-    
-    # read in background image (this part could be skipped if
-    # [bkg_sub]==True, but [bkg_sub] is used below when writing header
-    # info - could probably be avoided
-    fits_bkg = base+'_bkg.fits'
-    if os.path.exists(fits_bkg):
-        data_bkg = read_hdulist (fits_bkg, dtype='float32')
-    else:
-        # if it does not exist, create it from the background mesh
-        fits_bkg_mini = base+'_bkg_mini.fits'
-        data_bkg_mini = read_hdulist (fits_bkg_mini, dtype='float32')
-        data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
-                              order_interp=2, 
-                              bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                              timing=get_par(set_zogy.timing,tel))
+    # if not, then read in background image
+    if not bkg_sub:
 
+        fits_bkg = base+'_bkg.fits'
+        if os.path.exists(fits_bkg):
+            data_bkg = read_hdulist (fits_bkg, dtype='float32')
+        else:
+            # if it does not exist, create it from the background mesh
+            fits_bkg_mini = base+'_bkg_mini.fits'
+            data_bkg_mini = read_hdulist (fits_bkg_mini, dtype='float32')
+            data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
+                                  order_interp=2, 
+                                  bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                                  timing=get_par(set_zogy.timing,tel))
 
-    # same for background std image
+        # subtract the background
+        data_wcs -= data_bkg
+
+        # overwrite [input_fits] with its background-subtracted image
+        header['BKG-SUB'] = (True, 'sky background was subtracted?')
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        fits.writeto(input_fits, data_wcs, header, overwrite=True) 
+        
+        
+    # read in background std image in any case (i.e. also if
+    # background was already subtracted); it is needed for the
+    # variance image output
     fits_bkg_std = base+'_bkg_std.fits'
     if os.path.exists(fits_bkg_std):
         data_bkg_std = read_hdulist (fits_bkg_std, dtype='float32')
@@ -3297,82 +3277,82 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # create a minimal mask
         data_mask = create_mask (data_wcs, satlevel)
 
-    # if remapped image is provided, read that also
-    if ref_fits_remap is not None:
-        data_ref_remap = read_hdulist (ref_fits_remap, dtype='float32')
 
-        # the reference background maps and mask need to be projected
-        # to the coordinate frame of the new or remapped reference
-        # image. At the moment this is done with swarp, but this is a
-        # very slow solution. Tried to improve this using functions
+    # in case the reference image needs to be remapped, SWarp the
+    # reference image (already background subtracted), the background
+    # STD and the mask to the frame of the new image
+    if remap:
+
+        # for now this is done with SWarp, but this is a rather slow
+        # solution. Tried to improve this using functions
         # [xy_index_ref] and [get_data_remap] (see older zogy
         # versions), but these fail when there is rotation between the
         # images, resulting in rotated masks.
 
-        use_swarp = True
-        if use_swarp:
+        # local function to help with remapping
+        def help_swarp (fits2remap, data2remap, header2remap=header,
+                        fits2remap2=base_new+'.fits', value_edge=0,
+                        resampling_type='NEAREST', update_header=False):
 
-            # local function to help with remapping of the background
-            # maps and mask
-            def run_swarp (fits2remap, data2remap, header2remap=header_wcs,
-                           fits2remap2=base_new+'.fits', value_edge=0):
-
-                keywords = ['naxis2', 'naxis1']
-                header_new = read_hdulist (base_new+'.fits', get_data=False,
-                                           get_header=True)
-                ysize_new, xsize_new = read_header(header_new, keywords, log)
+            header_new = read_hdulist (fits2remap2, get_data=False,
+                                       get_header=True)
+            keywords = ['naxis2', 'naxis1']
+            ysize_new, xsize_new = read_header(header_new, keywords, log)
                 
-                # update headers of fits image with that of the
-                # original wcs-corrected reference image
-                header2remap['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+            # update header of fits image with that of the original
+            # wcs-corrected reference image (needed if header does not
+            # correspond to that of the reference image, e.g. for the mask)
+            if update_header:
+                header2remap['DATEFILE'] = (Time.now().isot,
+                                            'UTC date of writing file')
                 fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
-                # project fits image to new image
-                fits_out = fits2remap.replace('.fits', '_remap.fits')
-                fits_out = get_remap_name(fits2remap2, fits2remap, fits_out)
+
+
+            # project fits image to new image
+            fits_out = fits2remap.replace('.fits', '_remap.fits')
+            fits_out = get_remap_name(fits2remap2, fits2remap, fits_out)
+            result = run_remap(fits2remap2, fits2remap, fits_out,
+                               [ysize_new, xsize_new], gain=gain, log=log,
+                               config=get_par(set_zogy.swarp_cfg,tel),
+                               resampling_type=resampling_type,
+                               dtype=data2remap.dtype.name,
+                               value_edge=value_edge,
+                               timing=get_par(set_zogy.timing,tel))
+            data_remapped = read_hdulist (fits_out)
+
+            return data_remapped
         
-                # since name of remapped reference bkg/std/mask image
-                # will currently be the same for different new images,
-                # this if condition needs to go: 
-                #if not os.path.isfile(fits_out) or get_par(set_zogy.redo,tel):
-                result = run_remap(fits2remap2, fits2remap, fits_out,
-                                   [ysize_new, xsize_new], gain=gain, log=log,
-                                   config=get_par(set_zogy.swarp_cfg,tel),
-                                   resampling_type='NEAREST',
-                                   dtype=data2remap.dtype.name,
-                                   value_edge=value_edge,
-                                   timing=get_par(set_zogy.timing,tel))
-                data_remapped = read_hdulist (fits_out)
-                return data_remapped
+        
+        # remap reference image; if it is poorly sampled, could use
+        # bilinear interpolation for the remapping using SWarp - this
+        # removes artefacts around bright stars (see Fig.6 in the
+        # SWarp User's Guide). However, despite these artefacts, the
+        # Scorr image still appears to be better with LANCZOS3 than
+        # when BILINEAR is used.
+        data_ref_remap = help_swarp(input_fits, data_wcs,
+                                    resampling_type='LANCZOS3')
+        # remap reference image background std
+        data_ref_bkg_std_remap = help_swarp(fits_bkg_std, data_bkg_std,
+                                            update_header=True)
 
-            
-            # remap reference image background; this can be skipped if
-            # input reference image was already background subtracted
-            if not bkg_sub:
-                data_ref_bkg_remap = run_swarp(fits_bkg, data_bkg)
-            # remap reference image background std
-            data_ref_bkg_std_remap = run_swarp(fits_bkg_std, data_bkg_std)
-            # remap reference mask image if it exists
-            if fits_mask is not None:
-                # SWarp turns integer mask into float during processing,
-                # so need to add 0.5 and convert to integer again
-                data_ref_remap_mask = (run_swarp(fits_mask, data_mask, 
-                                                 value_edge=get_par(set_zogy.mask_value['edge'],tel))
-                                       +0.5).astype('uint8')
-
-        # if mask image is not provided, use above function [create_mask] to
-        # create a minimal mask from the remapped reference data
-        if fits_mask is None:
+        # remap reference mask image if it exists
+        if fits_mask is not None:
+            # SWarp turns integer mask into float during processing,
+            # so need to add 0.5 and convert to integer again
+            data_ref_remap_mask = (help_swarp(
+                fits_mask, data_mask, update_header=True,
+                value_edge=get_par(set_zogy.mask_value['edge'],tel))
+                                   +0.5).astype('uint8')
+        else:
+            # if mask image is not provided, use above function [create_mask] to
+            # create a minimal mask from the remapped reference data
             data_ref_remap_mask = create_mask(data_ref_remap, satlevel)
 
 
-    # subtract background
-    if not bkg_sub:
-        data_wcs -= data_bkg
-            
+
     # convert counts to electrons
     satlevel *= gain
     data_wcs *= gain
-    data_bkg *= gain
     data_bkg_std *= gain
     # fix pixels using function [fixpix]
     if imtype=='new':
@@ -3381,12 +3361,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                            mask_value=get_par(set_zogy.mask_value,tel),
                            timing=get_par(set_zogy.timing,tel))
 
-    if ref_fits_remap is not None:
-
-        # subtract background; this can be skipped if input reference
-        # image was already background subtracted
-        if not bkg_sub:
-            data_ref_remap -= data_ref_bkg_remap
+    if remap:
 
         # convert counts to electrons
         data_ref_remap *= gain
@@ -3406,7 +3381,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # why is this not done in SExtractor module?
     #bkg_mean, bkg_std, bkg_median = clipped_stats(data_bkg, nsigma=10., log=log)
     if 'S-BKG' not in header:
-        header['S-BKG'] = (np.median(data_bkg), '[e-] median background full image')
+        if bkg_sub:
+            val_temp = 0
+        else:
+            val_temp = np.median(data_bkg)
+        header['S-BKG'] = (val_temp, '[e-] median background full image')
     if 'S-BKGSTD' not in header:
         header['S-BKGSTD'] = (np.median(data_bkg_std), '[e-] sigma (STD) background full image')
 
@@ -3780,7 +3759,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # needs to be done after determination of optimal fluxes as
     # otherwise the potential replacement of the saturated pixels will
     # not be taken into account
-    if ref_fits_remap is not None:
+    if remap:
         data = data_ref_remap
         #data_bkg = data_ref_bkg_remap
         data_bkg_std = data_ref_bkg_std_remap
@@ -3789,9 +3768,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data = data_wcs
     
     # determine cutouts; in case ref image has different size than new
-    # image, redefine [ysize] and [xsize] as until here they refer to
-    # the shape of the original ref image, while shape of remapped ref
-    # image should be used
+    # image, redefine [ysize] and [xsize] as up to this point they
+    # refer to the shape of the original ref image, while shape of
+    # remapped ref image should be used
     ysize, xsize = np.shape(data)
     centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
         get_par(set_zogy.subimage_size,tel), ysize, xsize, log)
@@ -4741,6 +4720,11 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     returns a cube containing the psf for each subimage in the full
     frame.
 
+    PSFEx runs on a SExtractor catalog and not on an image, and
+    therefore the input [image] parameter is only used to print out
+    the name and if PSF fitting is done by SExtractor
+    (i.e. [set_zogy.psffit_sex] is set to True).
+
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -4816,7 +4800,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     # [set_zogy.sex_par_psffit] include several new columns related to the PSF
     # fitting.
     sexcat_ldac_psffit = base+'_ldac_psffit.fits'
-    if (not os.path.isfile(sexcat_ldac_psffit) or get_par(set_zogy.redo,tel)) and get_par(set_zogy.psffit_sex,tel):
+    if ((not os.path.isfile(sexcat_ldac_psffit) or get_par(set_zogy.redo,tel))
+        and get_par(set_zogy.psffit_sex,tel)):
         result = run_sextractor(image, sexcat_ldac_psffit, get_par(set_zogy.sex_cfg_psffit,tel),
                                 get_par(set_zogy.sex_par_psffit,tel), pixscale, log, header,
                                 fit_psf=True, update_vignet=False, fwhm=fwhm)
@@ -5672,9 +5657,11 @@ def centers_cutouts(subsize, ysize, xsize, log=None, get_remainder=False):
     """Function that determines the input image indices (!) of the centers
     (list of nsubs x 2 elements) and cut-out regions (list of nsubs x
     4 elements) of image with the size xsize x ysize. Subsize is the
-    fixed size of the subimages, e.g. 512 or 1024. The routine will
-    fit as many of these in the full frames, and for the moment it
-    will ignore any remaining pixels outside."""
+    fixed size of the subimages. The routine will fit as many of these
+    in the full frames, and for the moment it will ignore any
+    remaining pixels outside.
+
+    """
     
     nxsubs =int(xsize / subsize)
     nysubs = int(ysize / subsize)
@@ -5985,7 +5972,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                                 ra_center, dec_center, fov_half_deg, log)
         index_field = np.where(mask_field)[0]
         # N.B.: this [data_cal] array is returned by this function
-        # [run_wcs] and also by [run_wcs] so that it can be re-used
+        # [run_wcs] and also by [sex_wcs] so that it can be re-used
         # for the photometric calibration in [prep_optimal_subtraction]
         data_cal = data_cal[index_field]
         ra_ast = data_cal['ra']
@@ -6757,9 +6744,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)   
             
-        # improve background estimate if [set_zogy.bkg_method] not set
-        # to 1 (= use background determined by SExtractor) and
-        # background had not already been subtracted
+
+        # improve background and its standard deviation estimate if
+        # [set_zogy.bkg_method] not set to 1 (= use background
+        # determined by SExtractor) and background had not already
+        # been subtracted
         if save_bkg and get_par(set_zogy.bkg_method,tel) == 2 and not bkg_sub:
 
             # read in SExtractor's object mask created above
@@ -6772,7 +6761,6 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             # construct background image using [get_back]; in the case of
             # the reference image these data need to refer to the image
             # before remapping
-                
             data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
                 get_back (data, objmask, log, fits_mask=fits_mask))
                 
@@ -6807,8 +6795,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                     
             # write the improved background and standard deviation to fits
             # overwriting the fits images produced by SExtractor
-            fits.writeto(fits_bkg, data_bkg, overwrite=True)
-            fits.writeto(fits_bkg_std, data_bkg_std, overwrite=True)
+            fits.writeto(fits_bkg, data_bkg, header, overwrite=True)
+            fits.writeto(fits_bkg_std, data_bkg_std, header, overwrite=True)
 
                 
     if return_fwhm_elong:
