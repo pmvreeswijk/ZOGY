@@ -782,9 +782,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # compare input and output flux
             fluxdiff = (fakestar_flux_input - fakestar_flux_output) / fakestar_flux_input
             fluxdiff_err = fakestar_fluxerr_output / fakestar_flux_input
-            fd_mean, fd_std, fd_median = (clipped_stats(fluxdiff, clip_zeros=False, log=log))
-            fderr_mean, fderr_std, fderr_median = (clipped_stats(
-                fluxdiff_err, clip_zeros=False, log=log))
+            
+            fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff)
+            fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err)
 
             # add header keyword(s):
             nfake = len(fakestar_flux_input)
@@ -2434,7 +2434,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
         # image when transients are being fit using this function  
         elif bkg_var == 'calc_from_data':
             D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
-            D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (D_sub_masked)
+            D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
+                D_sub_masked, mask_value=0)
             bkg_var_sub = D_sub_std**2
 
             # if none of the above, write error message to log
@@ -3058,9 +3059,6 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0
     # add median
     if get_median:
         median = np.median(array)
-        if abs(median-mean)/mean>0.1 and log is not None:
-            log.info('Warning: mean and median in clipped_stats differ by more than 10%')
-            log.info('mean: {:.3f}, median: {:.3f}'.format(mean, median))
             
     # and mode
     if get_mode:
@@ -3068,8 +3066,6 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0
         hist, bin_edges = np.histogram(array, bins)
         index = np.argmax(hist)
         mode = (bins[index]+bins[index+1])/2.
-        if abs(mode-mean)/mean>0.1 and log is not None:
-            log.info('Warning: mean and mode in clipped_stats differ by more than 10%')
 
     if make_hist:
         bins = np.linspace(mean-nsigma*std, mean+nsigma*std)
@@ -3379,7 +3375,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # add header keyword(s) regarding background
     # pre-fixed with S as background is produced in SExtractor module
     # why is this not done in SExtractor module?
-    #bkg_mean, bkg_std, bkg_median = clipped_stats(data_bkg, nsigma=10., log=log)
+    #bkg_mean, bkg_median, bkg_std = sigma_clipped_stats(data_bkg, sigma=10, mask_value=0)
     if 'S-BKG' not in header:
         if bkg_sub:
             val_temp = 0
@@ -3467,14 +3463,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             limflux_array, __ = get_psfoptflux_xycoords (
                 psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim, ylim,
                 satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma, log=log)
-
-            limflux_mean, limflux_std, limflux_median = clipped_stats(limflux_array, 
-                                                                      log=log)
+            limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
+                limflux_array, mask_value=0)
             if get_par(set_zogy.verbose,tel):
                 log.info('{}-sigma limiting flux; mean: {}, std: {}, median: {}'
                          .format(nsigma, limflux_mean, limflux_std, limflux_median))
             return limflux_median
 
+        
         # limiting flux in e- (not per second), with nsigma determined
         # by [source_nsigma] in settings file
         nsigma = get_par(set_zogy.source_nsigma,tel)
@@ -4453,8 +4449,9 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
 
     # get clipped statistics
     mini_mean, mini_median, mini_std = sigma_clipped_stats (
-        data_masked_reshaped, sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2)
-
+        data_masked_reshaped, sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2,
+        mask_value=0)
+    
 
     # minimum fraction of background subimage pixels not to be
     # affected by the OR combination of object mask and image mask
@@ -4588,36 +4585,6 @@ def get_index_stat (npix, nmask, frac_nmask_max=0.5, frac_npix_stat=0.1):
 
 ################################################################################
 
-def get_median_std (nsub, cuts_ima, data, mask_use, mask_minsize, clip, log=None):
-    
-    subcut = cuts_ima[nsub]
-    data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
-    mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
-
-    # determine background for fraction of the masked image
-    #ysize, xsize = data_sub.shape
-    #index_stat = get_index_stat(xsize*ysize, np.sum(mask_sub), frac_npix_stat=0.5)
-
-    if np.sum(mask_sub) > mask_minsize:
-        if clip:
-            # get clipped_stats mean, std and median 
-            mean, median, std = sigma_clipped_stats (
-                data_sub[mask_sub], sigma=get_par(set_zogy.bkg_nsigma,tel))
-            #mean, std, median = clipped_stats(
-            #    data_sub[mask_sub], clip_upper_frac=0,
-            #    nsigma=get_par(set_zogy.bkg_nsigma,tel), log=log)
-        else:
-            median = np.median(data_sub[mask_sub])
-            std = np.std(data_sub[mask_sub])
-    else:
-        # set to zero
-        median, std = 0, 0
-            
-    return median, std
-        
-            
-################################################################################
-            
 def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o', markersize=3,
                   xlabel=None, ylabel=None, legendlabel=None, title=None, filename=None,
                   simple=False, xscale='log', yscale='linear'):
@@ -5557,9 +5524,10 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
     dy_sub = np.zeros(nsubs)
 
     # calculate full-frame average standard deviation and median
-    fratio_mean_full, fratio_std_full, fratio_median_full = clipped_stats(fratio_match, log=log)
-    dx_mean, dx_std, dx_median = clipped_stats(dx_match, log=log)
-    dy_mean, dy_std, dy_median = clipped_stats(dy_match, log=log)
+    fratio_mean_full, fratio_median_full, fratio_std_full = sigma_clipped_stats(
+        fratio_match, mask_value=0)
+    dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
+    dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
     dx_full = np.sqrt(dx_mean**2 + dx_std**2)
     dy_full = np.sqrt(dy_mean**2 + dy_std**2)
     if get_par(set_zogy.verbose,tel):
@@ -5621,15 +5589,18 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
             
             if get_par(set_zogy.fratio_local,tel):
                 # determine local fratios
-                fratio_mean, fratio_std, fratio_median = clipped_stats(fratio_match[mask_sub],
-                                                                       log=log)
-                fratio_mean = local_or_full (fratio_mean, fratio_mean_full, fratio_std_full, log)
+                fratio_mean, fratio_median, fratio_std = sigma_clipped_stats(
+                    fratio_match[mask_sub], mask_value=0)
+                fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
+                                             fratio_std_full, log)
                     
             # and the same for dx and dy
             if get_par(set_zogy.dxdy_local,tel):
                 # determine local values
-                dx_mean, dx_std, dx_median = clipped_stats(dx_match[mask_sub], log=log)
-                dy_mean, dy_std, dy_median = clipped_stats(dy_match[mask_sub], log=log)
+                dx_mean, dx_median, dx_std = sigma_clipped_stats(
+                    dx_match[mask_sub], mask_value=0)
+                dy_mean, dy_median, dy_std = sigma_clipped_stats(
+                    dy_match[mask_sub], mask_value=0)
                 dx = np.sqrt(dx_mean**2 + dx_std**2)
                 dy = np.sqrt(dy_mean**2 + dy_std**2)
 
@@ -6009,10 +5980,10 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         header['A-NAMAX'] = (get_par(set_zogy.ast_nbright,tel), 'input max. number of stars to use for WCS')
         
         # calculate means, stds and medians
-        dra_mean, dra_median, dra_std = sigma_clipped_stats(dra_array, sigma=5)
-        # ,make_hist=set_zogy.make_plots, name_hist=base+'_dra_hist.pdf', hist_xlabel='delta RA [arcsec]')
-        ddec_mean, ddec_median, ddec_std = sigma_clipped_stats(ddec_array, sigma=5)
-        # ,make_hist=set_zogy.make_plots, name_hist=base+'_ddec_hist.pdf', hist_xlabel='delta DEC [arcsec]')
+        dra_mean, dra_median, dra_std = sigma_clipped_stats(
+            dra_array, sigma=5, mask_value=0)
+        ddec_mean, ddec_median, ddec_std = sigma_clipped_stats(
+            ddec_array, sigma=5, mask_value=0)
         
         log.info('dra_mean [arcsec]: {:.3f}, dra_std: {:.3f}, dra_median: {:.3f}'
                  .format(dra_mean, dra_std, dra_median))
@@ -6442,14 +6413,16 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         log.info('WARNING: fewer than 10 objects are selected for FWHM determination')
     
     # determine mean, median and standard deviation through sigma clipping
-    fwhm_mean, fwhm_std, fwhm_median = clipped_stats(fwhm_select, log=log)
+    fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select,
+                                                           mask_value=0)
     if get_par(set_zogy.verbose,tel):
         log.info('catalog: ' + cat_ldac)
         log.info('fwhm_mean: {:.3f}, fwhm_median: {:.3f}, fwhm_std: {:.3f}'.
                  format(fwhm_mean, fwhm_median, fwhm_std))
     if get_elong:
         # determine mean, median and standard deviation through sigma clipping
-        elong_mean, elong_std, elong_median = clipped_stats(elong_select, log=log)
+        elong_mean, elong_median, elong_std = sigma_clipped_stats(elong_select,
+                                                                  mask_value=0)
         if get_par(set_zogy.verbose,tel):
             log.info('elong_mean: {:.3f}, elong_median: {:.3f}, elong_std: {:.3f}'.
                      format(elong_mean, elong_median, elong_std))
