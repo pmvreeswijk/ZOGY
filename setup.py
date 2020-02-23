@@ -10,5 +10,5 @@ setup(
     license='MIT',
     packages=find_packages(),
     install_requires=['numpy', 'astropy', 'matplotlib', 'scipy', 'pyfftw',
-                      'lmfit', 'sip_tpv', 'scikit-image']
+                      'lmfit', 'sip_tpv', 'scikit-image', 'bottleneck']
 )
