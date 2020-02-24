@@ -13,7 +13,6 @@ import traceback
 import warnings
 warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 from functools import partial
-# import bottleneck as bn
 
 from multiprocessing.dummy import Pool as ThreadPool
 import numpy as np
