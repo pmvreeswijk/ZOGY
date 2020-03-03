@@ -8,7 +8,6 @@
 #
 # Still to do:
 #
-# - add the calibration binary fits catalog used by zogy
 # - try to make apt-get install PSFEx (and SExtractor) with multi-threading
 #
 #
@@ -99,8 +98,8 @@ sudo ln -s /usr/bin/SWarp /usr/bin/swarp
 # PSFEx - this basic install does not allow multi-threading
 sudo ${packman} -y install psfex
 
-# ds9
-sudo ${packman} -y install saods9
+# ds9; add environment DEBIAN_FRONTEND to avoid interaction with TZONE
+DEBIAN_FRONTEND=noninteractive sudo ${packman} -y install saods9
 
 
 # download calibration catalog
@@ -112,6 +111,7 @@ url="https://storage.googleapis.com/blackbox-auxdata"
 sudo wget -nc $url/photometry/ML_calcat_kur_allsky_ext1deg_20181115.fits.gz -P ${ZOGYHOME}/CalFiles/
 # with Pickles templates
 #sudo wget -nc $url/photometry/ML_calcat_pick_allsky_ext1deg_20181201.fits.gz -P ${ZOGYHOME}/CalFiles/
+echo "gunzipping calibration catalog(s) ..."
 sudo gunzip ${ZOGYHOME}/CalFiles/ML_calcat*.gz
 
 
