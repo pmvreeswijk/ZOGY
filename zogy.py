@@ -1800,10 +1800,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
         # discard if sum of region pixel values (units: e-) is
         # negative in either new or ref image
-        if False:
-            if (np.sum(data_new[index_region]) <= 0 or
-                np.sum(data_ref[index_region]) <= 0):
-                continue
+        if (np.sum(data_new[index_region]) <= 0 or
+            np.sum(data_ref[index_region]) <= 0):
+            continue
                 
         
         # x and y indices of peak significance, and peak value
