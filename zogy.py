@@ -1314,10 +1314,8 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         #'ERRBWIN_IMAGE':  ['E', 'pix'  ], #, 'flt16' ],
         #'ERRTHETAWIN_IMAGE': ['E', 'deg'  ], #, 'flt16' ],
         'ELONGATION':     ['E', ''     ], #, 'flt16' ],
-        # N.B.: column names alphawin and deltawin are changed to
-        # ra_icrs and dec_icrs below
-        'ALPHAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
-        'DELTAWIN_J2000': ['D', 'deg'  ], #, 'flt64' ],
+        'RA':             ['D', 'deg'  ], #, 'flt64' ],
+        'DEC':            ['D', 'deg'  ], #, 'flt64' ],
         'FLAGS':          ['I', ''     ], #, 'uint8' ],
         'IMAFLAGS_ISO':   ['I', ''     ], #, 'uint8' ],
         'FWHM_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
@@ -1394,7 +1392,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           # change back after ADC runs!!!
                           #'AWIN_IMAGE', 'BWIN_IMAGE', 'THETAWIN_IMAGE',
                           #'ERRAWIN_IMAGE', 'ERRBWIN_IMAGE', 'ERRTHETAWIN_IMAGE',
-                          'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
+                          'ELONGATION', 'RA', 'DEC',
                           'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
                           'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
                           'FLUX_AUTO', 'FLUXERR_AUTO', 'KRON_RADIUS',   
@@ -1405,7 +1403,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
                           #'X2WIN_IMAGE', 'Y2WIN_IMAGE', 'XYWIN_IMAGE',
-                          'ELONGATION', 'ALPHAWIN_J2000', 'DELTAWIN_J2000',
+                          'ELONGATION', 'RA', 'DEC',
                           'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
                           'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
                           'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
@@ -1425,7 +1423,8 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
 
     # rename any of the keys using this dictionary, such as the
     # pre-defined SExtractor column names
-    keys2rename = {'ALPHAWIN_J2000': 'RA_ICRS', 'DELTAWIN_J2000': 'DEC_ICRS'}
+    #keys2rename = {'ALPHAWIN_J2000': 'RA_ICRS', 'DELTAWIN_J2000': 'DEC_ICRS'}
+    keys2rename = {}
     
 
     def get_col (key, key_new, data_key=None):
@@ -1803,7 +1802,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         # negative in either new or ref image
         if False:
             if (np.sum(data_new[index_region]) <= 0 or
-                np.sum(data_new[index_region]) <= 0):
+                np.sum(data_ref[index_region]) <= 0):
                 continue
                 
         
@@ -3493,11 +3492,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                              .format(nsigma))
             
         # get airmasses for SExtractor catalog sources
-        # N.B.: column names alphawin and deltawin are changed to
-        # ra_icrs and dec_icrs when writing the final catalogs in
-        # function [format_cat]
-        ra_sex = data_sex['ALPHAWIN_J2000']
-        dec_sex = data_sex['DELTAWIN_J2000']
+        ra_sex = data_sex['RA']
+        dec_sex = data_sex['DEC']
         flags_sex = data_sex['FLAGS']
 
         lat = get_par(set_zogy.obs_lat,tel)
@@ -3617,15 +3613,19 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 # updated [data_cal] for which all filters in
                 # [filt_req[current filter]] are present
                 mask_cal_filt = np.any([data_cal[col] for col in filt_req[filt]], axis=0)
-                # if less than [set_zogy.phot_ncal_min] stars left, drop filter requirements and hope for the best!
+                # if less than [set_zogy.phot_ncal_min] stars left,
+                # drop filter requirements and hope for the best!
                 if np.sum(mask_cal_filt) >= get_par(set_zogy.phot_ncal_min,tel):
                     data_cal = data_cal[mask_cal_filt]
                 else:
-                    log.info('Warning: less than {} calibration stars with default filter requirements'.
-                             format(get_par(set_zogy.phot_ncal_min,tel)))
-                    log.info('filter: {}, requirements (any one of these): {}'.format(filt, filt_req[filt]))
+                    log.info('Warning: less than {} calibration stars with default '
+                             'filter requirements'
+                             .format(get_par(set_zogy.phot_ncal_min,tel)))
+                    log.info('filter: {}, requirements (any one of these): {}'
+                             .format(filt, filt_req[filt]))
                     log.info('dropping this specific requirement and hoping for the best')
                     
+
             # This is the number of photometric calibration stars
             # after the chi2 and filter requirements cut.
             ncalstars = np.shape(data_cal)[0]
@@ -3986,8 +3986,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
 ################################################################################
 
-def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt,
-            ra_cal, dec_cal, mag_cal, magerr_cal, exptime, filt, imtype, log, data_cal):
+def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
+            mag_cal, magerr_cal, exptime, filt, imtype, log, data_cal):
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing get_zp ...')
@@ -5902,13 +5902,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                                       data_sexcat['YWIN_IMAGE'],
                                       1)
 
-    # replace old ra and dec with new ones
-    # N.B.: column names alphawin and deltawin are changed to
-    # ra_icrs and dec_icrs when writing the final catalogs in
-    # function [format_cat]
-    data_sexcat['ALPHAWIN_J2000'] = newra
-    data_sexcat['DELTAWIN_J2000'] = newdec
-    # replace catalog with RA and DEC columns
+    # update catalog with new RA and DEC columns
+    data_sexcat['RA'] = newra
+    data_sexcat['DEC'] = newdec
     fits.writeto(sexcat, data_sexcat, overwrite=True)
     
     if get_par(set_zogy.timing,tel):
@@ -6770,7 +6766,15 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             fits.writeto(fits_bkg, data_bkg, header, overwrite=True)
             fits.writeto(fits_bkg_std, data_bkg_std, header, overwrite=True)
 
-                
+
+    # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
+    data_sexcat = read_hdulist(cat_out)
+    data_sexcat.columns['ALPHAWIN_J2000'].name = 'RA'
+    data_sexcat.columns['DELTAWIN_J2000'].name = 'DEC'    
+    # overwrite [cat_out]
+    fits.writeto(cat_out, data_sexcat, overwrite=True)
+
+
     if return_fwhm_elong:
         # get estimate of seeing and elongation from output catalog
         fwhm, fwhm_std, elong, elong_std = get_fwhm(
