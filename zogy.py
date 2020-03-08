@@ -1052,9 +1052,9 @@ def orient_data (data, header=None):
 
         # for reference image, check if already oriented correctly
         if header is not None:
-            if 'CD1_2' in header:
+            if 'CD1_2' in header and 'CD2_1' in header:
                 # CHECK if this condition is correct
-                if header_ref['CD1_2'] == 0 and header_ref['CD2_1']==0:
+                if header['CD1_2'] == 0 and header['CD2_1']==0:
                     # no need to change input data
                     return data
                     
