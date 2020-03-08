@@ -809,8 +809,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             fluxdiff = (fakestar_flux_input - fakestar_flux_output) / fakestar_flux_input
             fluxdiff_err = fakestar_fluxerr_output / fakestar_flux_input
             
-            fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff)
-            fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err)
+            fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff.astype('float64'))
+            fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err
+                                                                      .astype('float64'))
 
             # add header keyword(s):
             nfake = len(fakestar_flux_input)
@@ -959,6 +960,18 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                               data_Scorr_full]
             thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
                               'THUMBNAIL_SCORR']
+
+            # orient data arrays to North up, East left using function
+            # [orient_data]; if header keyword is provided, it is
+            # checked if image is already in correct orientation;
+            # N.B.: the function only applies to MeerLICHT and
+            # BlackGEM data!
+            data_new_full = orient_data (data_new_full)
+            data_ref_full = orient_data (data_ref_full, header=header_ref)
+            data_D_full = orient_data (data_D_full)
+            data_Scorr_full = orient_data (data_Scorr_full)
+
+            
             # need to take care of objects closer than 32/2 pixels to
             # the full image edge in creation of thumbnails - results
             # in an error if transients are close to the edge
@@ -1028,6 +1041,33 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     elif ref:
         return header_ref
     
+
+################################################################################
+
+def orient_data (data, header=None):
+                    
+    # for MeerLICHT and BlackGEM, orient arrays to North
+    # up, East left orientation
+    if tel=='ML1' or tel=='BG2' or tel=='BG3' or tel=='BG4':
+
+        # for reference image, check if already oriented correctly
+        if header is not None:
+            if 'CD1_2' in header:
+                # CHECK if this condition is correct
+                if header_ref['CD1_2'] == 0 and header_ref['CD2_1']==0:
+                    # no need to change input data
+                    return data
+                    
+        # rotate data by exactly 90 degrees (for ML/BG this is to
+        # within a few degrees of the actual rotation
+        data = np.rot90(data)
+        
+        # also flip East-West for ML
+        if tel=='ML1':
+            data = np.flip(data, 1)
+            
+        return data
+
 
 ################################################################################
 
@@ -2465,7 +2505,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
         elif bkg_var == 'calc_from_data':
             D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
             D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
-                D_sub_masked, mask_value=0)
+                D_sub_masked.astype('float64'), mask_value=0)
             bkg_var_sub = D_sub_std**2
 
             # if none of the above, write error message to log
@@ -3482,7 +3522,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # determine 5-sigma limiting flux using
         # [get_psfoptflux_xycoords] with [get_limflux]=True for random
         # coordinates across the field
-        nlimits = 101
+        nlimits = 501
         edge = 100
         xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
         ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
@@ -3494,7 +3534,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim, ylim,
                 satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma, log=log)
             limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
-                limflux_array, mask_value=0)
+                limflux_array.astype('float64'), mask_value=0)
             if get_par(set_zogy.verbose,tel):
                 log.info('{}-sigma limiting flux; mean: {}, std: {}, median: {}'
                          .format(nsigma, limflux_mean, limflux_std, limflux_median))
@@ -4498,11 +4538,18 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     #    nysubs, nxsubs, -1)
     
 
-    # get clipped statistics
-    mini_mean, mini_median, mini_std = sigma_clipped_stats (
-        data_masked_reshaped, sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2,
-        mask_value=0)
-    
+    # get clipped statistics; if background box is big enough, do the
+    # statistics on a random subset of pixels
+    if boxsize > 200:
+        index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
+        mini_mean, mini_median, mini_std = sigma_clipped_stats (
+            data_masked_reshaped[:,:,index_stat].astype('float64'),
+            sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
+    else:
+        mini_mean, mini_median, mini_std = sigma_clipped_stats (
+            data_masked_reshaped.astype('float64'),
+            sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
+
 
     # minimum fraction of background subimage pixels not to be
     # affected by the OR combination of object mask and image mask
@@ -4585,6 +4632,34 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
 
 ################################################################################
 
+def get_rand_indices (shape, fraction=0.1):
+    
+    """Given an input shape, this function returns a tuple of random
+    integer arrays (with the ranges determined by shape), one for each
+    axis/dimension. The total number of indices returned is the total
+    size defined by [shape] times [fraction].
+
+    """
+
+    # number of dimensions
+    ndim = len(shape)
+
+    # if there are multiple axes, fraction per axis needs to be adjusted
+    fraction_axis = fraction**(1./ndim)
+
+    # create list of integer arrays
+    index = [np.random.randint(shape[i],size=int(shape[i]*fraction_axis))
+             for i in range(ndim)]
+
+    if ndim==1:
+        index = index[0]
+
+    # return tuple
+    return tuple(index)
+
+
+################################################################################
+
 def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None,
                timing=True):
     
@@ -4618,20 +4693,6 @@ def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None,
         log_timing_memory (t0=t, label='mini2back', log=log)
         
     return background
-
-
-################################################################################
-
-def get_index_stat (npix, nmask, frac_nmask_max=0.5, frac_npix_stat=0.1):
-    
-    ratio = 1.*nmask/npix
-    if ratio >= frac_nmask_max:
-        nstat = int(frac_npix_stat * npix / ratio)
-        index_stat = (np.random.rand(nstat)*nmask).astype(int)
-    else:
-        index_stat = np.arange(nmask)
-        
-    return index_stat
 
 
 ################################################################################
@@ -5587,9 +5648,11 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
 
     # calculate full-frame average standard deviation and median
     fratio_mean_full, fratio_median_full, fratio_std_full = sigma_clipped_stats(
-        fratio_match, mask_value=0)
-    dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
-    dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
+        fratio_match.astype('float64'), mask_value=0)
+    dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match.astype('float64'),
+                                                     mask_value=0)
+    dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match.astype('float64'),
+                                                     mask_value=0)
     dx_full = np.sqrt(dx_mean**2 + dx_std**2)
     dy_full = np.sqrt(dy_mean**2 + dy_std**2)
     if get_par(set_zogy.verbose,tel):
@@ -5652,7 +5715,7 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
             if get_par(set_zogy.fratio_local,tel):
                 # determine local fratios
                 fratio_mean, fratio_median, fratio_std = sigma_clipped_stats(
-                    fratio_match[mask_sub], mask_value=0)
+                    fratio_match[mask_sub].astype('float64'), mask_value=0)
                 fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
                                              fratio_std_full, log)
                     
@@ -5660,9 +5723,9 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
             if get_par(set_zogy.dxdy_local,tel):
                 # determine local values
                 dx_mean, dx_median, dx_std = sigma_clipped_stats(
-                    dx_match[mask_sub], mask_value=0)
+                    dx_match[mask_sub].astype('float64'), mask_value=0)
                 dy_mean, dy_median, dy_std = sigma_clipped_stats(
-                    dy_match[mask_sub], mask_value=0)
+                    dy_match[mask_sub].astype('float64'), mask_value=0)
                 dx = np.sqrt(dx_mean**2 + dx_std**2)
                 dy = np.sqrt(dy_mean**2 + dy_std**2)
 
@@ -5909,16 +5972,17 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     header_wcs['A-INDEX'] = (anet_index, 'name of index file WCS solution')
 
     # and pixelscale
-    cd1_1 = header_wcs['CD1_1']
-    cd1_2 = header_wcs['CD1_2']
-    cd2_1 = header_wcs['CD2_1']
-    cd2_2 = header_wcs['CD2_2']
+    cd1_1 = header_wcs['CD1_1']  # CD1_1 = CDELT1 * cos (CROTA2)
+    cd1_2 = header_wcs['CD1_2']  # CD1_2 = -CDELT2 * sin (CROTA2)
+    cd2_1 = header_wcs['CD2_1']  # CD2_1 = CDELT1 * sin (CROTA2)
+    cd2_2 = header_wcs['CD2_2']  # CD2_2 = CDELT2 * cos (CROTA2)
 
     anet_pixscale_x = np.sqrt(cd1_1**2 + cd1_2**2) * 3600.
     anet_pixscale_y = np.sqrt(cd2_2**2 + cd2_1**2) * 3600.
     anet_pixscale = np.average([anet_pixscale_x, anet_pixscale_y])
 
-    # and rotation
+    # and rotation with the angle between the North and the second
+    # axis (y-axis) of the image, counted positive to the East
     anet_rot_x = np.arctan2( cd1_2, cd1_1) * (180./np.pi)
     anet_rot_y = np.arctan2(-cd2_1, cd2_2) * (180./np.pi)
     anet_rot = np.average([anet_rot_x, anet_rot_y])
@@ -6044,9 +6108,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         
         # calculate means, stds and medians
         dra_mean, dra_median, dra_std = sigma_clipped_stats(
-            dra_array, sigma=5, mask_value=0)
+            dra_array.astype('float64'), sigma=5, mask_value=0)
         ddec_mean, ddec_median, ddec_std = sigma_clipped_stats(
-            ddec_array, sigma=5, mask_value=0)
+            ddec_array.astype('float64'), sigma=5, mask_value=0)
         
         log.info('dra_mean [arcsec]: {:.3f}, dra_std: {:.3f}, dra_median: {:.3f}'
                  .format(dra_mean, dra_std, dra_median))
@@ -6482,16 +6546,18 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
                  'determination')
         
     # determine mean, median and standard deviation through sigma clipping
-    fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select,
-                                                           mask_value=0)
+    fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(
+        fwhm_select.astype('float64'), mask_value=0)
+
     if get_par(set_zogy.verbose,tel):
         log.info('catalog: {}'.format(cat_ldac))
         log.info('fwhm_mean: {:.3f}, fwhm_median: {:.3f}, fwhm_std: {:.3f}'.
                  format(fwhm_mean, fwhm_median, fwhm_std))
     if get_elong:
         # determine mean, median and standard deviation through sigma clipping
-        elong_mean, elong_median, elong_std = sigma_clipped_stats(elong_select,
-                                                                  mask_value=0)
+        elong_mean, elong_median, elong_std = sigma_clipped_stats(
+            elong_select.astype('float64'), mask_value=0)
+
         if get_par(set_zogy.verbose,tel):
             log.info('elong_mean: {:.3f}, elong_median: {:.3f}, elong_std: {:.3f}'
                      .format(elong_mean, elong_median, elong_std))
