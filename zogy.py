@@ -6362,6 +6362,11 @@ def ldac2fits (cat_ldac, cat_fits, log):
 
         # delete VIGNET column
         hdulist[2].data = drop_fields(hdulist[2].data, 'VIGNET')
+
+        # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
+        hdulist[2].data.columns['ALPHAWIN_J2000'].name = 'RA'
+        hdulist[2].data.columns['DELTAWIN_J2000'].name = 'DEC'    
+
         # and write regular fits file
         hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
         hdulist_new.writeto(cat_fits, overwrite=True)
@@ -6918,12 +6923,16 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             fits.writeto(fits_bkg_std, data_bkg_std, header, overwrite=True)
 
 
-    # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
-    data_sexcat = read_hdulist(cat_out)
-    data_sexcat.columns['ALPHAWIN_J2000'].name = 'RA'
-    data_sexcat.columns['DELTAWIN_J2000'].name = 'DEC'    
-    # overwrite [cat_out]
-    fits.writeto(cat_out, data_sexcat, overwrite=True)
+
+    if False:
+        # this deletes the 2nd extension in the LDAC catalog; moved
+        # this to the function [ldac2fits]
+        # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
+        data_sexcat = read_hdulist(cat_out)
+        data_sexcat.columns['ALPHAWIN_J2000'].name = 'RA'
+        data_sexcat.columns['DELTAWIN_J2000'].name = 'DEC'    
+        # overwrite [cat_out]
+        fits.writeto(cat_out, data_sexcat, overwrite=True)
 
 
     if return_fwhm_elong:
