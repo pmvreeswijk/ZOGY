@@ -737,7 +737,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # compute statistics on Fpsferr image
         mean_Fpsferr, std_Fpsferr, median_Fpsferr = (
-            clipped_stats (data_Fpsferr_full[y_stat,x_stat], make_hist=get_par(set_zogy.make_plots,tel),
+            clipped_stats (data_Fpsferr_full[y_stat,x_stat],
+                           make_hist=get_par(set_zogy.make_plots,tel),
                            name_hist='{}_Fpsferr_hist.pdf'.format(base_newref),
                            hist_xlabel='value in Fpsferr image', log=log))
         if get_par(set_zogy.verbose,tel):
@@ -3562,12 +3563,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
         header['LIMFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma limiting flux'
                              .format(nsigma))
-            
+
         # get airmasses for SExtractor catalog sources
         ra_sex = data_sex['RA']
         dec_sex = data_sex['DEC']
         flags_sex = data_sex['FLAGS']
-
+        xcoords_sex = data_sex['XWIN_IMAGE']
+        ycoords_sex = data_sex['YWIN_IMAGE']
+        
         lat = get_par(set_zogy.obs_lat,tel)
         lon = get_par(set_zogy.obs_lon,tel)
         height = get_par(set_zogy.obs_height,tel)
@@ -3614,7 +3617,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # add header keyword(s):
             cal_name = get_par(set_zogy.cal_cat,tel).split('/')[-1]
             header['PC-CAT-F'] = (cal_name, 'photometric catalog')
-            #caldate = time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(set_zogy.cal_cat)))
+            #caldate = time.strftime('%Y-%m-%d',
+            #time.gmtime(os.path.getmtime(set_zogy.cal_cat)))
 
             # Only execute the following block if input [data_cal] is
             # not defined; if [set_zogy.cal_cat] exists, [data_cal] should
@@ -3625,8 +3629,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 # [get_zone_indices] (each 1 degree strip in declination is
                 # recorded in its own extension in the calibration catalog)
                 fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
-                zone_indices = get_zone_indices (dec_center, fov_half_deg, zone_size=60.)
-                #print ('dec_center: {}, zone_indices: {}'.format(dec_center, zone_indices))
+                zone_indices = get_zone_indices (dec_center, fov_half_deg,
+                                                 zone_size=60.)
+                #print ('dec_center: {}, zone_indices: {}'
+                #.format(dec_center, zone_indices))
 
                 # read specific extensions (=zone_indices+1) of
                 # calibration catalog
@@ -3635,24 +3641,29 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
                 # use function [find_stars] to select stars in calibration
                 # catalog that are within the current field-of-view
-                mask_field = find_stars(data_cal['ra'], data_cal['dec'], ra_center, dec_center,
-                                        fov_half_deg, log)
+                mask_field = find_stars(data_cal['ra'], data_cal['dec'],
+                                        ra_center, dec_center, fov_half_deg,
+                                        log=log)
                 index_field = np.where(mask_field)[0]
                 data_cal = data_cal[index_field]
 
 
             ncalstars = np.shape(data_cal)[0]
-            log.info('number of potential photometric calibration stars in FOV: {}'.format(ncalstars))
-            header['PC-TNCAL'] = (ncalstars, 'total number of photcal stars in FOV')
+            log.info('number of potential photometric calibration stars in FOV: '
+                     '{}'.format(ncalstars))
+            header['PC-TNCAL'] = (ncalstars, 'total number of photcal stars in '
+                                  'FOV')
 
             # test: limit calibration catalog entries
             if 'chi2' in data_cal.dtype.names:
-                mask_cal = (np.isfinite(data_cal['chi2']) & (data_cal['chi2'] <= 10.))
+                mask_cal = (np.isfinite(data_cal['chi2']) &
+                            (data_cal['chi2'] <= 10.))
                 #data_cal = data_cal[:][mask_cal]
                 data_cal = data_cal[mask_cal]
 
             ncalstars = np.shape(data_cal)[0]
-            log.info('number of phot.cal. stars in FOV after chi2 cut: {}'.format(ncalstars))
+            log.info('number of phot.cal. stars in FOV after chi2 cut: {}'
+                     .format(ncalstars))
 
             # requirements on presence of survey input filters for the
             # calibration of a ML/BG filter:
@@ -3670,7 +3681,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # these filters are required for specific filters, boolean OR
             filt_req['u'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u']
             filt_req['g'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g']
-            filt_req['q'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g', 'PS1_g', 'SM_g']
+            filt_req['q'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g',
+                             'PS1_g', 'SM_g']
             filt_req['i'] = ['PS1_z', 'PS1_y', 'SDSS_z', 'SM_z']
             filt_req['z'] = ['PS1_y']
 
@@ -3684,25 +3696,29 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 # [mask_cal_filt] is mask for for entries in the
                 # updated [data_cal] for which all filters in
                 # [filt_req[current filter]] are present
-                mask_cal_filt = np.any([data_cal[col] for col in filt_req[filt]], axis=0)
+                mask_cal_filt = np.any([data_cal[col] for col in filt_req[filt]],
+                                       axis=0)
                 # if less than [set_zogy.phot_ncal_min] stars left,
                 # drop filter requirements and hope for the best!
                 if np.sum(mask_cal_filt) >= get_par(set_zogy.phot_ncal_min,tel):
                     data_cal = data_cal[mask_cal_filt]
                 else:
-                    log.info('Warning: less than {} calibration stars with default '
-                             'filter requirements'
+                    log.info('Warning: less than {} calibration stars with '
+                             'default filter requirements'
                              .format(get_par(set_zogy.phot_ncal_min,tel)))
                     log.info('filter: {}, requirements (any one of these): {}'
                              .format(filt, filt_req[filt]))
-                    log.info('dropping this specific requirement and hoping for the best')
+                    log.info('dropping this specific requirement and hoping '
+                             'for the best')
                     
 
             # This is the number of photometric calibration stars
             # after the chi2 and filter requirements cut.
             ncalstars = np.shape(data_cal)[0]
-            log.info('number of photometric stars in FOV after filter cut: {}'.format(ncalstars))
-            header['PC-FNCAL'] = (ncalstars, 'number of photcal stars after filter cut')
+            log.info('number of photometric stars in FOV after filter cut: {}'
+                     .format(ncalstars))
+            header['PC-FNCAL'] = (ncalstars, 'number of photcal stars after '
+                                  'filter cut')
             
             # pick only main sequence stars
             if False:
@@ -3722,14 +3738,88 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 dec_cal = data_cal['dec']
                 mag_cal = data_cal[filt]
                 magerr_cal = data_cal['err_{}'.format(filt)]
-                # infer the zeropoint
+                # discard SExtractor catalog entries with negative
+                # flux and FLAGS higher than 1
                 mask_zp = ((flux_opt>0.) & (flags_sex<=1))
-                zp, zp_std, ncal_used = get_zp(ra_sex[mask_zp], dec_sex[mask_zp],
-                                               airmass_sex[mask_zp], flux_opt[mask_zp],
-                                               fluxerr_opt[mask_zp], ra_cal, dec_cal,
-                                               mag_cal, magerr_cal, exptime, filt,
-                                               imtype, log, data_cal)
-                header['PC-NCAL'] = (ncal_used, 'number of brightest photcal stars used')
+
+                # collect individual zeropoints across entire image
+                x_array, y_array, zp_array = collect_zps (
+                    ra_sex[mask_zp], dec_sex[mask_zp], airmass_sex[mask_zp],
+                    xcoords_sex[mask_zp], ycoords_sex[mask_zp],
+                    flux_opt[mask_zp], fluxerr_opt[mask_zp],
+                    ra_cal, dec_cal, mag_cal, magerr_cal,
+                    exptime, filt, log=log)
+                
+                # determine single zeropoint for entire image
+                zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
+                                                 filt, imtype, data_wcs.shape,
+                                                 zp_type='single')
+                
+                header['PC-NCAL'] = (ncal_used, 'number of brightest photcal '
+                                     'stars used')
+                
+                # for MeerLICHT and BlackGEM only
+                if tel=='ML1' or tel[0:2]=='BG':
+
+                    # calculate zeropoint for each channel
+                    zp_chan, zp_std_chan, ncal_chan = calc_zp (
+                        x_array, y_array, zp_array, filt, imtype,
+                        zp_type='channels')
+
+                    # and on scale of background boxsize
+                    zp_mini, zp_std_mini, ncal_mini = calc_zp (
+                        x_array, y_array, zp_array, filt, imtype,
+                        data_shape=data_wcs.shape,
+                        zp_type='background')
+
+                    # save these to fits
+                    fits_zp_mini = '{}_zp_mini.fits'.format(base)
+                    fits.writeto(fits_zp_mini, zp_mini, overwrite=True)
+                    fits_zp_std_mini = '{}_zp_std_mini.fits'.format(base)
+                    fits.writeto(fits_zp_std_mini, zp_std_mini, overwrite=True)
+
+                    # fill zeros in zp_mini with median of surrounding 3x3
+                    # pixels, until no more zeros left
+                    while (np.sum(zp_mini == 0) != 0):
+                        mask_zero = (zp_mini == 0)
+                        zp_mini_filt = median_filter (zp_mini, ~mask_zero)
+                        zp_mini[mask_zero] = zp_mini_filt[mask_zero]
+        
+                    # same for zp_std_mini
+                    while (np.sum(zp_std_mini == 0) != 0):
+                        mask_zero = (zp_std_mini == 0)
+                        zp_std_mini_filt = median_filter (zp_std_mini, ~mask_zero)
+                        zp_std_mini[mask_zero] = zp_std_mini_filt[mask_zero]
+
+                    # now that zeros are gone, median filter images
+                    # with filtersize defined in settings file
+                    size_filter = get_par(set_zogy.bkg_filtersize,tel)
+                    zp_mini_filt = ndimage.filters.median_filter(zp_mini,
+                                                                 size_filter)
+                    zp_std_mini_filt = ndimage.filters.median_filter(zp_std_mini,
+                                                                     size_filter)
+                    # save these to fits
+                    fits_zp_mini_filt = '{}_zp_mini_filt.fits'.format(base)
+                    fits.writeto(fits_zp_mini_filt, zp_mini_filt, overwrite=True)
+                    fits_zp_std_mini_filt = '{}_zp_std_mini_filt.fits'.format(base)
+                    fits.writeto(fits_zp_std_mini_filt, zp_std_mini_filt, overwrite=True)
+
+                    # now use function [mini2back] to turn filtered mesh of median
+                    # and std of background regions into full background image and
+                    # its standard deviation
+                    data_zp = mini2back (zp_mini_filt, data_wcs.shape, log, order_interp=2, 
+                                         bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                                         timing=get_par(set_zogy.timing,tel))
+                    data_zp_std = mini2back (zp_std_mini_filt, data_wcs.shape, log,
+                                             order_interp=1,
+                                             bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                                             timing=get_par(set_zogy.timing,tel)) 
+                    # save these to fits
+                    fits_zp = '{}_zp.fits'.format(base)
+                    fits.writeto(fits_zp, data_zp, overwrite=True)
+                    fits_zp_std = '{}_zp_std.fits'.format(base)
+                    fits.writeto(fits_zp_std, data_zp_std, overwrite=True)
+
 
             header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_max,tel),
                                   'input max. number of photcal stars to use')
@@ -3768,7 +3858,19 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
                               '[mag] default filter zeropoint in settings file')
         header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
-        header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint sigma')
+        header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
+
+        if tel=='ML1' or tel[0:2]=='BG':
+            for i_chan in range(zp_chan.size):
+                header['PC-ZP{}'.format(i_chan+1)] = (
+                    zp_chan.ravel()[i_chan], '[mag] channel {} zeropoint'
+                    .format(i_chan+1))
+            for i_chan in range(zp_chan.size):
+                header['PC-ZPS{}'.format(i_chan+1)] = (
+                    zp_std_chan.ravel()[i_chan], '[mag] channel {} sigma (STD) '
+                    'zeropoint'.format(i_chan+1))
+
+
         header['PC-EXTCO'] = (get_par(set_zogy.ext_coeff,tel)[filt], 
                               '[mag] filter extinction coefficient (k)')
         header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
@@ -4117,7 +4219,7 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
     for i in range(ncal):
 
         mask_match = find_stars(ra_sex, dec_sex, ra_cal[i], dec_cal[i],
-                                dist_max, log, search='circle')
+                                dist_max, search='circle', log=log)
 
         if np.sum(mask_match)==1:
             # there's one match, calculate its zeropoint
@@ -4168,6 +4270,205 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
 
     return zp_median, zp_std, nmatch
     
+
+################################################################################
+
+def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
+                 flux_opt, fluxerr_opt, ra_cal, dec_cal, mag_cal, magerr_cal,
+                 exptime, filt, log=None):
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing collect_zps ...')
+
+    # maximum distance in degrees between sources to match
+    dist_max = 3./3600
+
+    # record zeropoints in array with same size as number of
+    # calibration stars in the FOV
+    ncal = np.shape(ra_cal)[0]
+    zp_array = np.zeros(ncal)
+    x_array = np.zeros(ncal)
+    y_array = np.zeros(ncal)
+    
+    # instrumental magnitudes and errors
+    nrows = np.shape(ra_sex)[0]
+    mag_sex_inst = np.zeros(nrows)-1
+    magerr_sex_inst = np.zeros(nrows)-1
+    mag_sex_inst = -2.5*np.log10(flux_opt/exptime)
+    pogson = 2.5/np.log(10.)
+    magerr_sex_inst = pogson*fluxerr_opt/flux_opt
+
+    # sort calibration catalog arrays in brightness
+    index_sort = np.argsort(mag_cal)
+    ra_cal_sort = ra_cal[index_sort]
+    dec_cal_sort = dec_cal[index_sort]
+    mag_cal_sort = mag_cal[index_sort]
+
+    nmatch = 0
+    # loop calibration stars and find a match in SExtractor sources
+    for i in range(ncal):
+        
+        mask_match = find_stars(ra_sex, dec_sex, ra_cal_sort[i], dec_cal_sort[i],
+                                dist_max, search='circle')
+
+        if np.sum(mask_match)==1:
+            # there's one match, calculate its zeropoint
+            # need to calculate airmass for each star, as around A=2,
+            # difference in airmass across the FOV is 0.1, i.e. a 5% change
+            zp_array[i] = (mag_cal_sort[i] - mag_sex_inst[mask_match] +
+                           airmass_sex[mask_match] *
+                           get_par(set_zogy.ext_coeff,tel)[filt])
+            x_array[i] = xcoords_sex[mask_match]
+            y_array[i] = ycoords_sex[mask_match]
+
+            nmatch += 1
+            
+            if False:
+                # if single zeropoint is needed, break out of loop
+                # when number of matches equals [set_zogy.phot_ncal_max]
+                if nmatch == get_par(set_zogy.phot_ncal_max,tel):
+                    break
+
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel):
+            log_timing_memory (t0=t, label='collect_zps', log=log)
+
+
+    mask_nonzero = (zp_array != 0)
+    return x_array[mask_nonzero], y_array[mask_nonzero], zp_array[mask_nonzero]
+
+
+################################################################################
+
+def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
+             zp_type='single', log=None):
+                
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing calc_zp ...')
+
+    if imtype=='new':
+        base = base_new
+    else:
+        base = base_ref
+    
+    if zp_type == 'single':
+
+        # determine median zeropoint, requiring at least 3 non-zero values
+        # in zp_array
+        nmax = get_par(set_zogy.phot_ncal_max,tel)
+        if np.sum(zp_array != 0) >= 3:
+            __, zp_std, zp_median = clipped_stats(
+                zp_array[0:nmax], clip_zeros=True,
+                make_hist=get_par(set_zogy.make_plots,tel),
+                name_hist='{}_zp_hist.pdf'.format(base),
+                hist_xlabel='{} zeropoint (mag)'.format(filt),
+                log=log)
+            nmatch = len(zp_array[0:nmax])
+            
+        else:
+            log.info('Warning: could not determine median and/or std zeropoint; '
+                     'returning zeros')
+            zp_std, zp_median = 0, 0
+            nmatch = 0
+            
+    elif zp_type == 'channels':
+
+        # determine zeropoints of the 16 channels of the
+        # MeerLICHT/BlackGEM CCD
+        zp_median, zp_std, nmatch = zps_medarray (x_array, y_array, zp_array,
+                                                  1320, 5280, (2,8), nval_min=3)
+
+    elif zp_type == 'background':
+
+        # determine zeropoints on the scale of the background boxsize
+        ysize, xsize = data_shape
+        boxsize = get_par(set_zogy.bkg_boxsize,tel)
+        if ysize % boxsize != 0 or xsize % boxsize !=0:
+            log.info('Warning: [set_zogy.bkg_boxsize] does not fit integer '
+                     'times in image')
+        nysubs = int(ysize / boxsize)
+        nxsubs = int(xsize / boxsize)
+        zp_median, zp_std, nmatch = zps_medarray (x_array, y_array, zp_array,
+                                                  boxsize, boxsize,
+                                                  (nysubs, nxsubs), nval_min=1)
+
+
+    if log is not None:
+
+        if get_par(set_zogy.verbose,tel):
+            log.info('zp_median: {}'.format(zp_median))
+            log.info('zp_std: {}'.format(zp_std))
+            log.info('nmatch: {}'.format(nmatch))
+            
+        if get_par(set_zogy.timing,tel):
+            log_timing_memory (t0=t, label='calc_zp', log=log)
+
+
+    return zp_median, zp_std, nmatch
+    
+
+################################################################################
+
+def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min=3):
+    
+    """Function that returns three arrays with shape [array_shape] with
+    the clipped median, standard deviation and number of zeropoint
+    values [zps] over rectangles with size [dx] x [dy] and shape
+    [array_shape]. This is used to calculate the median zeropoints
+    over the MeerLICHT/BlackGEM channels, or to create a "mini" image
+    with the median zeropoints over some box size, similar to the mini
+    background and standard deviation images.
+
+    """
+
+    # initialize output arrays
+    zps_median = np.zeros(array_shape).ravel().astype('float32')
+    zps_std = np.zeros(array_shape).ravel().astype('float32')
+    zps_nstars = np.zeros(array_shape).ravel().astype(int)
+    
+    # determine the indices of the origins of the subimages
+    nsubs = zps_median.size
+    ny, nx = array_shape
+    index_x = np.tile(np.arange(nx) * dx, ny)
+    index_y = np.repeat(np.arange(ny) * dy, nx)
+
+    # initialize the integer [sub_array] with same size as
+    # coordinates/zeropoint arrays
+    ncoords = np.size(xcoords)
+    sub_array = np.zeros(ncoords).astype(int)
+    
+    # determine to which subimage the coordinates belong
+    x = (xcoords-0.5).astype(int)
+    y = (ycoords-0.5).astype(int)
+    for nsub in range(nsubs):
+        mask_sub = ((x >= index_x[nsub]) &  (x < index_x[nsub]+dx) &
+                    (y >= index_y[nsub]) &  (y < index_y[nsub]+dy))
+        sub_array[mask_sub] = nsub
+        # record number of stars in subimage
+        zps_nstars[nsub] = np.sum(mask_sub)
+
+
+    # loop subimages and determine median zeropoint
+    for nsub in range(nsubs):
+
+        # mask that identifies zeropoints in current subimage
+        mask = (sub_array==nsub)
+
+        # only determine median when sufficient number of values
+        # [nval_min] are available; otherwise leave it at zero
+        if np.sum(mask) >= nval_min:
+            mean, median, std = sigma_clipped_stats (zps[mask])
+            zps_median[nsub] = median
+            zps_std[nsub] = std
+            
+    # return median values with shape [array_shape]
+    return (zps_median.reshape(array_shape),
+            zps_std.reshape(array_shape),
+            zps_nstars.reshape(array_shape))
+
 
 ################################################################################
 
@@ -4255,10 +4556,11 @@ def field_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
 
 ################################################################################
 
-def find_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
+def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box', log=None):
 
-    if get_par(set_zogy.timing,tel): t = time.time()
-    #log.info('executing find_stars ...')
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing find_stars ...')
 
     # find entries in [ra_cat] and [dec_cat] within [dist] of
     # [ra] and [dec]
@@ -4278,8 +4580,9 @@ def find_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
         dsigma_dec = np.abs(dec_cat_cut-dec)
         mask_data[mask_cut] = ((dsigma_ra<=dist) & (dsigma_dec<=dist))
 
-    #if get_par(set_zogy.timing,tel):
-    #    log_timing_memory (t0=t, label='find_stars', log=log)
+    if log is not None:
+        if get_par(set_zogy.timing,tel):
+            log_timing_memory (t0=t, label='find_stars', log=log)
 
     return mask_data
 
@@ -4564,34 +4867,7 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     #mini_median[~np.isfinite(mini_median)] = 0
     #mini_std[~np.isfinite(mini_std)] = 0
 
-
-    # helper function to return median filter, with size
-    # [filter_size], of array with mask (True=valid pixels)
-    def median_filter (array, mask, filter_size=3):
-        
-        # array shape
-        ysize, xsize = array.shape
-
-        # pad array with (filter_size-1)//2 pixels with value 0
-        dpix = int(filter_size-1)//2
-        array_pad = np.pad(array, (dpix,dpix), 'constant')
-        # and mask with value False
-        mask_pad = np.pad(mask, (dpix,dpix), 'constant')
-        
-        # using skimage.util.shape.view_as_windows to construct cubes
-        window_shape = (filter_size, filter_size)
-        array_cube = view_as_windows (array_pad, window_shape).reshape(
-            array.shape[0], array.shape[1], -1)
-        mask_cube = view_as_windows (mask_pad, window_shape).reshape(
-            mask.shape[0], mask.shape[1], -1)
     
-        # create masked array
-        array_masked = np.ma.masked_array(array_cube, mask=~mask_cube)
-    
-        # return median filtered array
-        return np.ma.median(array_masked, axis=2)
-
-
     # fill zeros in mini_median with median of surrounding 3x3
     # pixels, until no more zeros left
     while (np.sum(mini_median == 0) != 0):
@@ -4628,6 +4904,35 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     # being float64 as well
     return (mini_median_filt.astype('float32'), mini_std_filt.astype('float32'),
             bkg_median, bkg_std)
+
+
+################################################################################
+
+# helper function to return median filter, with size
+# [filter_size], of array with mask (True=valid pixels)
+def median_filter (array, mask, filter_size=3):
+    
+    # array shape
+    ysize, xsize = array.shape
+    
+    # pad array with (filter_size-1)//2 pixels with value 0
+    dpix = int(filter_size-1)//2
+    array_pad = np.pad(array, (dpix,dpix), 'constant')
+    # and mask with value False
+    mask_pad = np.pad(mask, (dpix,dpix), 'constant')
+    
+    # using skimage.util.shape.view_as_windows to construct cubes
+    window_shape = (filter_size, filter_size)
+    array_cube = view_as_windows (array_pad, window_shape).reshape(
+        array.shape[0], array.shape[1], -1)
+    mask_cube = view_as_windows (mask_pad, window_shape).reshape(
+        mask.shape[0], mask.shape[1], -1)
+    
+    # create masked array
+    array_masked = np.ma.masked_array(array_cube, mask=~mask_cube)
+    
+    # return median filtered array
+    return np.ma.median(array_masked, axis=2)
 
 
 ################################################################################
@@ -5901,7 +6206,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            '--no-remove-lines', '--uniformize', '0',
            # only work on brightest sources
            #'--objs', '1000',
-           '--width', str(width), '--height', str(height),           
+           '--width', str(width),
+           '--height', str(height),           
            #'--keep-xylist', sexcat,
            # ignore existing WCS headers in FITS input images
            #'--no-verify', 
@@ -5917,11 +6223,15 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            '--depth', '50,150,200,250,300,350,400,450,500',
            #'--scamp', scampcat,
            # give up solving after the specified number of seconds of CPU time
-           #'--cpulimit', '60',
+           '--cpulimit', '60',
            sexcat_bright,
-           '--tweak-order', str(get_par(set_zogy.astronet_tweak_order,tel)), '--scale-low', str(scale_low),
-           '--scale-high', str(scale_high), '--scale-units', 'app',
-           '--ra', str(ra), '--dec', str(dec), '--radius', str(get_par(set_zogy.astronet_radius,tel)),
+           '--tweak-order', str(get_par(set_zogy.astronet_tweak_order,tel)),
+           '--scale-low', str(scale_low),
+           '--scale-high', str(scale_high),
+           '--scale-units', 'app',
+           '--ra', str(ra),
+           '--dec', str(dec),
+           '--radius', str(get_par(set_zogy.astronet_radius,tel)),
            '--new-fits', 'none', '--overwrite',
            '--out', base.split('/')[-1],
            '--dir', dir_out
@@ -6063,7 +6373,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         # use function [find_stars] to select stars in calibration
         # catalog that are within the current field-of-view
         mask_field = find_stars(data_cal['ra'], data_cal['dec'],
-                                ra_center, dec_center, fov_half_deg, log)
+                                ra_center, dec_center, fov_half_deg, log=log)
         index_field = np.where(mask_field)[0]
         # N.B.: this [data_cal] array is returned by this function
         # [run_wcs] and also by [sex_wcs] so that it can be re-used
