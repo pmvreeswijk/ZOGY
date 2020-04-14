@@ -3309,9 +3309,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_wcs -= data_bkg
 
         # overwrite [input_fits] with its background-subtracted image
-        header['BKG-SUB'] = (True, 'sky background was subtracted?')
-        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits.writeto(input_fits, data_wcs, header, overwrite=True) 
+        # 20200414: why not keep background in fits image??
+        if False:
+            header['BKG-SUB'] = (True, 'sky background was subtracted?')
+            header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+            fits.writeto(input_fits, data_wcs, header, overwrite=True) 
         
         
     # read in background std image in any case (i.e. also if
