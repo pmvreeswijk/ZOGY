@@ -318,6 +318,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if (('CTYPE1' not in header and 'CTYPE2' not in header) or get_par(set_zogy.redo,tel)):
             try:
                 if not get_par(set_zogy.skip_wcs,tel):
+                    # delete some keywords that astrometry.net does
+                    # not appear to overwrite
+                    for key in ['CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2',
+                                'CUNIT1', 'CUNIT2',
+                                'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
+                                'PROJP1', 'PROJP3',
+                                'PV1_1', 'PV1_2', 'PV2_1', 'PV2_2']:
+                        if key in header: 
+                            del header[key]                    
                     WCS_processed = False
                     fits_base = '{}.fits'.format(base)
                     data_cal = run_wcs(fits_base, fits_base, ra, dec, 
@@ -3080,8 +3089,9 @@ def flux_optimal_s2n (P, bkg_var, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
             break
         
         # also break out of loop if S/N sufficiently close
-        if abs(flux_opt/fluxerr_opt - s2n) / s2n < epsilon:
-            break
+        if fluxerr_opt != 0:
+            if abs(flux_opt/fluxerr_opt - s2n) / s2n < epsilon:
+                break
         
     return flux_opt
     
@@ -3319,30 +3329,42 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                   bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
                                   timing=get_par(set_zogy.timing,tel))
 
+        
 
-    # function to create a minimal mask of saturated pixels and the
-    # adjacent pixels from input data, in case mask image is not
-    # provided
-    def create_mask (data, satlevel):
-        # saturated pixels
-        data_mask = np.zeros(data.shape, dtype='uint8')
-        mask_sat = (data >= 0.8*satlevel)
-        data_mask[mask_sat] += get_par(set_zogy.mask_value['saturated'],tel)
-        # pixels connected to saturated pixels
-        mask_sat_adj = ndimage.binary_dilation(mask_sat, structure=np.ones((3,3)).astype('bool'))
-        mask_sat_adj[mask_sat] = False
-        data_mask[mask_sat_adj] += get_par(set_zogy.mask_value['saturated-connected'],tel)
+    def create_modify_mask (data, satlevel, data_mask=None):
+
+        """function to identify the saturated and adjacent pixels in input
+           data and add these to an existing mask or creat a new one
+        """
+        if data_mask is None:
+            data_mask = np.zeros(data.shape, dtype='uint8')
+
+        value = get_par(set_zogy.mask_value['saturated'],tel)
+        mask_sat_check = (data_mask & value == value)
+
+        # if no saturated pixels already present, add them
+        if np.sum(mask_sat_check) == 0:
+            mask_sat = (data >= 0.8*satlevel)
+            data_mask[mask_sat] += get_par(set_zogy.mask_value['saturated'],tel)
+            # pixels connected to saturated pixels
+            mask_sat_adj = ndimage.binary_dilation(mask_sat,structure=
+                                                   np.ones((3,3)).astype('bool'))
+            mask_sat_adj[mask_sat] = False
+            data_mask[mask_sat_adj] += get_par(set_zogy.mask_value
+                                               ['saturated-connected'],tel)
         
         return data_mask
     
     
-    # and read in mask image
+
     if fits_mask is not None:
+        # read in mask image
         data_mask = read_hdulist (fits_mask, dtype='uint8')
     else:
-        # if mask image is not provided, use function [create_mask] to
-        # create a minimal mask
-        data_mask = create_mask (data_wcs, satlevel)
+        data_mask = None
+
+    # create new mask or modify an existing one
+    data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
 
 
     # in case the reference image needs to be remapped, SWarp the
@@ -3401,20 +3423,16 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # remap reference image background std
         data_ref_bkg_std_remap = help_swarp(fits_bkg_std, data_bkg_std,
                                             update_header=True)
-
-        # remap reference mask image if it exists
-        if fits_mask is not None:
-            # SWarp turns integer mask into float during processing,
-            # so need to add 0.5 and convert to integer again
-            data_ref_remap_mask = (help_swarp(
-                fits_mask, data_mask, update_header=True,
-                value_edge=get_par(set_zogy.mask_value['edge'],tel))
-                                   +0.5).astype('uint8')
-        else:
-            # if mask image is not provided, use above function [create_mask] to
-            # create a minimal mask from the remapped reference data
-            data_ref_remap_mask = create_mask(data_ref_remap, satlevel)
-
+        
+        # remap reference mask image; note that with update_header set
+        # to True, the data_mask is written to image [fits_mask]
+        # inside the function [help_swarp]; also: SWarp turns integer
+        # mask into float during processing, so need to add 0.5 and
+        # convert to integer again
+        data_ref_remap_mask = (help_swarp(
+            fits_mask, data_mask, update_header=True,
+            value_edge=get_par(set_zogy.mask_value['edge'],tel))
+                               +0.5).astype('uint8')
 
 
     # convert counts to electrons
@@ -4369,8 +4387,9 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
             nmatch = len(zp_array[0:nmax])
             
         else:
-            log.info('Warning: could not determine median and/or std zeropoint; '
-                     'returning zeros')
+            if log is not None:
+                log.info('Warning: could not determine median and/or std zeropoint; '
+                         'returning zeros')
             zp_std, zp_median = 0, 0
             nmatch = 0
             
@@ -4674,9 +4693,11 @@ def fixpix (data, log, satlevel=60000., data_mask=None, base=None,
     # features in the subtracted image.
     
     # determine pixels to be replaced
-    mask_2replace = ((data_mask == mask_value['saturated']) |
-                     (data_mask == mask_value['saturated-connected']))
-        
+    value_sat = mask_value['saturated']
+    value_satcon = mask_value['saturated-connected']
+    mask_2replace = ((data_mask & value_sat == value_sat) |
+                     (data_mask & value_satcon == value_satcon))
+    
     if imtype=='ref':
         struct = np.ones((3,3), dtype=bool)
         mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct, iterations=2)
