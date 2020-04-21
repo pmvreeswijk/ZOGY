@@ -3889,6 +3889,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 header['PC-ZPS{}'.format(i_chan+1)] = (
                     zp_std_chan.ravel()[i_chan], '[mag] channel {} sigma (STD) '
                     'zeropoint'.format(i_chan+1))
+            for i_chan in range(zp_chan.size):
+                header['PC-NCC{}'.format(i_chan+1)] = (
+                    ncal_chan.ravel()[i_chan], 'channel {} number of stars used'
+                    .format(i_chan+1))
 
 
         header['PC-EXTCO'] = (get_par(set_zogy.ext_coeff,tel)[filt], 
