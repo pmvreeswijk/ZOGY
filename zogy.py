@@ -72,7 +72,7 @@ __version__ = '0.9.2'
 # @profile
 def optimal_subtraction(new_fits=None,      ref_fits=None,
                         new_fits_mask=None, ref_fits_mask=None,
-                        set_file='Settings.set_zogy', log=None,
+                        set_file='set_zogy', log=None,
                         verbose=None, nthread=1, telescope='ML1'):
 
     """Function that accepts a new and a reference fits image, finds their
@@ -7983,7 +7983,7 @@ def main():
     parser.add_argument('--ref_fits', default=None, help='filename of ref image')
     parser.add_argument('--new_fits_mask', default=None, help='filename of new image mask')
     parser.add_argument('--ref_fits_mask', default=None, help='filename of ref image mask')
-    parser.add_argument('--set_file', default='Settings.set_zogy', help='name of settings file')
+    parser.add_argument('--set_file', default='set_zogy', help='name of settings file')
     parser.add_argument('--log', default=None, help='help')
     parser.add_argument('--verbose', default=None, help='verbose')
     parser.add_argument('--nthreads', default=1, type=int, help='number of threads to use')
