@@ -56,9 +56,6 @@ else
 fi
 pip="python${v_python} -m pip"
 
-# let /usr/bin/python refer to version installed above
-sudo ln -sf /usr/bin/python${v_python} /usr/bin/python
-
 # git
 sudo ${packman} -y install git
 
@@ -147,6 +144,9 @@ sudo wget -nc $url/astrometry/index-500{4..6}-1{0..1}.fits -P ${dir_save}
 
 # set environent variables:
 # ================================================================================
+
+# let /usr/bin/python refer to version installed above
+sudo ln -sf /usr/bin/python${v_python} /usr/bin/python
 
 echo
 echo "======================================================================"
