@@ -86,8 +86,12 @@ sudo ${packman} -y install astrometry.net
 # SExtractor (although it seems already installed automatically)
 sudo ${packman} -y install sextractor
 # the executable for this installation is 'sextractor' while ZOGY
-# expects 'source-extractor'; make a symbolic link
+# versions starting from 0.9.2 expect 'source-extractor'; make a
+# symbolic link
 sudo ln -s /usr/bin/sextractor /usr/bin/source-extractor
+# the command 'sex' is used in ZOGY versions before 0.9.2
+sudo ln -s /usr/bin/sextractor /usr/bin/sex
+
 
 # SWarp
 sudo ${packman} -y install swarp
