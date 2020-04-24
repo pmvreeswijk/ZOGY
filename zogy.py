@@ -1058,7 +1058,7 @@ def orient_data (data, header=None):
                     
     # for MeerLICHT and BlackGEM, orient arrays to North
     # up, East left orientation
-    if tel=='ML1' or tel=='BG2' or tel=='BG3' or tel=='BG4':
+    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
 
         # for reference image, check if already oriented correctly
         if header is not None:
@@ -3199,7 +3199,10 @@ def read_header(header, keywords, log):
         # from either the variable defined in settings file, or from
         # the fits header using the keyword name defined in the
         # settings file
-        values.append(get_keyvalue(key, header, log))
+        value = get_keyvalue(key, header, log)
+        if key=='filter':
+            value = str(value)
+        values.append(value)
 
     if len(values)==1:
         return values[0]
@@ -3364,7 +3367,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_mask = read_hdulist (fits_mask, dtype='uint8')
     else:
         data_mask = None
-
+        fits_mask = input_fits.replace('.fits', '_mask.fits')
+        
     # create new mask or modify an existing one
     data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
 
@@ -3576,13 +3580,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         keywords = ['exptime', 'filter', 'obsdate']
         exptime, filt, obsdate = read_header(header, keywords, log)
         if get_par(set_zogy.verbose,tel):
-            log.info('exptime: {}, filter: {}, obsdate: {}'.format(exptime, filt, obsdate))
+            log.info('exptime: {}, filter: {}, obsdate: {}'
+                     .format(exptime, filt, obsdate))
             
 
         # now that [exptime] is known, add n-sigma limiting flux in e-/s to header
         header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
-        header['LIMFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma limiting flux'
-                             .format(nsigma))
+        header['LIMFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
+                             'limiting flux'.format(nsigma))
 
         # get airmasses for SExtractor catalog sources
         ra_sex = data_sex['RA']
@@ -3632,7 +3637,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         
         # determine image zeropoint if ML/BG calibration catalog exists
         ncalstars=0
-        if os.path.isfile(get_par(set_zogy.cal_cat,tel)):
+        if (os.path.isfile(get_par(set_zogy.cal_cat,tel)) and
+            filt in 'ugqriz'):
             
             # add header keyword(s):
             cal_name = get_par(set_zogy.cal_cat,tel).split('/')[-1]
@@ -3779,7 +3785,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                      'stars used')
                 
                 # for MeerLICHT and BlackGEM only
-                if tel=='ML1' or tel[0:2]=='BG':
+                if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
 
                     # calculate zeropoint for each channel
                     zp_chan, zp_std_chan, ncal_chan = calc_zp (
@@ -3880,7 +3886,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
         header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
 
-        if tel=='ML1' or tel[0:2]=='BG':
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
             for i_chan in range(zp_chan.size):
                 header['PC-ZP{}'.format(i_chan+1)] = (
                     zp_chan.ravel()[i_chan], '[mag] channel {} zeropoint'
@@ -5842,7 +5848,9 @@ def moffat2min (params, image, xx, yy, fit_gauss, image_err=None, mask_use=None)
 
 def calc_psf_config (data, poldeg, x, y):
     
-    if poldeg==2:
+    if poldeg==1:
+        psf_ima_config = (data[0] + data[1] * x + data[2] * y)
+    elif poldeg==2:
         psf_ima_config = (data[0] + data[1] * x + data[2] * x**2 +
                           data[3] * y + data[4] * x * y + data[5] * y**2)
     elif poldeg==3:
