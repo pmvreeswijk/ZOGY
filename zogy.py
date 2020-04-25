@@ -18,7 +18,8 @@ from multiprocessing.dummy import Pool as ThreadPool
 import numpy as np
 
 # import numpy.fft as fft
-from numpy.lib.recfunctions import append_fields, drop_fields, rename_fields, stack_arrays
+from numpy.lib.recfunctions import append_fields, drop_fields
+from numpy.lib.recfunctions import rename_fields, stack_arrays
 import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
@@ -3856,9 +3857,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 log_timing_memory (t0=t2, label='determining photometric calibration', log=log)
 
         else:
-            log.info('Warning: photometric calibration catalog {} not found!'
+            log.info('Warning: photometric calibration catalog {} not found '
+                     'and/or filter not one of ugqriz'
                      .format(get_par(set_zogy.cal_cat,tel)))
-
+            
         # if there are no photometric calibration stars (either
         # because no photometric calibration catalog was provided, or
         # no matching calibration stars could be found in this
