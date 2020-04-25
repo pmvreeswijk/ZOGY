@@ -2323,32 +2323,52 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
     data_psf, header_psf = read_hdulist(psfex_bintable, get_header=True)
     data_psf = data_psf[0][0][:]
 
-    if psfex_bintable_ref is not None:
-        data_psf_ref, header_psf_ref = read_hdulist(psfex_bintable_ref, get_header=True)
-        data_psf_ref = data_psf_ref[0][0][:]
+    # determine [poldeg] from shape of psf data; if too few stars are
+    # available, PSFEx can lower this polynomial degree with respect
+    # to the initial value defined in [set_zogy.psf_poldeg]
+    poldeg = np.cumsum(range(10)).tolist().index(data_psf.shape[0])-1
 
-    # read in some header keyword values
-    keys = ['POLZERO1', 'POLZERO2', 'POLSCAL1', 'POLSCAL2', 'POLDEG1', 'PSF_FWHM', 
-            'PSF_SAMP', 'PSFAXIS1']
-    # [psf_size_config] is the size of the PSF grid as defined in the
-    # PSFex configuration file ([PSF_SIZE] parameter)
-    polzero1, polzero2, polscal1, polscal2, poldeg, psf_fwhm, psf_samp, psf_size_config = (
-        [header_psf[key] for key in keys])
+    # read keyword values from header; [psf_size_config] is the size of
+    # the PSF grid as defined in the PSFex configuration file
+    # ([PSF_SIZE] parameter)
+    keys = ['PSF_FWHM', 'PSF_SAMP', 'PSFAXIS1']
+    psf_fwhm, psf_samp, psf_size_config = ([header_psf[key] for key in keys])
+    # following keys are only present if poldeg nonzero
+    if poldeg != 0:
+        keys = ['POLZERO1', 'POLZERO2', 'POLSCAL1', 'POLSCAL2']
+        polzero1, polzero2, polscal1, polscal2 = (
+            [header_psf[key] for key in keys])
+    else:
+        polzero1, polzero2 = 0, 0
+        polscal1, polscal2 = 1, 1
 
-    if get_par(set_zogy.verbose,tel):
-        log.info('polzero1:                   {}'.format(polzero1))
-        log.info('polscal1:                   {}'.format(polscal1))
-        log.info('polzero2:                   {}'.format(polzero2))
-        log.info('polscal2:                   {}'.format(polscal2))
-        log.info('order polynomial:           {}'.format(poldeg))
-        log.info('PSFex FWHM:                 {}'.format(psf_fwhm))
-        log.info('PSF sampling size (pixels): {}'.format(psf_samp))
-        log.info('PSF size defined in config: {}'.format(psf_size_config))
+
 
     # same for reference image
     if psfex_bintable_ref is not None:
-        polzero1_ref, polzero2_ref, polscal1_ref, polscal2_ref, poldeg_ref, psf_fwhm_ref, psf_samp_ref, psf_size_config_ref = (
+        data_psf_ref, header_psf_ref = read_hdulist(psfex_bintable_ref,
+                                                    get_header=True)
+        data_psf_ref = data_psf_ref[0][0][:]
+
+        # determine [poldeg] from shape of psf data; if too few stars are
+        # available, PSFEx can lower this polynomial degree with respect
+        # to the initial value defined in [set_zogy.psf_poldeg]
+        poldeg_ref = np.cumsum(range(10)).tolist().index(data_psf_ref.shape[0])-1
+
+        # read keyword values from header
+        keys = ['PSF_FWHM', 'PSF_SAMP', 'PSFAXIS1']
+        psf_fwhm_ref, psf_samp_ref, psf_size_config_ref = (
             [header_psf_ref[key] for key in keys])
+
+        # following keys are only present if poldeg_ref nonzero
+        if poldeg_ref != 0:
+            keys = ['POLZERO1', 'POLZERO2', 'POLSCAL1', 'POLSCAL2']
+            polzero1_ref, polzero2_ref, polscal1_ref, polscal2_ref = (
+                [header_psf_ref[key] for key in keys])
+        else:
+            polzero1_ref, polzero2_ref = 0, 0
+            polscal1_ref, polscal2_ref = 1, 1
+
         
     # [psf_size] is the PSF size in image pixels,
     # i.e. [psf_size_config] multiplied by the PSF sampling (roughly
@@ -2395,7 +2415,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
             # same for reference image
             psf_ima_config_ref, index_ref, index_P_ref = get_psf_config (
                 data_psf_ref, xcoords[i], ycoords[i], psf_oddsized, ysize, xsize, 
-                psf_hsize, polzero1, polscal1, polzero2, polscal2, poldeg)
+                psf_hsize, polzero1_ref, polscal1_ref, polzero2_ref,
+                polscal2_ref, poldeg_ref)
             # if coordinates off the image, the function returns None
             # and the rest can be skipped
             if psf_ima_config_ref is None:
@@ -2700,10 +2721,8 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
     x = (int(xcoord) - polzero1) / polscal1
     y = (int(ycoord) - polzero2) / polscal2
 
-    if get_par(set_zogy.use_single_psf,tel):
-        psf_ima_config = data[0]
-    else:
-        psf_ima_config = calc_psf_config (data, poldeg, x, y)
+    # construct PSF at x,y
+    psf_ima_config = calc_psf_config (data, poldeg, x, y)
 
     # extract subsection from psf_shift and psf_noshift
     y1_P = y1 - (ypos - psf_hsize)
@@ -5161,6 +5180,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     subsize = get_par(set_zogy.subimage_size,tel)
     nx = int(xsize / subsize)
     ny = int(ysize / subsize)
+
     
     # run psfex on SExtractor output catalog
     #
@@ -5191,13 +5211,18 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         sexcat_ldac = '{}_ldac.fits'.format(base)
         log.info('sexcat_ldac: {}'.format(sexcat_ldac))
         try:
+            # set polynomial degree to use in [run_psfex]
+            poldeg = get_par(set_zogy.psf_poldeg,tel)
+            # but if only 1 subimage, use constant PSF
+            if nsubs==1:
+                poldeg = 0
             # size of axes of PSF output snap image; does not need to
             # be same as number of subimage
             nsnap = min(nx, ny)
             # run PSFEx:
             result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel), 
-                               psfexcat, imtype, nsnap=nsnap, limit_ldac=True,
-                               log=log)
+                               psfexcat, imtype, poldeg,
+                               nsnap=nsnap, limit_ldac=True, log=log)
         except Exception as e:
             PSFEx_processed = False
             log.info(traceback.format_exc())
@@ -5222,30 +5247,48 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     sexcat_ldac_psffit = '{}_ldac_psffit.fits'.format(base)
     if ((not os.path.isfile(sexcat_ldac_psffit) or get_par(set_zogy.redo,tel))
         and get_par(set_zogy.psffit_sex,tel)):
-        result = run_sextractor(image, sexcat_ldac_psffit, get_par(set_zogy.sex_cfg_psffit,tel),
+        result = run_sextractor(image, sexcat_ldac_psffit,
+                                get_par(set_zogy.sex_cfg_psffit,tel),
                                 get_par(set_zogy.sex_par_psffit,tel), pixscale, log, header,
                                 fit_psf=True, update_vignet=False, fwhm=fwhm)
         
+
     # If not already done so above, read in PSF output binary table
     # from psfex, containing the polynomial coefficient images
     if not ('header_psf' in dir()):
         data, header_psf = read_hdulist (psfex_bintable, get_header=True)
         data = data[0][0][:]
 
-    # read in some header keyword values
-    keys = ['POLZERO1', 'POLZERO2', 'POLSCAL1', 'POLSCAL2', 'POLDEG1', 'PSF_FWHM', 
-            'PSF_SAMP', 'PSFAXIS1', 'CHI2', 'ACCEPTED']
-    polzero1, polzero2, polscal1, polscal2, poldeg, psf_fwhm, psf_samp, \
-        psf_size_config, psf_chi2, psf_nstars = ([header_psf[key] for key in keys])
+
+    # determine [poldeg] from shape of psf data; if too few stars are
+    # available, PSFEx can lower this polynomial degree with respect
+    # to the initial value defined in [set_zogy.psf_poldeg]
+    poldeg = np.cumsum(range(10)).tolist().index(data.shape[0])-1
+
+    # read keyword values from header
+    keys = ['PSF_FWHM', 'PSF_SAMP', 'PSFAXIS1', 'CHI2', 'ACCEPTED']
+    psf_fwhm, psf_samp, psf_size_config, psf_chi2, psf_nstars = (
+        [header_psf[key] for key in keys])
+    # following keys are only present if poldeg nonzero
+    if poldeg != 0:
+        keys = ['POLZERO1', 'POLZERO2', 'POLSCAL1', 'POLSCAL2']
+        polzero1, polzero2, polscal1, polscal2 = (
+            [header_psf[key] for key in keys])
+    else:
+        polzero1, polzero2 = 0, 0
+        polscal1, polscal2 = 1, 1
+
 
     # [psf_size_config] is the size of the PSF as defined in the PSFex
     # configuration file ([PSF_SIZE] parameter), which is the same as
     # the size of the [data] array
     if get_par(set_zogy.verbose,tel):
-        log.info('polzero1:                     {}'.format(polzero1))
-        log.info('polscal1:                     {}'.format(polscal1))
-        log.info('polzero2:                     {}'.format(polzero2))
-        log.info('polscal2:                     {}'.format(polscal2))
+        if poldeg != 0:
+            log.info('polzero1:                     {}'.format(polzero1))
+            log.info('polscal1:                     {}'.format(polscal1))
+            log.info('polzero2:                     {}'.format(polzero2))
+            log.info('polscal2:                     {}'.format(polscal2))
+            
         log.info('order polynomial:             {}'.format(poldeg))
         log.info('PSFex FWHM:                   {}'.format(psf_fwhm))
         log.info('PSF sampling size (pixels):   {}'.format(psf_samp))
@@ -5253,6 +5296,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         log.info('number of accepted PSF stars: {}'.format(psf_nstars))
         log.info('final reduced chi2 PSFEx fit: {}'.format(psf_chi2))
         
+
     # call centers_cutouts to determine centers
     # and cutout regions of the full image
     subimage_size = get_par(set_zogy.subimage_size,tel)
@@ -5329,7 +5373,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         header['PSF-SAMP'] = (psf_samp_update, '[pix] PSF sampling step (~ PSF-FRAC * FWHM)')
         header['PSF-CFGS'] = (psf_size_config, 'size PSF config. image (= PSF-SIZE / PSF-SAMP)')
         header['PSF-NOBJ'] = (psf_nstars, 'number of accepted PSF stars')
-        header['PSF-FIX'] = (get_par(set_zogy.use_single_psf,tel), 'single fixed PSF used for entire image?')
+        header['PSF-FIX'] = (poldeg==0, 'single fixed PSF used for entire image?')
         header['PSF-PLDG'] = (poldeg, 'degree polynomial used in PSFEx')
         header['PSF-CHI2'] = (psf_chi2, 'final reduced chi-squared PSFEx fit')
         # add PSF-FWHM in arcseconds using initial pixel scale
@@ -5350,10 +5394,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         x = (centers[nsub,1] - polzero1) / polscal1
         y = (centers[nsub,0] - polzero2) / polscal2
 
-        if nsubs==1 or get_par(set_zogy.use_single_psf,tel):
-            psf_ima_config = data[0]
-        else:
-            psf_ima_config = calc_psf_config (data, poldeg, x, y)
+        # construct PSF at x,y
+        psf_ima_config = calc_psf_config (data, poldeg, x, y)
 
         # resample PSF image at image pixel scale
         psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update)
@@ -5850,13 +5892,15 @@ def moffat2min (params, image, xx, yy, fit_gauss, image_err=None, mask_use=None)
 
 def calc_psf_config (data, poldeg, x, y):
     
-    if poldeg==1:
+    if poldeg==0:
+        psf_ima_config = data[0]
+    elif poldeg==1:
         psf_ima_config = (data[0] + data[1] * x + data[2] * y)
     elif poldeg==2:
         psf_ima_config = (data[0] + data[1] * x + data[2] * x**2 +
                           data[3] * y + data[4] * x * y + data[5] * y**2)
     elif poldeg==3:
-        psf_ima_config = (data[0] + data[1] * x + data[2] * x**2 + data[3] * x**3 +
+        psf_ima_config = (data[0] + data[1] * x + data[2] * x**2  + data[3] * x**3 +
                           data[4] * y + data[5] * x * y + data[6] * x**2 * y +
                           data[7] * y**2 + data[8] * x * y**2 + data[9] * y**3)
 
@@ -7302,8 +7346,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, imtype, nsnap=11,
-              limit_ldac=True, log=None):
+def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
+              nsnap=11, limit_ldac=True, log=None):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -7377,7 +7421,8 @@ def run_psfex(cat_in, file_config, cat_out, imtype, nsnap=11,
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
            '-SAMPLE_MINSN', str(get_par(set_zogy.psf_stars_s2n_min,tel)),
-           '-NTHREADS', str(nthreads), '-PSFVAR_NSNAP', str(nsnap)]
+           '-NTHREADS', str(nthreads), '-PSFVAR_NSNAP', str(nsnap),
+           '-PSFVAR_DEGREES', str(poldeg)]
     #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
 

@@ -92,7 +92,7 @@ fwhm_frac = 0.25         # fraction of objects, sorted in brightness
 #===============================================================================
 # PSF parameters
 #===============================================================================
-use_single_psf = False   # use the same central PSF for all subimages
+psf_poldeg = 2           # polynomial degree PSF across image (0=constant PSF)
 psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
@@ -127,8 +127,8 @@ skip_wcs = False         # skip Astrometry.net step if image already
 astronet_tweak_order = 3
 # only search in Astrometry.net index files within this radius of the
 # header RA and DEC [deg]
-astronet_radius = 30.
-pixscale_varyfrac = 0.02 # pixscale solution found by Astrometry.net will
+astronet_radius = 180.
+pixscale_varyfrac = 0.01 # pixscale solution found by Astrometry.net will
                          # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
 
