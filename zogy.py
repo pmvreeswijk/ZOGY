@@ -5000,14 +5000,15 @@ def get_rand_indices (shape, fraction=0.1):
 
     """
 
+    # determine size
+    size = np.empty(shape).size
+
     # number of dimensions
     ndim = len(shape)
 
-    # if there are multiple axes, fraction per axis needs to be adjusted
-    fraction_axis = fraction**(1./ndim)
-
     # create list of integer arrays
-    index = [np.random.randint(shape[i],size=int(shape[i]*fraction_axis))
+    # N.B.: size needs to be the same for each axis
+    index = [np.random.randint(shape[i],size=int(size*fraction))
              for i in range(ndim)]
 
     if ndim==1:
