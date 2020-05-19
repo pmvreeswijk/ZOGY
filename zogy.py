@@ -16,6 +16,7 @@ from functools import partial
 
 from multiprocessing.dummy import Pool as ThreadPool
 import numpy as np
+from numpy.polynomial.polynomial import polyvander2d, polygrid2d
 
 # import numpy.fft as fft
 from numpy.lib.recfunctions import append_fields, drop_fields
@@ -50,7 +51,7 @@ pyfftw.interfaces.cache.enable()
 
 # pyfftw.interfaces.cache.set_keepalive_time(1.)
 # for PSF fitting - see https://lmfit.github.io/lmfit-py/index.html
-from lmfit import minimize, Minimizer, Parameters, Parameter, report_fit
+from lmfit import minimize, Minimizer, Parameters, fit_report
 
 # see https://github.com/stargaser/sip_tpv (version June 2017):
 # download from GitHub and "python setup.py install --user" for local
@@ -1952,12 +1953,14 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     if get_par(set_zogy.make_plots,tel):
         result = prep_ds9regions('{}_trans_initregions_ds9regions.txt'
                                  .format(base_newref), x_peak, y_peak,
-                                 radius=5., width=2, color='red')
+                                 radius=5., width=2, color='red',
+                                 value=np.arange(ntrans))
         
         result = prep_ds9regions('{}_trans_cut_sizeposneg_ds9regions.txt'
                                  .format(base_newref), x_peak[mk], y_peak[mk],
-                                 radius=5., width=2, color='pink')
-            
+                                 radius=5., width=2, color='pink',
+                                 value=np.arange(ntrans))
+
     
     # try fitting P_D (combination of PSFs of new and ref images)
     # to D, Scorr, Fpsf and Fpsferr images in order to:
@@ -2008,7 +2011,8 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     if get_par(set_zogy.make_plots,tel):
         result = prep_ds9regions('{}_trans_ds9regions.txt'.format(base_newref),
                                  x_psf_D[mask_keep], y_psf_D[mask_keep], 
-                                 radius=5., width=2, color='green')
+                                 radius=5., width=2, color='green',
+                                 value=np.arange(ntrans))
 
 
     # Moffat fit to D
@@ -2123,8 +2127,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
 ################################################################################
 
-def prep_ds9regions(filename, x, y, radius=5, width=2, color='green',
-                    text='id'):
+def prep_ds9regions(filename, x, y, radius=5, width=2, color='green', value=None):
 
     """Function that creates a text file with the name [filename] that
     can be used to mark objects at an array of pixel positions (x,y)
@@ -2134,13 +2137,13 @@ def prep_ds9regions(filename, x, y, radius=5, width=2, color='green',
     f = open(filename, 'w')
     ncoords = len(x)
     for i in range(ncoords):
-        if text == 'id':
-            f.write('circle({},{},{}) # color={} width={} text={{{}}} font="times 7"\n'.
-                    format(x[i], y[i], radius, color, width, i+1))
+        if value is None:
+            f.write('circle({},{},{}) # color={} width={}\n'
+                    .format(x[i], y[i], radius, color, width))            
         else:
-            f.write('circle({},{},{}) # color={} width={}\n'.
-                    format(x[i], y[i], radius, color, width))            
-            
+            f.write('circle({},{},{}) # color={} width={} text={{{}}} font="times 7"\n'
+                    .format(x[i], y[i], radius, color, width, value[i]))
+
     f.close()
     return
     
@@ -3535,11 +3538,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         
         psfex_bintable = '{}_psf.fits'.format(base)
-        results = get_psfoptflux_xycoords (psfex_bintable, data_wcs,
-                                           data_bkg_std**2, data_mask, xwin, ywin,
-                                           satlevel=satlevel, replace_satdata=False, 
-                                           psffit=mypsffit, moffat=False, log=log)
+        results = get_psfoptflux_xycoords (
+            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
+            satlevel=satlevel, replace_satdata=False, psffit=mypsffit,
+            moffat=False, log=log)
 
+        
         if mypsffit:
             flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf, \
                 xerr_psf, yerr_psf = results
@@ -3550,8 +3554,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         if get_par(set_zogy.make_plots,tel):
             # make ds9 regions file with all detections
             result = prep_ds9regions('{}_alldet_ds9regions.txt'.format(base),
-                                     xwin, ywin, 
-                                     radius=2., width=1, color='blue')
+                                     xwin, ywin, radius=2., width=1,
+                                     color='blue', value=np.arange(len(xwin)))
             # and with flux_opt/fluxerr_opt < 5.
             mask_nonzero = np.nonzero(fluxerr_opt)
             mask_s2n_lt5 = np.zeros(flux_opt.shape, dtype='bool')
@@ -3559,9 +3563,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                                  /fluxerr_opt[mask_nonzero])<5)
             mask_s2n_lt5 |= (flux_opt==0)              
             result = prep_ds9regions('{}_s2n_lt5_ds9regions.txt'.format(base),
-                                     xwin[mask_s2n_lt5],
-                                     ywin[mask_s2n_lt5],
-                                     radius=2., width=1, color='red') 
+                                     xwin[mask_s2n_lt5], ywin[mask_s2n_lt5],
+                                     radius=2., width=1, color='red',
+                                     value=np.arange(len(xwin[mask_s2n_lt5]))) 
 
 
         # determine 5-sigma limiting flux using
@@ -3799,7 +3803,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 # determine single zeropoint for entire image
                 zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
                                                  filt, imtype, data_wcs.shape,
-                                                 zp_type='single')
+                                                 zp_type='single', log=log)
                 
                 header['PC-NCAL'] = (ncal_used, 'number of brightest photcal '
                                      'stars used')
@@ -3812,68 +3816,167 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                         x_array, y_array, zp_array, filt, imtype,
                         zp_type='channels')
 
-                    # and on scale of background boxsize
+
+                    # fit low-order 2D polynomial to zeropoint array;
+                    # normalize coordinates by image size to make it
+                    # easier on the polynomial fit
+                    order = 2
+                    ysize, xsize = data_wcs.shape
+                    coeffs = polyfit2d(x_array/xsize, y_array/ysize, zp_array,
+                                       order)
+                    
+                    # evaluate at image grid in pixel coordinates as
+                    # x_array and y_array are in pixel coordinates
+                    x = np.arange(1,xsize+1)
+                    y = np.arange(1,ysize+1)
+                    zp_2dfit = polygrid2d(x/xsize, y/ysize, coeffs).T
+
+
+                    # record fit coefficients in header
+                    header['PC-ZPFO'] = (order,
+                                         'zeropoint 2D polynomial fit order')
+                    for nc, coeff in enumerate(coeffs.ravel()):
+                        if np.isfinite(coeff):
+                            value = coeff
+                        else:
+                            value = 'None'              
+                        header['PC-ZPF{}'.format(nc)] = (
+                            value, 'zeropoint 2D poly fit coefficient {}'.format(nc))
+
+                    
+                    if get_par(set_zogy.make_plots,tel):
+
+                        # save zeropoint arrays
+                        ascii.write([x_array, y_array, zp_array],
+                                    '{}_zp.dat'.format(base),
+                                    names=['x_array', 'y_array', 'zp_array'],
+                                    overwrite=True)
+
+                        # plot
+                        plt.imshow(zp_2dfit, origin='lower', aspect=1)
+                        plt.colorbar()
+                        plt.scatter(x_array, y_array, c=zp_array, marker='o',
+                                    edgecolor='k')
+                        plt.xlim(x.min(), x.max())
+                        plt.xlabel('X-axis')
+                        plt.ylim(y.min(), y.max())
+                        plt.ylabel('Y-axis')
+                        plt.title('polynomial fit (order={}) to image zeropoints'
+                                  .format(order))
+                        plt.savefig('{}_zp_2dfit.pdf'.format(base))
+                        plt.close()
+
+                        
+
+                    # determine median zeropoints of 6x6 subimages to
+                    # check if they are constant across the image
+                    nsubs_side = 6
                     zp_mini, zp_std_mini, ncal_mini = calc_zp (
                         x_array, y_array, zp_array, filt, imtype,
-                        data_shape=data_wcs.shape,
-                        zp_type='background')
+                        data_shape=data_wcs.shape, zp_type='background',
+                        boxsize=data_wcs.shape[0]/nsubs_side)
 
-                    # save these to fits
-                    fits_zp_mini = '{}_zp_mini.fits'.format(base)
-                    fits.writeto(fits_zp_mini, zp_mini, overwrite=True)
-                    fits_zp_std_mini = '{}_zp_std_mini.fits'.format(base)
-                    fits.writeto(fits_zp_std_mini, zp_std_mini, overwrite=True)
+                    # add some statistics of these arrays to header
+                    # the maximum relative difference between the
+                    # boxes' medians
+                    mask_nonzero = ((zp_mini != 0) & (zp_std_mini != 0))
+                    max_diff = (np.amax(zp_mini[mask_nonzero]) -
+                                np.amin(zp_mini[mask_nonzero]))
+                    max_std = np.amax(zp_std_mini[mask_nonzero])
+                    
+                    header['PC-NSUBS'] = (nsubs_side**2,
+                                          'number of zeropoint subimages for statistics')
+                    header['PC-MDIFF'] = (max_diff,
+                                          'maximum difference: max(subs)-min(subs)')
+                    header['PC-MSTD'] = (max_std, 'maximum sigma '
+                                         '(STD) of zeropoint subimages')
 
-                    # fill zeros in zp_mini with median of surrounding 3x3
-                    # pixels, until no more zeros left
-                    while (np.sum(zp_mini == 0) != 0):
-                        mask_zero = (zp_mini == 0)
-                        zp_mini_filt = median_filter (zp_mini, ~mask_zero)
-                        zp_mini[mask_zero] = zp_mini_filt[mask_zero]
+                    
+                    mask_nonzero = (zp_mini != 0)
+                    if np.sum(mask_nonzero) != 0:
+                        rstd = zp_std_mini[mask_nonzero] / zp_mini[mask_nonzero]
+                        index_max = np.argmax(rstd)
+                        rstd_max = rstd.ravel()[index_max]
+                        
+
+                    # block below determines zeropoint image on the
+                    # scale of the background boxsize; switched off
+                    # for the moment
+                    if False:
+                        # and on scale of background boxsize
+                        zp_mini, zp_std_mini, ncal_mini = calc_zp (
+                            x_array, y_array, zp_array, filt, imtype,
+                            data_shape=data_wcs.shape,
+                            zp_type='background',
+                            boxsize=get_par(set_zogy.bkg_boxsize,tel))
+                        
+                        # save these to fits
+                        fits_zp_mini = '{}_zp_mini.fits'.format(base)
+                        fits.writeto(fits_zp_mini, zp_mini, overwrite=True)
+                        fits_zp_std_mini = '{}_zp_std_mini.fits'.format(base)
+                        fits.writeto(fits_zp_std_mini, zp_std_mini,
+                                     overwrite=True)
+
+                        # fill zeros in zp_mini with median of surrounding 3x3
+                        # pixels, until no more zeros left
+                        while (np.sum(zp_mini == 0) != 0):
+                            mask_zero = (zp_mini == 0)
+                            zp_mini_filt = median_filter (zp_mini, ~mask_zero)
+                            zp_mini[mask_zero] = zp_mini_filt[mask_zero]
         
-                    # same for zp_std_mini
-                    while (np.sum(zp_std_mini == 0) != 0):
-                        mask_zero = (zp_std_mini == 0)
-                        zp_std_mini_filt = median_filter (zp_std_mini, ~mask_zero)
-                        zp_std_mini[mask_zero] = zp_std_mini_filt[mask_zero]
+                        # same for zp_std_mini
+                        while (np.sum(zp_std_mini == 0) != 0):
+                            mask_zero = (zp_std_mini == 0)
+                            zp_std_mini_filt = median_filter (zp_std_mini,
+                                                              ~mask_zero)
+                            zp_std_mini[mask_zero] = zp_std_mini_filt[mask_zero]
 
-                    # now that zeros are gone, median filter images
-                    # with filtersize defined in settings file
-                    size_filter = get_par(set_zogy.bkg_filtersize,tel)
-                    zp_mini_filt = ndimage.filters.median_filter(zp_mini,
-                                                                 size_filter)
-                    zp_std_mini_filt = ndimage.filters.median_filter(zp_std_mini,
+                        # now that zeros are gone, median filter images
+                        # with filtersize defined in settings file
+                        size_filter = get_par(set_zogy.bkg_filtersize,tel)
+                        zp_mini_filt = ndimage.filters.median_filter(zp_mini,
                                                                      size_filter)
-                    # save these to fits
-                    fits_zp_mini_filt = '{}_zp_mini_filt.fits'.format(base)
-                    fits.writeto(fits_zp_mini_filt, zp_mini_filt, overwrite=True)
-                    fits_zp_std_mini_filt = '{}_zp_std_mini_filt.fits'.format(base)
-                    fits.writeto(fits_zp_std_mini_filt, zp_std_mini_filt, overwrite=True)
+                        zp_std_mini_filt = ndimage.filters.median_filter(
+                            zp_std_mini, size_filter)
+                        # save these to fits
+                        fits_zp_mini_filt = '{}_zp_mini_filt.fits'.format(base)
+                        fits.writeto(fits_zp_mini_filt, zp_mini_filt,
+                                     overwrite=True)
+                        fits_zp_std_mini_filt = ('{}_zp_std_mini_filt.fits'
+                                                 .format(base))
+                        fits.writeto(fits_zp_std_mini_filt, zp_std_mini_filt,
+                                     overwrite=True)
 
-                    # now use function [mini2back] to turn filtered mesh of median
-                    # and std of background regions into full background image and
-                    # its standard deviation
-                    data_zp = mini2back (zp_mini_filt, data_wcs.shape, log, order_interp=2, 
-                                         bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                                         timing=get_par(set_zogy.timing,tel))
-                    data_zp_std = mini2back (zp_std_mini_filt, data_wcs.shape, log,
-                                             order_interp=1,
-                                             bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                                             timing=get_par(set_zogy.timing,tel)) 
-                    # save these to fits
-                    fits_zp = '{}_zp.fits'.format(base)
-                    fits.writeto(fits_zp, data_zp, overwrite=True)
-                    fits_zp_std = '{}_zp_std.fits'.format(base)
-                    fits.writeto(fits_zp_std, data_zp_std, overwrite=True)
+                        # now use function [mini2back] to turn
+                        # filtered mesh of median and std of
+                        # background regions into full background
+                        # image and its standard deviation
+                        data_zp = mini2back (
+                            zp_mini_filt, data_wcs.shape, log, order_interp=2,
+                            bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                            timing=get_par(set_zogy.timing,tel))
+                        data_zp_std = mini2back (
+                            zp_std_mini_filt, data_wcs.shape, log, order_interp=1,
+                            bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                            timing=get_par(set_zogy.timing,tel)) 
+
+                        # save these to fits
+                        fits_zp = '{}_zp.fits'.format(base)
+                        fits.writeto(fits_zp, data_zp, overwrite=True)
+                        fits_zp_std = '{}_zp_std.fits'.format(base)
+                        fits.writeto(fits_zp_std, data_zp_std, overwrite=True)
 
 
+
+            # end of block: if ncalstars > 0
             header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_max,tel),
                                   'input max. number of photcal stars to use')
             header['PC-NCMIN'] = (get_par(set_zogy.phot_ncal_min,tel),
                                   'input min. number of stars to apply filter cut')
 
             if get_par(set_zogy.timing,tel):
-                log_timing_memory (t0=t2, label='determining photometric calibration', log=log)
+                log_timing_memory (
+                    t0=t2, label='determining photometric calibration', log=log)
 
         else:
             log.info('Warning: photometric calibration catalog {} not found '
@@ -3918,7 +4021,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                     'zeropoint'.format(i_chan+1))
             for i_chan in range(zp_chan.size):
                 header['PC-NCC{}'.format(i_chan+1)] = (
-                    ncal_chan.ravel()[i_chan], 'channel {} number of stars used'
+                    ncal_chan.ravel()[i_chan], 'channel {} number of photcal stars used'
                     .format(i_chan+1))
 
 
@@ -4394,7 +4497,7 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
 ################################################################################
 
 def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
-             zp_type='single', log=None):
+             zp_type='single', boxsize=None, log=None):
                 
     if log is not None:
         if get_par(set_zogy.timing,tel): t = time.time()
@@ -4437,7 +4540,6 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
 
         # determine zeropoints on the scale of the background boxsize
         ysize, xsize = data_shape
-        boxsize = get_par(set_zogy.bkg_boxsize,tel)
         if ysize % boxsize != 0 or xsize % boxsize !=0:
             log.info('Warning: [set_zogy.bkg_boxsize] does not fit integer '
                      'times in image')
@@ -4447,6 +4549,8 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
                                                   boxsize, boxsize,
                                                   (nysubs, nxsubs), nval_min=1)
 
+
+        
 
     if log is not None:
 
@@ -4841,14 +4945,14 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3, log=None):
 
 ################################################################################
 
-def get_back (data, objmask, log, clip=True, fits_mask=None):
+def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
     
     """Function that returns the background of the image [data]. A clipped
     median is determined for each subimage which is masked using the
     object mask (created from SExtractor's '-OBJECTS' image, where
     objects have zero values). The subimages (with size:
-    [set_zogy.bkg_boxsize]) are then median filtered and resized to the size
-    of the input image.
+    [set_zogy.bkg_boxsize]) are then median filtered and resized to
+    the size of the input image.
 
     """
 
@@ -4899,11 +5003,11 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     # statistics on a random subset of pixels
     if boxsize > 200:
         index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
-        mini_mean, mini_median, mini_std = sigma_clipped_stats (
+        __, mini_median, mini_std = sigma_clipped_stats (
             data_masked_reshaped[:,:,index_stat].astype('float64'),
             sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
     else:
-        mini_mean, mini_median, mini_std = sigma_clipped_stats (
+        __, mini_median, mini_std = sigma_clipped_stats (
             data_masked_reshaped.astype('float64'),
             sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
 
@@ -4921,6 +5025,33 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     #mini_median[~np.isfinite(mini_median)] = 0
     #mini_std[~np.isfinite(mini_std)] = 0
 
+
+    # for ML/BG images, determine relative correction factors between
+    # different channels, possibly due to non-linearity, from the mini
+    # background images
+    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+        if False:
+            # channel correction factors by comparing background
+            # values on edges of adjacent channels
+            bkg_corr = bkg_corr_MLBG (mini_median, mini_std, data, header,
+                                      correct_data=True)
+        else:
+            # channel correction factors determined from low order 2D
+            # polynomial fit and minimizing the residuals            
+            bkg_corr = bkg_corr_MLBG_alt (mini_median, mini_std, data, header,
+                                          correct_data=True, order=2, log=log)
+
+            
+        # save data to fits image if background correction was applied
+        if bkg_corr:
+            if imtype=='new':
+                base = base_new
+            else:
+                base = base_ref
+
+            fits.writeto ('{}.fits'.format(base), data, header, overwrite=True)
+        
     
     # fill zeros in mini_median with median of surrounding 3x3
     # pixels, until no more zeros left
@@ -4936,14 +5067,20 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
         mini_std[mask_zero] = mini_std_filt[mask_zero]
 
         
-    # now that zeros are gone, median filter full images with
-    # filtersize defined in settings file
+    # now that zeros are gone, median or mean filter mini images with
+    # filtersize defined in settings file: [set_zogy.bkg_filtersize]
     size_filter = get_par(set_zogy.bkg_filtersize,tel)
-    # median filter the meshes with filter of size [set_zogy.bkg_filtersize]
-    mini_median_filt = ndimage.filters.median_filter(mini_median, size_filter)
-    mini_std_filt = ndimage.filters.median_filter(mini_std, size_filter)
-    
-            
+    if False:
+        # median filter
+        mini_median_filt = ndimage.filters.median_filter(mini_median, size_filter)
+        mini_std_filt = ndimage.filters.median_filter(mini_std, size_filter)
+    else:
+        # mean filter
+        weights = np.full((size_filter,size_filter), 1./size_filter**2)
+        mini_median_filt = ndimage.filters.convolve(mini_median, weights)
+        mini_std_filt = ndimage.filters.convolve(mini_std, weights)
+
+
     # estimate median and std of entire image from the values of the subimages
     bkg_median = np.median(mini_median_filt)
     bkg_std = np.median(mini_std_filt)
@@ -4958,6 +5095,276 @@ def get_back (data, objmask, log, clip=True, fits_mask=None):
     # being float64 as well
     return (mini_median_filt.astype('float32'), mini_std_filt.astype('float32'),
             bkg_median, bkg_std)
+
+
+################################################################################
+
+def bkg_corr_MLBG_alt (mini_median, mini_std, data, header, correct_data=False,
+                       order=2, log=None):
+    
+    # helper function to determine channel definitions for image
+    # with shape [data_shape]
+    def get_section (data_shape):
+        
+        ysize, xsize = data_shape
+        # define number of channels in x and y; hardcoded here because
+        # from this zogy.py module in principle there is no access to
+        # the blackbox settings file
+        ny, nx = 2, 8
+        # and size of data section in each channel
+        ysize_chan, xsize_chan = ysize//ny, xsize//nx
+        # channel reduced data section slices; shape=(16,2)
+        return tuple([(slice(y,y+ysize_chan), slice(x,x+xsize_chan))
+                      for y in range(0,ysize,ysize_chan)
+                      for x in range(0,xsize,xsize_chan)])
+    
+    
+    # determine channel pixels for full and mini images
+    data_sec = get_section (data.shape)
+    mini_shape = mini_median.shape
+    mini_sec = get_section (mini_shape)
+    nchans = np.shape(mini_sec)[0]
+
+    # create a set of Parameters
+    params = Parameters()
+    for i_chan in range(nchans):
+        params.add('factor{}'.format(i_chan+1), value=1, min=0.5, max=1.5,
+                   vary=True)
+        
+    # do leastsq polynomial fit
+    result = minimize(mini2min, params, method='Leastsq',
+                      args=(mini_median, mini_std, mini_sec, order,))
+
+    p = result.params.valuesdict()
+
+    factor = np.zeros(nchans)
+    for i_chan in range(nchans):
+        factor[i_chan] = p['factor{}'.format(i_chan+1)]
+        
+    # normalize factors such that their mean is 1
+    factor_mean, factor_median, factor_std = sigma_clipped_stats (factor,
+                                                                  mask_value=0)
+    factor /= factor_mean
+
+    # if factor range is within limits and correct_data is True,
+    # correct the mini images and original data
+    maxdiff = (np.amax(factor) - np.amin(factor)) / 2
+    if maxdiff < 0.05 and correct_data:
+        bkg_corr = True
+        if log is not None:
+            log.info ('image channels modified with correction factors: {}'
+                      .format(factor))
+    else:
+        bkg_corr = False        
+
+    # add boolean to header
+    header['BKG-CORR'] = (bkg_corr, 'channels corrected for background ratios?')
+
+
+    #data_old = np.copy(data)
+    #mini_median_old = np.copy(mini_median)
+    #mini_std_old = np.copy(mini_std)
+    
+
+    # add factors determined to header
+    for i_chan in range(nchans):
+        
+        header['BKG-CF{}'.format(i_chan+1)] = (
+            factor[i_chan], 'channel {} correction factor'
+            .format(i_chan+1))
+
+        # correct the data
+        if bkg_corr:
+
+            # full data
+            data[data_sec[i_chan]] *= factor[i_chan]
+
+            # mini median and std
+            mini_median[mini_sec[i_chan]] *= factor[i_chan]
+            mini_std[mini_sec[i_chan]] *= factor[i_chan]
+
+
+    #ds9_arrays(data_old=data_old, data=data,
+    #           mini_median_old=mini_median_old, mini_median=mini_median,
+    #           mini_std_old=mini_std_old, mini_std=mini_std)
+
+    return bkg_corr
+
+
+################################################################################
+
+def mini2min (params, data, data_std, data_sec, order):
+    
+    # fit parameters
+    p = params.valuesdict()
+
+    # define x, y grid to fit
+    x = np.arange(data.shape[1])
+    y = np.arange(data.shape[0])
+    xx, yy = np.meshgrid(x, y)
+
+    # make copy of input data
+    data_corr = np.copy(data)
+    data_std_corr = np.copy(data_std)
+    
+    # modify channel sections with fit parameters
+    nchans = np.shape(data_sec)[0]
+    for i_chan in range(nchans):
+        factor_chan = p['factor{}'.format(i_chan+1)]
+        data_corr[data_sec[i_chan]] *= factor_chan
+        data_std_corr[data_sec[i_chan]] *= factor_chan
+
+
+    # fit 2D polynomial using function polyfit2d
+    coeffs = polyfit2d(xx.ravel(), yy.ravel(), data_corr.ravel(), order)
+    
+    # evaluate at grid
+    fit = polygrid2d(x, y, coeffs).T
+    
+    #resid = np.zeros(data_corr.shape)
+    mask = ((data_corr != 0) & (data_std_corr != 0))
+    resid = (data_corr[mask] - fit[mask]) / data_std_corr[mask]
+
+
+    # return flattened residuals
+    return resid.flatten()
+
+
+################################################################################
+
+def polyfit2d(x, y, f, deg):
+
+    """see 2nd most popular answer at
+https://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-order-dependent
+
+    """
+
+    deg = [deg, deg]
+    deg = np.asarray(deg)
+    vander = polyvander2d(x, y, deg)
+    vander = vander.reshape((-1,vander.shape[-1]))
+    f = f.reshape((vander.shape[0],))
+    c = np.linalg.lstsq(vander, f, rcond=None)[0]
+    return c.reshape(deg+1)
+
+
+################################################################################
+
+def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=False):
+
+    
+    # helper function to determine channel definitions for image
+    # with shape [data_shape]
+    def get_section (data_shape):
+        
+        ysize, xsize = data_shape
+        # define number of channels in x and y; hardcoded here because
+        # from this zogy.py module in principle there is no access to
+        # the blackbox settings file
+        ny, nx = 2, 8
+        # and size of data section in each channel
+        ysize_chan, xsize_chan = ysize//ny, xsize//nx
+        # channel reduced data section slices; shape=(16,2)
+        return tuple([(slice(y,y+ysize_chan), slice(x,x+xsize_chan))
+                      for y in range(0,ysize,ysize_chan)
+                      for x in range(0,xsize,xsize_chan)])
+    
+    
+    # determine channel pixels for full and mini images
+    data_sec = get_section (data.shape)
+    mini_shape = mini_median.shape
+    mini_sec = get_section (mini_shape)
+
+    
+    # make copy of mini_median data
+    mini_median_corr = np.copy(mini_median)
+    
+    
+    # loop channels 1 through 8 and 9 through 16 and determine
+    # relative correction factors from clipped median of mini pixels
+    # along long edge
+    nchans = np.shape(mini_sec)[0]
+    factor = np.ones(nchans)
+    for i_chan in range(nchans):
+        # do not consider right-most channels
+        if i_chan != 7 and i_chan != 15:
+            last_column = mini_median_corr[mini_sec[i_chan]][:,-1]
+            first_column = mini_median_corr[mini_sec[i_chan+1]][:,-1]
+            mask_nonzero = ((last_column != 0) & (first_column != 0))
+            if np.sum(mask_nonzero) != 0:
+                ratio_mean, ratio_median, ratio_std = sigma_clipped_stats (
+                    last_column[mask_nonzero] / first_column[mask_nonzero])
+                print ('chan: {}, ratio_mean: {}, ratio_median: {}, ratio_std: {}'
+                       .format(i_chan+1, ratio_mean, ratio_median, ratio_std))
+
+                # increase factor of channel on the right
+                factor[i_chan+1] *= ratio_median
+                # apply this ratio to channel in mini_median_corr image
+                mini_median_corr[mini_sec[i_chan+1]] *= ratio_median
+
+                    
+    # determine correction factor between top and bottom rows of channels
+    # y_index indicates index of first row of the top channels
+    y_index = mini_shape[0] // 2
+    first_row = mini_median_corr[y_index,:]
+    last_row = mini_median_corr[y_index-1,:]
+    mask_nonzero = ((last_row != 0) & (first_row != 0))
+    if np.sum(mask_nonzero) != 0:
+        ratio_mean, ratio_median, ratio_std = sigma_clipped_stats (
+            last_row[mask_nonzero] / first_row[mask_nonzero])
+        print ('top/bottom ratio_mean: {}, ratio_median: {}, ratio_std: {}'
+               .format(ratio_mean, ratio_median, ratio_std))
+        # increase factor of top row of channels
+        factor[8:16] *= ratio_median
+        
+
+    # normalize factors such that their mean is 1
+    factor_mean, factor_median, factor_std = sigma_clipped_stats (factor,
+                                                                  mask_value=0)
+    factor /= factor_mean
+
+
+    # if factor range is within limits and correct_data is True,
+    # correct the mini images and original data
+    maxdiff = (np.amax(factor) - np.amin(factor)) / 2
+    if maxdiff < 0.02 and correct_data:
+        bkg_corr = True
+    else:
+        bkg_corr = False
+        
+
+    # add boolean to header
+    header['BKG-CORR'] = (bkg_corr, 'channels corrected for background ratios?')
+
+
+    data_old = np.copy(data)
+    mini_median_old = np.copy(mini_median)
+    mini_std_old = np.copy(mini_std)
+    
+
+    # add factors determined to header
+    for i_chan in range(nchans):
+        
+        header['BKG-CF{}'.format(i_chan+1)] = (
+            factor[i_chan], 'channel {} correction factor'
+            .format(i_chan+1))
+
+        # correct the data
+        if bkg_corr:
+
+            # full data
+            data[data_sec[i_chan]] *= factor[i_chan]
+
+            # mini median and std
+            mini_median[mini_sec[i_chan]] *= factor[i_chan]
+            mini_std[mini_sec[i_chan]] *= factor[i_chan]
+
+
+    ds9_arrays(data_old=data_old, data=data,
+               mini_median_old=mini_median_old, mini_median=mini_median,
+               mini_std_old=mini_std_old, mini_std=mini_std)
+
+    return bkg_corr
 
 
 ################################################################################
@@ -4991,8 +5398,8 @@ def median_filter (array, mask, filter_size=3):
 
 ################################################################################
 
-def get_rand_indices (shape, fraction=0.1):
-    
+def get_rand_indices (shape, fraction=0.2):
+
     """Given an input shape, this function returns a tuple of random
     integer arrays (with the ranges determined by shape), one for each
     axis/dimension. The total number of indices returned is the total
@@ -6274,7 +6681,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         result = prep_ds9regions('{}_cat_bright_ds9regions.txt'.format(base),
                                  data_sexcat['XWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  data_sexcat['YWIN_IMAGE'][mask_use][index_sort][-nbright:],
-                                 radius=5., width=2, color='green')
+                                 radius=5., width=2, color='green',
+                                 value=np.arange(nbright))
  
     #scampcat = image_in.replace('.fits','.scamp')
 
@@ -6971,10 +7379,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         flux_auto = data['FLUX_AUTO'][index]
         mag_auto = -2.5*np.log10(flux_auto)
 
-        plt.plot(fwhm, mag_auto, 'bo', markersize=5, markeredgecolor='k')
+        plt.plot(fwhm, mag_auto, 'bo', markersize=1)
         x1,x2,y1,y2 = plt.axis()
-        plt.plot(fwhm_select, mag_auto_select, 'go', markersize=5,
-                 markeredgecolor='k')
+        plt.plot(fwhm_select, mag_auto_select, 'go', markersize=1)
         plt.plot([fwhm_median, fwhm_median], [y2,y1], color='red')
         fwhm_line = fwhm_median-fwhm_std
         plt.plot([fwhm_line, fwhm_line], [y2,y1], 'r--')
@@ -6994,10 +7401,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
             elong = data['ELONGATION'][index]
 
-            plt.plot(elong, mag_auto, 'bo', markersize=5, markeredgecolor='k')
+            plt.plot(elong, mag_auto, 'bo', markersize=1)
             x1,x2,y1,y2 = plt.axis()
-            plt.plot(elong_select, mag_auto_select, 'go', markersize=5,
-                     markeredgecolor='k')
+            plt.plot(elong_select, mag_auto_select, 'go', markersize=1)
             plt.plot([elong_median, elong_median], [y2,y1], color='red')
             elong_line = elong_median-elong_std
             plt.plot([elong_line, elong_line], [y2,y1], 'r--')
@@ -7012,8 +7418,21 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
             if get_par(set_zogy.show_plots,tel): plt.show()
             plt.close()
             
+
+    # show catalog entries with very low FWHM
+    if True:
+        mask_lowfwhm = (data['FWHM_IMAGE'] < fwhm_median-3*fwhm_std)
+        result = prep_ds9regions('{}_lowfwhm_ds9regions.txt'
+                                 .format(cat_ldac.split('_ldac')[0]),
+                                 data['XWIN_IMAGE'][mask_lowfwhm],
+                                 data['YWIN_IMAGE'][mask_lowfwhm],
+                                 radius=5., width=2, color='purple',
+                                 value=data['FWHM_IMAGE'][mask_lowfwhm])
+
+        
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_fwhm', log=log)
+
 
     if get_elong:
         return fwhm_median, fwhm_std, elong_median, elong_std
@@ -7258,8 +7677,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         log.info(stderrstr)
 
         if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)   
-            
+            log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)
+
 
         # improve background and its standard deviation estimate if
         # [set_zogy.bkg_method] not set to 1 (= use background
@@ -7278,8 +7697,9 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             # the reference image these data need to refer to the image
             # before remapping
             data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
-                get_back (data, objmask, log, fits_mask=fits_mask))
-                
+                get_back (data, header, objmask, imtype, log,
+                          fits_mask=fits_mask))
+            
             # write these filtered meshes to fits
             fits.writeto('{}_bkg_mini.fits'.format(base), data_bkg_mini,
                          overwrite=True)
@@ -7332,12 +7752,13 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         fwhm, fwhm_std, elong, elong_std = get_fwhm(
             cat_out, get_par(set_zogy.fwhm_frac,tel), log,
             class_sort=get_par(set_zogy.fwhm_class_sort,tel), get_elong=True)
-        
+
     else:
         fwhm = 0.
         fwhm_std = 0.
         elong = 0.
         elong_std = 0.
+
         
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_sextractor', log=log)
