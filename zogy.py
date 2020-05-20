@@ -5029,7 +5029,7 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
     # for ML/BG images, determine relative correction factors between
     # different channels, possibly due to non-linearity, from the mini
     # background images
-    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+    if False and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
 
         if False:
             # channel correction factors by comparing background
