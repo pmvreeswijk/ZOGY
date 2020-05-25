@@ -5051,36 +5051,36 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
                 base = base_ref
 
             fits.writeto ('{}.fits'.format(base), data, header, overwrite=True)
-        
-    
-    # fill zeros in mini_median with median of surrounding 3x3
-    # pixels, until no more zeros left
-    while (np.sum(mini_median == 0) != 0):
-        mask_zero = (mini_median == 0)
-        mini_median_filt = median_filter (mini_median, ~mask_zero)
-        mini_median[mask_zero] = mini_median_filt[mask_zero]
-        
-    # same for mini_std
-    while (np.sum(mini_std == 0) != 0):
-        mask_zero = (mini_std == 0)
-        mini_std_filt = median_filter (mini_std, ~mask_zero)
-        mini_std[mask_zero] = mini_std_filt[mask_zero]
 
-        
-    # now that zeros are gone, median or mean filter mini images with
-    # filtersize defined in settings file: [set_zogy.bkg_filtersize]
+
+    # fill zeros and smooth mini images with median or mean filter
+    # using function [fill_zeros_filter]
     size_filter = get_par(set_zogy.bkg_filtersize,tel)
-    if False:
-        # median filter
-        mini_median_filt = ndimage.filters.median_filter(mini_median, size_filter)
-        mini_std_filt = ndimage.filters.median_filter(mini_std, size_filter)
+
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+        mini_median_filt = fill_zeros_filter (mini_median, size_filter,
+                                              use_median=False)
+        mini_std_filt = fill_zeros_filter (mini_std, size_filter,
+                                           use_median=False)
     else:
-        # mean filter
-        weights = np.full((size_filter,size_filter), 1./size_filter**2)
-        mini_median_filt = ndimage.filters.convolve(mini_median, weights)
-        mini_std_filt = ndimage.filters.convolve(mini_std, weights)
+        # for ML/BG this needs to be done per channel separately, to
+        # avoid channels with different count levels affecting each
+        # other
+        mini_shape = mini_median.shape
+        mini_sec = get_section_MLBG (mini_shape)
+        nchans = np.shape(mini_sec)[0]
+    
+        # prepare output arrays and loop channels
+        mini_median_filt = np.zeros_like (mini_median)
+        mini_std_filt = np.zeros_like (mini_std)
+        for i_chan in range(nchans):
+            sec_temp = mini_sec[i_chan]
+            mini_median_filt[sec_temp] = fill_zeros_filter (
+                mini_median[sec_temp], size_filter, use_median=False)
+            mini_std_filt[sec_temp] = fill_zeros_filter (
+                mini_std[sec_temp], size_filter, use_median=False)
 
-
+            
     # estimate median and std of entire image from the values of the subimages
     bkg_median = np.median(mini_median_filt)
     bkg_std = np.median(mini_std_filt)
@@ -5099,30 +5099,57 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
 
 ################################################################################
 
+def fill_zeros_filter (data_mini, size_filter, use_median=True):
+    
+    # fill zeros in data_mini with median of surrounding 3x3
+    # pixels, until no more zeros left
+    while (np.sum(data_mini == 0) != 0):
+        mask_zero = (data_mini == 0)
+        data_mini_filt = median_filter (data_mini, ~mask_zero)
+        data_mini[mask_zero] = data_mini_filt[mask_zero]
+
+    if use_median:
+        # median filter
+        data_mini_filt = ndimage.filters.median_filter(data_mini, size_filter)
+    else:
+        # mean filter
+        weights = np.full((size_filter,size_filter), 1./size_filter**2)
+        data_mini_filt = ndimage.filters.convolve(data_mini, weights)
+    
+    return data_mini_filt
+
+
+################################################################################
+
+def get_section_MLBG (data_shape):
+        
+    """function to determine channel definitions for Meerlicht/BlackGEM
+    image with shape [data_shape]
+
+    """
+
+    ysize, xsize = data_shape
+    # define number of channels in x and y; hardcoded here because
+    # from this zogy.py module in principle there is no access to
+    # the blackbox settings file
+    ny, nx = 2, 8
+    # and size of data section in each channel
+    ysize_chan, xsize_chan = ysize//ny, xsize//nx
+    # channel reduced data section slices; shape=(16,2)
+    return tuple([(slice(y,y+ysize_chan), slice(x,x+xsize_chan))
+                  for y in range(0,ysize,ysize_chan)
+                  for x in range(0,xsize,xsize_chan)])
+
+
+################################################################################
+
 def bkg_corr_MLBG_alt (mini_median, mini_std, data, header, correct_data=False,
                        order=2, log=None):
     
-    # helper function to determine channel definitions for image
-    # with shape [data_shape]
-    def get_section (data_shape):
-        
-        ysize, xsize = data_shape
-        # define number of channels in x and y; hardcoded here because
-        # from this zogy.py module in principle there is no access to
-        # the blackbox settings file
-        ny, nx = 2, 8
-        # and size of data section in each channel
-        ysize_chan, xsize_chan = ysize//ny, xsize//nx
-        # channel reduced data section slices; shape=(16,2)
-        return tuple([(slice(y,y+ysize_chan), slice(x,x+xsize_chan))
-                      for y in range(0,ysize,ysize_chan)
-                      for x in range(0,xsize,xsize_chan)])
-    
-    
     # determine channel pixels for full and mini images
-    data_sec = get_section (data.shape)
+    data_sec = get_section_MLBG (data.shape)
     mini_shape = mini_median.shape
-    mini_sec = get_section (mini_shape)
+    mini_sec = get_section_MLBG (mini_shape)
     nchans = np.shape(mini_sec)[0]
 
     # create a set of Parameters
@@ -5251,29 +5278,12 @@ https://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-ord
 ################################################################################
 
 def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=False):
+    
 
-    
-    # helper function to determine channel definitions for image
-    # with shape [data_shape]
-    def get_section (data_shape):
-        
-        ysize, xsize = data_shape
-        # define number of channels in x and y; hardcoded here because
-        # from this zogy.py module in principle there is no access to
-        # the blackbox settings file
-        ny, nx = 2, 8
-        # and size of data section in each channel
-        ysize_chan, xsize_chan = ysize//ny, xsize//nx
-        # channel reduced data section slices; shape=(16,2)
-        return tuple([(slice(y,y+ysize_chan), slice(x,x+xsize_chan))
-                      for y in range(0,ysize,ysize_chan)
-                      for x in range(0,xsize,xsize_chan)])
-    
-    
     # determine channel pixels for full and mini images
-    data_sec = get_section (data.shape)
+    data_sec = get_section_MLBG (data.shape)
     mini_shape = mini_median.shape
-    mini_sec = get_section (mini_shape)
+    mini_sec = get_section_MLBG (mini_shape)
 
     
     # make copy of mini_median data
@@ -5294,8 +5304,8 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=False):
             if np.sum(mask_nonzero) != 0:
                 ratio_mean, ratio_median, ratio_std = sigma_clipped_stats (
                     last_column[mask_nonzero] / first_column[mask_nonzero])
-                print ('chan: {}, ratio_mean: {}, ratio_median: {}, ratio_std: {}'
-                       .format(i_chan+1, ratio_mean, ratio_median, ratio_std))
+                #print ('chan: {}, ratio_mean: {}, ratio_median: {}, ratio_std: {}'
+                #       .format(i_chan+1, ratio_mean, ratio_median, ratio_std))
 
                 # increase factor of channel on the right
                 factor[i_chan+1] *= ratio_median
@@ -5312,8 +5322,8 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=False):
     if np.sum(mask_nonzero) != 0:
         ratio_mean, ratio_median, ratio_std = sigma_clipped_stats (
             last_row[mask_nonzero] / first_row[mask_nonzero])
-        print ('top/bottom ratio_mean: {}, ratio_median: {}, ratio_std: {}'
-               .format(ratio_mean, ratio_median, ratio_std))
+        #print ('top/bottom ratio_mean: {}, ratio_median: {}, ratio_std: {}'
+        #       .format(ratio_mean, ratio_median, ratio_std))
         # increase factor of top row of channels
         factor[8:16] *= ratio_median
         
