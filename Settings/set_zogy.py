@@ -1,9 +1,5 @@
 import os
 
-# discontinuing versions for this setting file as it is automatically
-# linked to the zogy.py version using tags in github
-#__version__ = '0.8'
-
 #===============================================================================
 # ZOGY
 #===============================================================================
@@ -12,13 +8,13 @@ import os
 # be performed on images with size [subimage_size]+2xsubimage_border,
 # where only the central [subimage_size] pixels will be used for the
 # full output image
-subimage_size = 960      # size of subimages
-subimage_border = 32     # border around subimage to avoid edge effects
+subimage_size = 1320     # size of subimages
+subimage_border = 40     # border around subimage to avoid edge effects
 
 # ZOGY parameters
 fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
-transient_nsigma = 6     # required significance in Scorr for transient detection
+transient_nsigma = 7     # required significance in Scorr for transient detection
 chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter transients
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
@@ -45,9 +41,9 @@ fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                          # clipped (method 2 only)
-bkg_boxsize = 120        # size of region used to determine
+bkg_boxsize = 220        # size of region used to determine
                          # background (both methods)
-bkg_filtersize = 5       # size of filter used for smoothing the above
+bkg_filtersize = 3       # size of filter used for smoothing the above
                          # regions (both methods)
 bkg_npasses = 1          # number of background iterations
 
@@ -81,12 +77,12 @@ key_obsdate = 'DATE-OBS'
 #===============================================================================
 # Initial seeing estimate
 #===============================================================================
-fwhm_imafrac = 0.25      # fraction of image area that will be used
+fwhm_imafrac = 0.9       # fraction of image area that will be used
                          # for initial seeing estimate
-fwhm_detect_thresh = 10. # detection threshold for fwhm SExtractor run
+fwhm_detect_thresh = 20  # detection threshold for fwhm SExtractor run
 fwhm_class_sort = False  # sort objects according to CLASS_STAR (T)
                          # or by FLUX_AUTO (F)
-fwhm_frac = 0.25         # fraction of objects, sorted in brightness
+fwhm_frac = 0.33         # fraction of objects, sorted in brightness
                          # or class_star, used for fwhm estimate
 
 #===============================================================================
@@ -139,7 +135,7 @@ cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
            }
 
 ast_nbright = 1000       # brightest no. of objects in the field to
-                         # use for astrometry solution and crosscheck
+                         # use for astrometric solution and crosscheck
                          # of positions obtained against calibration
                          # catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
