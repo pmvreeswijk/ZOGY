@@ -282,7 +282,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                  fits_mask, ra, dec, xsize, ysize, header, log):
 
         # run SExtractor on full image
-        if not os.path.isfile(sexcat) or get_par(set_zogy.redo,tel):
+        if (not (os.path.isfile(sexcat) or
+                 os.path.isfile('{}_cat.fits'.format(base)))
+            or get_par(set_zogy.redo,tel)):
             try:
                 SE_processed = False
                 result = run_sextractor(
@@ -317,7 +319,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # determine WCS solution
         data_cal = None
-        if (('CTYPE1' not in header and 'CTYPE2' not in header) or get_par(set_zogy.redo,tel)):
+        if (('CTYPE1' not in header and 'CTYPE2' not in header) or
+            get_par(set_zogy.redo,tel)):
             try:
                 if not get_par(set_zogy.skip_wcs,tel):
                     # delete some keywords that astrometry.net does
@@ -3867,14 +3870,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                         plt.close()
 
                         
-
-                    # determine median zeropoints of 6x6 subimages to
+                    # determine median zeropoints on subimages to
                     # check if they are constant across the image
-                    nsubs_side = 6
+                    subsize = get_par(set_zogy.subimage_size,tel)
                     zp_mini, zp_std_mini, ncal_mini = calc_zp (
                         x_array, y_array, zp_array, filt, imtype,
                         data_shape=data_wcs.shape, zp_type='background',
-                        boxsize=data_wcs.shape[0]/nsubs_side)
+                        boxsize=subsize)
 
                     # add some statistics of these arrays to header
                     # the maximum relative difference between the
@@ -3884,7 +3886,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                 np.amin(zp_mini[mask_nonzero]))
                     max_std = np.amax(zp_std_mini[mask_nonzero])
                     
-                    header['PC-NSUBS'] = (nsubs_side**2,
+                    header['PC-NSUBS'] = (int(ysize/subsize)**2,
                                           'number of zeropoint subimages for statistics')
                     header['PC-MDIFF'] = (max_diff,
                                           'maximum difference: max(subs)-min(subs)')
@@ -7779,7 +7781,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 ################################################################################
 
 def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
-              nsnap=11, limit_ldac=True, log=None):
+              nsnap=8, limit_ldac=True, log=None):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
