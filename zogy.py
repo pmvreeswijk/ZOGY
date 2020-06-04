@@ -761,8 +761,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         
         # convert Fpsferr image to limiting magnitude image
-        mask_zero = np.nonzero(data_Fpsferr_full==0)
-        data_Fpsferr_full[mask_zero] = median_Fpsferr
+        index_zero = np.nonzero(data_Fpsferr_full==0)
+        data_Fpsferr_full[index_zero] = median_Fpsferr
         exptime, filt = read_header(header_new, ['exptime', 'filter'], log)
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             zp = header_new['PC-ZP']
@@ -778,7 +778,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         header_zogy['Z-FPESTD'] = (std_Fpsferr/exptime, '[e-/s] sigma (STD) Fpsferr full image')
 
 
-        # find transients using function [get_trans_alt], which
+        # find transients using function [get_trans], which
         # applies threshold cuts directly on Scorr for the transient
         # detection, rather than running SExtractor (see below)
         ntrans = get_trans (data_new_full, data_ref_full, 
@@ -788,6 +788,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                             header_new, header_ref, header_zogy,
                             '{}_psf.fits'.format(base_new),
                             '{}_psf.fits'.format(base_ref),
+                            '{}_cat.fits'.format(base_new),
+                            '{}_cat.fits'.format(base_ref),
                             log)
 
         # add header keyword(s):
@@ -1692,7 +1694,8 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 
 def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                data_new_mask, data_ref_mask, header_new, header_ref, header_zogy,
-               psfex_bintable_new, psfex_bintable_ref, log):
+               psfex_bintable_new, psfex_bintable_ref,
+               fits_cat_new, fits_cat_ref, log):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
@@ -1723,15 +1726,16 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     if get_par(set_zogy.timing,tel): t = time.time()
 
     # mask of pixels with absolute values >= set_zogy.transient_sigma
-    mask_significant_init = (np.abs(data_Scorr) >= get_par(set_zogy.transient_nsigma,tel)).astype('uint8')
+    mask_significant_init = (np.abs(data_Scorr) >=
+                             get_par(set_zogy.transient_nsigma,tel)).astype('uint8')
     
     # mask of pixels beyond neighbour_nsigma
     neighbour_nsigma = 2.
     mask_neighbours = (np.abs(data_Scorr) >= neighbour_nsigma).astype('uint8')
     
     # let significant mask grow until all neighbours are included
-    mask_significant = ndimage.morphology.binary_propagation (mask_significant_init,
-                                                              mask=mask_neighbours).astype('uint8')
+    mask_significant = ndimage.morphology.binary_propagation (
+        mask_significant_init, mask=mask_neighbours).astype('uint8')
 
     # label the connecting pixels
     data_Scorr_regions, nregions = ndimage.label(mask_significant, structure=None)
@@ -1957,14 +1961,96 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         result = prep_ds9regions('{}_trans_initregions_ds9regions.txt'
                                  .format(base_newref), x_peak, y_peak,
                                  radius=5., width=2, color='red',
-                                 value=np.arange(ntrans))
+                                 value=np.arange(1,x_peak.size+1))
         
         result = prep_ds9regions('{}_trans_cut_sizeposneg_ds9regions.txt'
                                  .format(base_newref), x_peak[mk], y_peak[mk],
                                  radius=5., width=2, color='pink',
-                                 value=np.arange(ntrans))
+                                 value=np.arange(1,ntrans+1))
+
+
+    # match transients with sources in full-source and reference
+    # catalogs and to be able to filter on e.g. FWHM_IMAGE and
+    # ELONGATION
+
+    # read new and ref catalogs
+    table_cat_new = read_hdulist(fits_cat_new)
+    table_cat_ref = read_hdulist(fits_cat_ref)
+
+    # estimate of FWHM in pix for new and ref image
+    psf_fwhm_new, psf_fwhm_ref = 0, 0
+    if 'PSF-FWHM' in header_new:
+        psf_fwhm_new = header_new['PSF-FWHM'] / pixscale_new
+    if 'PSF-FWHM' in header_ref:
+        psf_fwhm_ref = header_ref['PSF-FWHM'] / pixscale_ref
+
+    # estimate of elongation for new and ref image
+    elong_new, elong_ref = 0, 0
+    if 'S-ELONG' in header_new:
+        elong_new = header_new['S-ELONG']
+    if 'S-ELONG' in header_ref:
+        elong_ref = header_ref['S-ELONG']
+
+
+    # helper function to discard transient based on input table and
+    # limits set for the ratio of source fwhm and elongation with
+    # respect to the image average
+    def help_discard_trans (table, ra, dec, fwhm_mean, elong_mean,
+                            dist_max=2./3600, fwhm_ratio_limit=0.7,
+                            elong_ratio_limit=1.5):
+        
+        # check for match in input catalog
+        index = find_stars (table['RA'], table['DEC'], ra, dec, dist_max,
+                            search='circle', sort=True)
+
+        discard = False
+        if len(index) > 0:
+            # take closest object if more than a single match
+            index = index[0]
+            
+            # determine which transients to discard
+            if fwhm_mean != 0:
+                fwhm_source = table['FWHM_IMAGE'][index]
+                if fwhm_source / fwhm_mean < fwhm_ratio_limit:
+                    discard = True
+
+            # elongation cut below is switched off as it is too
+            # dangerous: viable transients on top of elongated
+            # galaxies are likely to be discarded too
+            if False:
+                if elong_mean != 0:
+                    elong_source = table['ELONGATION'][index]
+                    if elong_source / elong_mean > elong_ratio_limit:
+                        discard = True
+                        
+        return discard
+        
+
+    # loop transients and find match in new and ref catalog within
+    # some distance using function find_stars
+    mask_discard = np.zeros(ntrans, dtype=bool)
+
+    for i in range(ntrans):
+
+        mask_discard[i] = help_discard_trans (
+            table_cat_new, ra_peak[mask_keep][i], dec_peak[mask_keep][i],
+            psf_fwhm_new, elong_new)
+        
+        # if not discarded based on new catalog, check ref catalog
+        if not mask_discard[i]:
+            mask_discard[i] = help_discard_trans (
+                table_cat_ref, ra_peak[mask_keep][i], dec_peak[mask_keep][i],
+                psf_fwhm_ref, elong_ref)
 
     
+    # update mask_keep
+    mask_keep[mask_keep] = ~mask_discard
+    # number of transients left
+    mk = mask_keep
+    ntrans = np.sum(mk)
+    log.info('ntrans after FWHM/ELONGATION loop: {}'.format(ntrans))
+    
+        
     # try fitting P_D (combination of PSFs of new and ref images)
     # to D, Scorr, Fpsf and Fpsferr images in order to:
     #
@@ -1999,7 +2085,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     for l in list2check:
         mask_finite &= np.isfinite(l)
    
-    print ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
+    log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
 
 
     # filter out transient candidates with high chi2 values
@@ -2015,7 +2101,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         result = prep_ds9regions('{}_trans_ds9regions.txt'.format(base_newref),
                                  x_psf_D[mask_keep], y_psf_D[mask_keep], 
                                  radius=5., width=2, color='green',
-                                 value=np.arange(ntrans))
+                                 value=np.arange(1,ntrans+1))
 
 
     # Moffat fit to D
@@ -2031,7 +2117,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     for l in list2check:
         mask_finite &= np.isfinite(l)
    
-    print ('[get_trans] time after Moffat fit to D: {}'.format(time.time()-t))
+    log.info ('[get_trans] time after Moffat fit to D: {}'.format(time.time()-t))
 
     # filter out transient candidates with high chi2 values
     #mask_keep &= (chi2_moffat <= chi2_max)
@@ -2078,7 +2164,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                                        filt, log, fluxerr=np.abs(fluxerr_opt_D),
                                        zp_std=None)
 
-    print ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
+    log.info ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
 
     # determine RA and DEC corresponding to x_psf_D and y_psf_D
     ra_psf_D, dec_psf_D = wcs_new.all_pix2world(x_psf_D, y_psf_D, 1)
@@ -3558,7 +3644,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # make ds9 regions file with all detections
             result = prep_ds9regions('{}_alldet_ds9regions.txt'.format(base),
                                      xwin, ywin, radius=2., width=1,
-                                     color='blue', value=np.arange(len(xwin)))
+                                     color='blue', value=np.arange(1,len(xwin)+1))
             # and with flux_opt/fluxerr_opt < 5.
             mask_nonzero = np.nonzero(fluxerr_opt)
             mask_s2n_lt5 = np.zeros(flux_opt.shape, dtype='bool')
@@ -3568,7 +3654,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             result = prep_ds9regions('{}_s2n_lt5_ds9regions.txt'.format(base),
                                      xwin[mask_s2n_lt5], ywin[mask_s2n_lt5],
                                      radius=2., width=1, color='red',
-                                     value=np.arange(len(xwin[mask_s2n_lt5]))) 
+                                     value=np.arange(1,np.sum(mask_s2n_lt5)+1)) 
 
 
         # determine 5-sigma limiting flux using
@@ -3694,10 +3780,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
                 # use function [find_stars] to select stars in calibration
                 # catalog that are within the current field-of-view
-                mask_field = find_stars(data_cal['ra'], data_cal['dec'],
-                                        ra_center, dec_center, fov_half_deg,
-                                        log=log)
-                index_field = np.where(mask_field)[0]
+                index_field = find_stars (data_cal['ra'], data_cal['dec'],
+                                          ra_center, dec_center, fov_half_deg,
+                                          log=log)
+                #index_field = np.where(mask_field)[0]
                 data_cal = data_cal[index_field]
 
 
@@ -3836,8 +3922,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
 
                     # record fit coefficients in header
-                    header['PC-ZPFO'] = (order,
-                                         'zeropoint 2D polynomial fit order')
+                    header['PC-ZPFDG'] = (order,
+                                         'zeropoint 2D polynomial fit degree')
                     for nc, coeff in enumerate(coeffs.ravel()):
                         if np.isfinite(coeff):
                             value = coeff
@@ -3886,12 +3972,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                 np.amin(zp_mini[mask_nonzero]))
                     max_std = np.amax(zp_std_mini[mask_nonzero])
                     
-                    header['PC-NSUBS'] = (int(ysize/subsize)**2,
-                                          'number of zeropoint subimages for statistics')
-                    header['PC-MDIFF'] = (max_diff,
-                                          'maximum difference: max(subs)-min(subs)')
-                    header['PC-MSTD'] = (max_std, 'maximum sigma '
-                                         '(STD) of zeropoint subimages')
+                    header['PC-NSUBS'] = (int(ysize/subsize)**2, 'number of '
+                                          'subimages for zeropoint statistics')
+                    header['PC-MZPD'] = (max_diff, 'maximum zeropoint '
+                                          'difference between subimages')
+                    header['PC-MZPS'] = (max_std, 'maximum zeropoint sigma (STD) '
+                                         'of subimages')
 
                     
                     mask_nonzero = (zp_mini != 0)
@@ -4345,7 +4431,7 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
         base = base_new
     else:
         base = base_ref
-                    
+
     # maximum distance in degrees between sources to match
     dist_max = 3./3600
 
@@ -4373,28 +4459,28 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
     nmatch = 0
     # loop calibration stars and find a match in SExtractor sources
     for i in range(ncal):
+        
+        index_match = find_stars (ra_sex, dec_sex, ra_cal[i], dec_cal[i],
+                                  dist_max, search='circle', log=log)
 
-        mask_match = find_stars(ra_sex, dec_sex, ra_cal[i], dec_cal[i],
-                                dist_max, search='circle', log=log)
-
-        if np.sum(mask_match)==1:
+        if len(index_match)==1:
             # there's one match, calculate its zeropoint
             # need to calculate airmass for each star, as around A=2,
             # difference in airmass across the FOV is 0.1, i.e. a 5% change
-            zp_array[mask_match] = (mag_cal[i] - mag_sex_inst[mask_match] +
-                                    airmass_sex[mask_match] *
+            zp_array[index_match] = (mag_cal[i] - mag_sex_inst[index_match] +
+                                    airmass_sex[index_match] *
                                     get_par(set_zogy.ext_coeff,tel)[filt])
 
             #if get_par(get_par(set_zogy.verbose,tel):
             #    if 'spectype' in data_cal.dtype.names:
             #        log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}, spectype: {}, chi2: {}, absdev: {}'.
             #                 format(ra_cal[i], dec_cal[i], mag_cal[i],
-            #                        magerr_sex_inst[mask_match], zp_array[mask_match],
+            #                        magerr_sex_inst[index_match], zp_array[index_match],
             #                        data_cal['spectype'][i], data_cal['chi2'][i], data_cal['absdev'][i]))
             #    else:
             #        log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}'.
             #                 format(ra_cal[i], dec_cal[i], mag_cal[i],
-            #                        magerr_sex_inst[mask_match], zp_array[mask_match]))
+            #                        magerr_sex_inst[index_match], zp_array[index_match]))
 
                     
             # done when number of matches equals [set_zogy.phot_ncal_max]
@@ -4465,18 +4551,18 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
     # loop calibration stars and find a match in SExtractor sources
     for i in range(ncal):
         
-        mask_match = find_stars(ra_sex, dec_sex, ra_cal_sort[i], dec_cal_sort[i],
-                                dist_max, search='circle')
+        index_match = find_stars (ra_sex, dec_sex, ra_cal_sort[i], dec_cal_sort[i],
+                                  dist_max, search='circle')
 
-        if np.sum(mask_match)==1:
+        if len(index_match)==1:
             # there's one match, calculate its zeropoint
             # need to calculate airmass for each star, as around A=2,
             # difference in airmass across the FOV is 0.1, i.e. a 5% change
-            zp_array[i] = (mag_cal_sort[i] - mag_sex_inst[mask_match] +
-                           airmass_sex[mask_match] *
+            zp_array[i] = (mag_cal_sort[i] - mag_sex_inst[index_match] +
+                           airmass_sex[index_match] *
                            get_par(set_zogy.ext_coeff,tel)[filt])
-            x_array[i] = xcoords_sex[mask_match]
-            y_array[i] = ycoords_sex[mask_match]
+            x_array[i] = xcoords_sex[index_match]
+            y_array[i] = ycoords_sex[index_match]
 
             nmatch += 1
             
@@ -4714,7 +4800,7 @@ def field_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
 
 ################################################################################
 
-def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box', log=None):
+def find_stars_old (ra_cat, dec_cat, ra, dec, dist, search='box', log=None):
 
     if log is not None:
         if get_par(set_zogy.timing,tel): t = time.time()
@@ -4743,6 +4829,51 @@ def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box', log=None):
             log_timing_memory (t0=t, label='find_stars', log=log)
 
     return mask_data
+
+
+################################################################################
+
+def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box',
+                sort=False, log=None):
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing find_stars ...')
+
+    # find entries in [ra_cat] and [dec_cat] within [dist] of
+    # [ra] and [dec]
+    # make a big cut in arrays ra_cat and dec_cat to speed up
+    index_cut = np.nonzero(np.abs(dec_cat-dec)<=dist)
+    ra_cat_cut = ra_cat[index_cut]
+    dec_cat_cut = dec_cat[index_cut]
+
+    if search=='circle':
+        # find within circle:
+        dsigma = haversine(ra_cat_cut, dec_cat_cut, ra, dec)
+        mask_dist = (dsigma<=dist)
+    else:
+        # find within box:
+        dsigma_ra = haversine(ra_cat_cut, dec_cat_cut, ra, dec_cat_cut)
+        dsigma_dec = np.abs(dec_cat_cut-dec)
+        mask_dist = ((dsigma_ra<=dist) & (dsigma_dec<=dist))
+        
+        if sort:
+            dsigma = np.sqrt(dsigma_ra**2 + dsigma_dec**2)
+
+            
+    # now select only entries within circle or box
+    index_dist = index_cut[0][mask_dist]
+
+    # sort indices in distance if needed
+    if sort:
+        index_sort = np.argsort(dsigma[mask_dist])
+        index_dist = index_dist[index_sort]
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel):
+            log_timing_memory (t0=t, label='find_stars', log=log)
+
+    return index_dist
 
 
 ################################################################################
@@ -6681,8 +6812,16 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         mask_use = (data_sexcat['FLAGS']<=3)
         
     # sort in brightness (FLUX_AUTO)
-    index_sort = np.argsort(data_sexcat['FLUX_AUTO'][mask_use])
-    # select the brightest objects
+    if 'FLUX_AUTO' in data_sexcat.dtype.names:
+        column_sort = 'FLUX_AUTO'
+    elif 'FLUX_OPT' in data_sexcat.dtype.names:
+        column_sort = 'FLUX_OPT'
+    else:
+        column_sort = 'FLUX_APER_R5xFWHM'
+
+    index_sort = np.argsort(data_sexcat[column_sort][mask_use])
+
+        # select the brightest objects
     nbright = get_par(set_zogy.ast_nbright,tel)
     sexcat_bright = '{}_cat_bright.fits'.format(base)
     #fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:], overwrite=True)
@@ -6694,7 +6833,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                                  data_sexcat['XWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  data_sexcat['YWIN_IMAGE'][mask_use][index_sort][-nbright:],
                                  radius=5., width=2, color='green',
-                                 value=np.arange(nbright))
+                                 value=np.arange(1,nbright+1))
  
     #scampcat = image_in.replace('.fits','.scamp')
 
@@ -6704,7 +6843,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
     cmd = ['solve-field', '--no-plots', #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'XWIN_IMAGE', '--y-column', 'YWIN_IMAGE',
-           '--sort-column', 'FLUX_AUTO',
+           '--sort-column', column_sort,
            '--no-remove-lines', '--uniformize', '0',
            # only work on brightest sources
            #'--objs', '1000',
@@ -6874,9 +7013,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
         # use function [find_stars] to select stars in calibration
         # catalog that are within the current field-of-view
-        mask_field = find_stars(data_cal['ra'], data_cal['dec'],
-                                ra_center, dec_center, fov_half_deg, log=log)
-        index_field = np.where(mask_field)[0]
+        index_field = find_stars (data_cal['ra'], data_cal['dec'], ra_center,
+                                  dec_center, fov_half_deg, log=log)
+        #index_field = np.where(mask_field)[0]
         # N.B.: this [data_cal] array is returned by this function
         # [run_wcs] and also by [sex_wcs] so that it can be re-used
         # for the photometric calibration in [prep_optimal_subtraction]
