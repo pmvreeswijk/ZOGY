@@ -483,7 +483,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                         
             def plot (x, y, limits, xlabel, ylabel, filename, annotate=True):
                 plt.axis(limits)
-                plt.plot(x, y, 'go', color='tab:blue', markersize=5, markeredgecolor='k')
+                #plt.plot(x, y, 'go', color='tab:blue', markersize=5,
+                #         markeredgecolor='k')
+                plt.plot(x, y, 'ko', markersize=2)
                 plt.xlabel(xlabel)
                 plt.ylabel(ylabel)
                 plt.title('{}\n vs {}'.format(new_fits, ref_fits), fontsize=12)
@@ -3419,18 +3421,21 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                   order_interp=2, 
                                   bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
                                   timing=get_par(set_zogy.timing,tel))
-
+            
         # subtract the background
         data_wcs -= data_bkg
 
         # overwrite [input_fits] with its background-subtracted image
-        # 20200414: why not keep background in fits image??
-        if False:
-            header['BKG-SUB'] = (True, 'sky background was subtracted?')
+        # 2020-04-14: why not keep background in fits image??
+
+        # 2020-06-07: create background-subtracted image for the
+        # reference image only for SWarp to work on below
+        if imtype == 'ref':
             header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto(input_fits, data_wcs, header, overwrite=True) 
-        
-        
+            fits_bkgsub = input_fits.replace('.fits', '_bkgsub.fits')
+            fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
+
+
     # read in background std image in any case (i.e. also if
     # background was already subtracted); it is needed for the
     # variance image output
@@ -3445,7 +3450,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                   order_interp=1,
                                   bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
                                   timing=get_par(set_zogy.timing,tel))
-
+        # and write to fits; needed below to SWarp
+        fits.writeto (fits_bkg_std, data_bkg_std, overwrite=True)
         
 
     def create_modify_mask (data, satlevel, data_mask=None):
@@ -3510,9 +3516,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # wcs-corrected reference image (needed if header does not
             # correspond to that of the reference image, e.g. for the mask)
             if update_header:
+                log.info('updating header of {}'.format(fits2remap))
                 header2remap['DATEFILE'] = (Time.now().isot,
                                             'UTC date of writing file')
-                fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
+                with fits.open(fits2remap, 'update') as hdulist:
+                    hdulist[0].header = header2remap
+                # previously overwrote not just header but also the data:
+                #fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
 
 
             # project fits image to new image
@@ -3536,15 +3546,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # SWarp User's Guide). However, despite these artefacts, the
         # Scorr image still appears to be better with LANCZOS3 than
         # when BILINEAR is used.
-        data_ref_remap = help_swarp(input_fits, data_wcs,
+        # N.B.: SWarp needs to run on the background-subtracted
+        # reference image
+        data_ref_remap = help_swarp(fits_bkgsub, data_wcs,
                                     resampling_type='LANCZOS3')
-        # remap reference image background std
+        
+        # remap reference image background std; note that with
+        # update_header set to True, the header is updated
+        # with that of the wcs-corrected reference image
         data_ref_bkg_std_remap = help_swarp(fits_bkg_std, data_bkg_std,
                                             update_header=True)
         
-        # remap reference mask image; note that with update_header set
-        # to True, the data_mask is written to image [fits_mask]
-        # inside the function [help_swarp]; also: SWarp turns integer
+        # remap reference mask image; SWarp turns integer
         # mask into float during processing, so need to add 0.5 and
         # convert to integer again
         data_ref_remap_mask = (help_swarp(
@@ -4177,7 +4190,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_mask = data_ref_remap_mask
     else:
         data = data_wcs
-    
+
+
     # determine cutouts; in case ref image has different size than new
     # image, redefine [ysize] and [xsize] as up to this point they
     # refer to the shape of the original ref image, while shape of
@@ -5064,7 +5078,8 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3, log=None):
             fit_spline = interpolate.UnivariateSpline(x_fit, y_fit, w=w_fit, k=k, 
                                                   check_finite=True)
         except Exception as e:
-            log.info('Warning: spline fit in [inter_pix] to region {} with slice {} failed; pixel values not updated'
+            log.info('Warning: spline fit in [inter_pix] to region {} with '
+                     'slice {} failed; pixel values not updated'
                      .format(i, obj_slices[i]))
             log.info(traceback.format_exc())
         else:    
@@ -5197,8 +5212,8 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
                                            use_median=False)
     else:
         # for ML/BG this needs to be done per channel separately, to
-        # avoid channels with different count levels affecting each
-        # other
+        # avoid channels with different average count levels affecting
+        # each other
         mini_shape = mini_median.shape
         mini_sec = get_section_MLBG (mini_shape)
         nchans = np.shape(mini_sec)[0]
@@ -5607,12 +5622,14 @@ def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None,
 
 ################################################################################
 
-def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o', markersize=3,
-                  xlabel=None, ylabel=None, legendlabel=None, title=None, filename=None,
-                  simple=False, xscale='log', yscale='linear'):
+def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
+                  markersize=2, xlabel=None, ylabel=None, legendlabel=None,
+                  title=None, filename=None, simple=False, xscale='log',
+                  yscale='linear'):
 
     plt.axis(limits)
-    plt.scatter(x, y, c=corder, cmap=cmap, alpha=1, label=legendlabel, edgecolors='black')
+    plt.scatter(x, y, c=corder, cmap=cmap, alpha=0.5, label=legendlabel,
+                edgecolors='black')
     plt.xscale(xscale)
     plt.yscale(yscale)
     if legendlabel is not None:
@@ -5800,8 +5817,9 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         and get_par(set_zogy.psffit_sex,tel)):
         result = run_sextractor(image, sexcat_ldac_psffit,
                                 get_par(set_zogy.sex_cfg_psffit,tel),
-                                get_par(set_zogy.sex_par_psffit,tel), pixscale, log, header,
-                                fit_psf=True, update_vignet=False, fwhm=fwhm)
+                                get_par(set_zogy.sex_par_psffit,tel),
+                                pixscale, log, header, fit_psf=True,
+                                update_vignet=False, fwhm=fwhm)
         
 
     # If not already done so above, read in PSF output binary table
@@ -7739,7 +7757,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
     else:
         bkg_sub = False
 
-    log.info('background already subtracted: {}'.format(bkg_sub))
+
+    log.info('background already subtracted?: {}'.format(bkg_sub))
     
         
     for npass in range(npasses):
