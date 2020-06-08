@@ -3416,12 +3416,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         else:
             # if it does not exist, create it from the background mesh
             fits_bkg_mini = '{}_bkg_mini.fits'.format(base)
-            data_bkg_mini = read_hdulist (fits_bkg_mini, dtype='float32')
-            data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
-                                  order_interp=2, 
-                                  bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                                  timing=get_par(set_zogy.timing,tel))
+            data_bkg_mini, header_mini = read_hdulist (
+                fits_bkg_mini, get_header=True, dtype='float32')
             
+            if 'BKG-SIZE' in header_mini:
+                bkg_size = header_mini['BKG-SIZE']
+            else:
+                bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+                
+            data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
+                                  order_interp=2, bkg_boxsize=bkg_size,
+                                  timing=get_par(set_zogy.timing,tel))
+
         # subtract the background
         data_wcs -= data_bkg
 
@@ -3430,11 +3436,17 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         # 2020-06-07: create background-subtracted image for the
         # reference image only for SWarp to work on below
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        fits_bkgsub = input_fits.replace('.fits', '_bkgsub.fits')
         if imtype == 'ref':
-            header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits_bkgsub = input_fits.replace('.fits', '_bkgsub.fits')
             fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
+        else:
+            # not needed, but make one for the new image also
+            if False:
+                ds9_arrays(bkgsub=data_wcs)
+                fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
 
+            
 
     # read in background std image in any case (i.e. also if
     # background was already subtracted); it is needed for the
@@ -3445,12 +3457,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     else:
         # if it does not exist, create it from the background mesh
         fits_bkg_std_mini = '{}_bkg_std_mini.fits'.format(base)
-        data_bkg_std_mini = read_hdulist (fits_bkg_std_mini, dtype='float32')
+        data_bkg_std_mini, header_mini = read_hdulist (
+            fits_bkg_std_mini, get_header=True, dtype='float32')
+
+        if 'BKG-SIZE' in header_mini:
+            bkg_size = header_mini['BKG-SIZE']
+        else:
+            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+
         data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape, log,
-                                  order_interp=1,
-                                  bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                                  order_interp=1, bkg_boxsize=bkg_size,
                                   timing=get_par(set_zogy.timing,tel))
-        # and write to fits; needed below to SWarp
+        # and write to fits; needed below for SWarp
         fits.writeto (fits_bkg_std, data_bkg_std, overwrite=True)
         
 
@@ -3998,74 +4016,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                         rstd = zp_std_mini[mask_nonzero] / zp_mini[mask_nonzero]
                         index_max = np.argmax(rstd)
                         rstd_max = rstd.ravel()[index_max]
-                        
-
-                    # block below determines zeropoint image on the
-                    # scale of the background boxsize; switched off
-                    # for the moment
-                    if False:
-                        # and on scale of background boxsize
-                        zp_mini, zp_std_mini, ncal_mini = calc_zp (
-                            x_array, y_array, zp_array, filt, imtype,
-                            data_shape=data_wcs.shape,
-                            zp_type='background',
-                            boxsize=get_par(set_zogy.bkg_boxsize,tel))
-                        
-                        # save these to fits
-                        fits_zp_mini = '{}_zp_mini.fits'.format(base)
-                        fits.writeto(fits_zp_mini, zp_mini, overwrite=True)
-                        fits_zp_std_mini = '{}_zp_std_mini.fits'.format(base)
-                        fits.writeto(fits_zp_std_mini, zp_std_mini,
-                                     overwrite=True)
-
-                        # fill zeros in zp_mini with median of surrounding 3x3
-                        # pixels, until no more zeros left
-                        while (np.sum(zp_mini == 0) != 0):
-                            mask_zero = (zp_mini == 0)
-                            zp_mini_filt = median_filter (zp_mini, ~mask_zero)
-                            zp_mini[mask_zero] = zp_mini_filt[mask_zero]
-        
-                        # same for zp_std_mini
-                        while (np.sum(zp_std_mini == 0) != 0):
-                            mask_zero = (zp_std_mini == 0)
-                            zp_std_mini_filt = median_filter (zp_std_mini,
-                                                              ~mask_zero)
-                            zp_std_mini[mask_zero] = zp_std_mini_filt[mask_zero]
-
-                        # now that zeros are gone, median filter images
-                        # with filtersize defined in settings file
-                        size_filter = get_par(set_zogy.bkg_filtersize,tel)
-                        zp_mini_filt = ndimage.filters.median_filter(zp_mini,
-                                                                     size_filter)
-                        zp_std_mini_filt = ndimage.filters.median_filter(
-                            zp_std_mini, size_filter)
-                        # save these to fits
-                        fits_zp_mini_filt = '{}_zp_mini_filt.fits'.format(base)
-                        fits.writeto(fits_zp_mini_filt, zp_mini_filt,
-                                     overwrite=True)
-                        fits_zp_std_mini_filt = ('{}_zp_std_mini_filt.fits'
-                                                 .format(base))
-                        fits.writeto(fits_zp_std_mini_filt, zp_std_mini_filt,
-                                     overwrite=True)
-
-                        # now use function [mini2back] to turn
-                        # filtered mesh of median and std of
-                        # background regions into full background
-                        # image and its standard deviation
-                        data_zp = mini2back (
-                            zp_mini_filt, data_wcs.shape, log, order_interp=2,
-                            bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                            timing=get_par(set_zogy.timing,tel))
-                        data_zp_std = mini2back (
-                            zp_std_mini_filt, data_wcs.shape, log, order_interp=1,
-                            bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
-                            timing=get_par(set_zogy.timing,tel)) 
-
-                        # save these to fits
-                        fits_zp = '{}_zp.fits'.format(base)
-                        fits.writeto(fits_zp, data_zp, overwrite=True)
-                        fits_zp_std = '{}_zp_std.fits'.format(base)
-                        fits.writeto(fits_zp_std, data_zp_std, overwrite=True)
 
 
 
@@ -4651,9 +4601,6 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
                                                   boxsize, boxsize,
                                                   (nysubs, nxsubs), nval_min=1)
 
-
-        
-
     if log is not None:
 
         if get_par(set_zogy.verbose,tel):
@@ -5120,6 +5067,7 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
         data_mask = read_hdulist (fits_mask, dtype='uint8')
         mask_reject |= (data_mask > 0)
 
+
     # reshape the input image in a 3D array of shape (nysubs, nxsubs,
     # number of pixels in background box), such that when taking
     # median along last axis, the mini image with the medians of the
@@ -5149,7 +5097,7 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
 
     # get clipped statistics; if background box is big enough, do the
     # statistics on a random subset of pixels
-    if boxsize > 200:
+    if boxsize > 300:
         index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
         __, mini_median, mini_std = sigma_clipped_stats (
             data_masked_reshaped[:,:,index_stat].astype('float64'),
@@ -5236,6 +5184,10 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_back', log=log)
+
+
+    #ds9_arrays(data=data, mask_reject=mask_reject, mini_median=mini_median,
+    #           mini_median_filt=mini_median_filt)
 
     # mini_median_filt and mini_std_filt are float64 (which is what
     # sigma_clipped_stats returns); return them as float32 below to
@@ -5585,39 +5537,68 @@ def get_rand_indices (shape, fraction=0.2):
 
 ################################################################################
 
-def mini2back (mini_filt, shape_data, log, order_interp=3, bkg_boxsize=None,
+def mini2back (data_mini, output_shape, log, order_interp=3, bkg_boxsize=None,
                timing=True):
     
     if timing: t = time.time()
     log.info('executing mini2back ...')
 
-    # resize low-resolution meshes, with order [order_interp], where
-    # order=0: nearest
-    # order=1: bilinear spline interpolation
-    # order=2: quadratic spline interpolation
-    # order=3: cubic spline interpolation
-    background = ndimage.zoom(mini_filt, bkg_boxsize, order=order_interp)
 
-    # if shape of the background is not equal to input [data]
-    # then pad the background images
-    if shape_data != background.shape:
-        t1 = time.time()
-        ysize, xsize = shape_data
-        ypad = ysize - background.shape[0]
-        xpad = xsize - background.shape[1]
-        background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
-        log.info('time to pad: {:.4f}'.format(time.time()-t1))
-
-        #np.pad seems quite slow; alternative:
-        #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(get_par(set_zogy.bkg_boxsize,tel),
-        #                                                                   ysize, xsize, log,
-        #                                                                   get_remainder=True)
-        # these now include the remaining patches
+    def help_mini2back (data_mini, output_shape):
         
+        # resize low-resolution meshes, with order [order_interp], where
+        # order=0: nearest
+        # order=1: bilinear spline interpolation
+        # order=2: quadratic spline interpolation
+        # order=3: cubic spline interpolation
+        background = ndimage.zoom(data_mini, bkg_boxsize, order=order_interp)
+        
+        # if shape of the background is not equal to input
+        # [output_data], then pad the background image
+        if output_shape != background.shape:
+            t1 = time.time()
+            ysize, xsize = output_shape
+            ypad = ysize - background.shape[0]
+            xpad = xsize - background.shape[1]
+            background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
+            log.info('time to pad: {:.4f}'.format(time.time()-t1))
+            
+            #np.pad seems quite slow; alternative:
+            #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
+            #    get_par(set_zogy.bkg_boxsize,tel), ysize, xsize, log,
+            #    get_remainder=True)
+            # these now include the remaining patches
+
+        return background
+
+            
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+        data_full = help_mini2back (data_mini, output_shape)
+        
+    else:
+            
+        # for ML/BG, determine the full image for each channel
+        # separately and insert them into the output image
+        data_sec = get_section_MLBG (output_shape)
+        mini_shape = data_mini.shape
+        mini_sec = get_section_MLBG (mini_shape)
+        nchans = np.shape(mini_sec)[0]
+    
+        # prepare output array and loop channels
+        data_full = np.zeros(output_shape, dtype='float32')
+        channel_shape = np.shape(data_full[data_sec[0]])
+        
+        for i_chan in range(nchans):
+            
+            data_full[data_sec[i_chan]] = help_mini2back (
+                data_mini[mini_sec[i_chan]], channel_shape)
+
+
     if timing:
         log_timing_memory (t0=t, label='mini2back', log=log)
         
-    return background
+    return data_full
 
 
 ################################################################################
@@ -7592,7 +7573,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     if True:
         mask_lowfwhm = (data['FWHM_IMAGE'] < fwhm_median-3*fwhm_std)
         result = prep_ds9regions('{}_lowfwhm_ds9regions.txt'
-                                 .format(cat_ldac.split('_ldac')[0]),
+                                 .format(cat_ldac.replace('.fits','')),
                                  data['XWIN_IMAGE'][mask_lowfwhm],
                                  data['YWIN_IMAGE'][mask_lowfwhm],
                                  radius=5., width=2, color='purple',
@@ -7876,20 +7857,22 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             fits.writeto('{}_bkg_std_mini.fits'.format(base), data_bkg_std_mini,
                          overwrite=True)
             # and update headers with [set_zogy.bkg_boxsize]
-            fits.setval('{}_bkg_mini.fits'.format(base), 'BKG_SIZE',
-                        value=get_par(set_zogy.bkg_boxsize,tel))
-            fits.setval('{}_bkg_std_mini.fits'.format(base), 'BKG_SIZE', 
-                        value=get_par(set_zogy.bkg_boxsize,tel))
+            fits.setval('{}_bkg_mini.fits'.format(base), 'BKG-SIZE',
+                        value=get_par(set_zogy.bkg_boxsize,tel),
+                        comment='[pix] background boxsize used to create this image')
+            fits.setval('{}_bkg_std_mini.fits'.format(base), 'BKG-SIZE', 
+                        value=get_par(set_zogy.bkg_boxsize,tel),
+                        comment='[pix] background boxsize used to create this image')
 
             # now use function [mini2back] to turn filtered mesh of median
             # and std of background regions into full background image and
             # its standard deviation
-            data_bkg = mini2back (data_bkg_mini, data.shape, log, order_interp=2, 
-                                  bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+            data_bkg = mini2back (data_bkg_mini, data.shape, log, order_interp=2,
+                                  bkg_boxsize=bkg_size,
                                   timing=get_par(set_zogy.timing,tel))
             data_bkg_std = mini2back (data_bkg_std_mini, data.shape, log,
-                                      order_interp=1, 
-                                      bkg_boxsize=get_par(set_zogy.bkg_boxsize,tel),
+                                      order_interp=1, bkg_boxsize=bkg_size,
                                       timing=get_par(set_zogy.timing,tel)) 
 
             # if [npasses] greater than 1, subtract the background
