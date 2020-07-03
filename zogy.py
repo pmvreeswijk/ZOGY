@@ -237,7 +237,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             get_par(set_zogy.sex_par,tel), pixscale, log, header,
             fit_psf=False, return_fwhm_elong=True,
             fraction=get_par(set_zogy.fwhm_imafrac,tel),
-            fwhm=5.0, save_bkg=False, update_vignet=False)
+            fwhm=5.0, save_bkg=False, update_vignet=False,
+            tel=tel, set_zogy=set_zogy)
 
         log.info('fwhm_{}: {:.3f} +- {:.3f}'.format(imtype, fwhm, fwhm_std))
         # if SEEING keyword exists, report its value in the log
@@ -292,7 +293,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     sex_params, pixscale, log, header, fit_psf=False,
                     return_fwhm_elong=False, fraction=1.0, fwhm=fwhm,
                     save_bkg=True, update_vignet=update_vignet, imtype=imtype,
-                    fits_mask=fits_mask, npasses=get_par(set_zogy.bkg_npasses,tel))
+                    fits_mask=fits_mask, npasses=get_par(set_zogy.bkg_npasses,tel),
+                    tel=tel, set_zogy=set_zogy)
             except Exception as e:
                 log.info(traceback.format_exc())
                 log.error('exception was raised during [run_sextractor]: {}'
@@ -1208,9 +1210,25 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
     numpy array of integers, those extensions are retrieved.
 
     """
-    
+
+    if os.path.exists(fits_file):
+        fits_file_read = fits_file
+
+    else:
+        # if fits_file does not exist, try looking for compressed
+        # versions
+        if os.path.exists('{}.fz'.format(fits_file)):
+            fits_file_read = '{}.fz'.format(fits_file)
+            
+        elif os.path.exists('{}.gz'.format(fits_file)):
+            fits_file_read = '{}.gz'.format(fits_file)
+            
+        else:
+            raise FileNotFoundError ('file not found: {}'.format(fits_file))
+
+
     # open fits file into hdulist
-    with fits.open(fits_file) as hdulist:
+    with fits.open(fits_file_read) as hdulist:
 
         n_exts = len(hdulist)
         
@@ -1236,7 +1254,7 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
                     data_temp = Table(data_temp)
                     # could also read fits extension into Table directly,
                     # but this is about twice as slow as the 2 steps above
-                    #data_temp = Table.read(fits_file, hdu=ext)
+                    #data_temp = Table.read(fits_file_read, hdu=ext)
                     if i_ext==0:
                         data = data_temp
                     else:
@@ -1465,6 +1483,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         'FWHM_MOFFAT':    ['E', 'arcsec'], #, 'flt32' ],
         'ELONG_MOFFAT':   ['E', ''     ], #, 'flt32' ],
         'CHI2_MOFFAT':    ['E', ''     ], #, 'flt32' ],
+        'ML_PROB_REAL':   ['E', ''     ], #, 'flt32' ],
         'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
@@ -1511,6 +1530,8 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
                           'RA_MOFFAT', 'DEC_MOFFAT', 
                           'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT']
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+            keys_to_record.append('ML_PROB_REAL')
 
 
     # rename any of the keys using this dictionary, such as the
@@ -2584,14 +2605,17 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
             # using Eran's function:
             #psf_ima_shift = image_shift_fft(psf_ima_config, xshift, yshift)
             # resample PSF image at image pixel scale
-            psf_ima_shift_resized = ndimage.zoom(psf_ima_shift, psf_samp_update, order=order)
+            psf_ima_shift_resized = ndimage.zoom(psf_ima_shift, psf_samp_update,
+                                                 order=order, mode='nearest')
             # also resample non-shifted PSF image at image pixel scale
             # only required if psf-fitting is performed
             if psffit:
-                psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, order=order)
+                psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update,
+                                               order=order, mode='nearest')
         else:
             # resample PSF image at image pixel scale
-            psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, order=order)
+            psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update,
+                                           order=order, mode='nearest')
             # shift PSF
             psf_ima_shift_resized = ndimage.shift(psf_ima_resized, (yshift, xshift), order=order)
             # using Eran's function:
@@ -3398,6 +3422,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     ysize, xsize = np.shape(data_wcs)
     
 
+    # determine data_mask
+    if fits_mask is not None:
+        # read in mask image
+        data_mask = read_hdulist (fits_mask, dtype='uint8')
+    else:
+        data_mask = None
+        fits_mask = input_fits.replace('.fits', '_mask.fits')
+        
+    # create new mask or modify an existing one
+    data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
+
+    
     # check if background was already subtracted from input_fits
     if 'BKG-SUB' in header:
         bkg_sub = header['BKG-SUB']
@@ -3424,12 +3460,19 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             else:
                 bkg_size = get_par(set_zogy.bkg_boxsize,tel)
                 
-            data_bkg = mini2back (data_bkg_mini, data_wcs.shape, log,
+            data_bkg = mini2back (data_bkg_mini, data_wcs.shape,
                                   order_interp=2, bkg_boxsize=bkg_size,
-                                  timing=get_par(set_zogy.timing,tel))
+                                  timing=get_par(set_zogy.timing,tel),
+                                  log=log, tel=tel, set_zogy=set_zogy)
 
         # subtract the background
         data_wcs -= data_bkg
+        # edge pixels will now be negative, best to ensure that they
+        # are set to zero
+        value_edge = get_par(set_zogy.mask_value['edge'],tel)
+        mask_edge = (data_mask & value_edge == value_edge)
+        data_wcs[mask_edge] = 0
+
 
         # overwrite [input_fits] with its background-subtracted image
         # 2020-04-14: why not keep background in fits image??
@@ -3442,8 +3485,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
         else:
             # not needed, but make one for the new image also
-            if False:
-                ds9_arrays(bkgsub=data_wcs)
+            if True:
                 fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
 
             
@@ -3465,48 +3507,17 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         else:
             bkg_size = get_par(set_zogy.bkg_boxsize,tel)
 
-        data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape, log,
+        data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape,
                                   order_interp=1, bkg_boxsize=bkg_size,
-                                  timing=get_par(set_zogy.timing,tel))
+                                  timing=get_par(set_zogy.timing,tel),
+                                  log=log, tel=tel, set_zogy=set_zogy)
         # and write to fits; needed below for SWarp
         fits.writeto (fits_bkg_std, data_bkg_std, overwrite=True)
         
 
-    def create_modify_mask (data, satlevel, data_mask=None):
-
-        """function to identify the saturated and adjacent pixels in input
-           data and add these to an existing mask or creat a new one
-        """
-        if data_mask is None:
-            data_mask = np.zeros(data.shape, dtype='uint8')
-
-        value = get_par(set_zogy.mask_value['saturated'],tel)
-        mask_sat_check = (data_mask & value == value)
-
-        # if no saturated pixels already present, add them
-        if np.sum(mask_sat_check) == 0:
-            mask_sat = (data >= 0.8*satlevel)
-            data_mask[mask_sat] += get_par(set_zogy.mask_value['saturated'],tel)
-            # pixels connected to saturated pixels
-            mask_sat_adj = ndimage.binary_dilation(mask_sat,structure=
-                                                   np.ones((3,3)).astype('bool'))
-            mask_sat_adj[mask_sat] = False
-            data_mask[mask_sat_adj] += get_par(set_zogy.mask_value
-                                               ['saturated-connected'],tel)
-        
-        return data_mask
     
     
 
-    if fits_mask is not None:
-        # read in mask image
-        data_mask = read_hdulist (fits_mask, dtype='uint8')
-    else:
-        data_mask = None
-        fits_mask = input_fits.replace('.fits', '_mask.fits')
-        
-    # create new mask or modify an existing one
-    data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
 
 
     # in case the reference image needs to be remapped, SWarp the
@@ -3942,20 +3953,32 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                     # easier on the polynomial fit
                     order = 2
                     ysize, xsize = data_wcs.shape
-                    coeffs = polyfit2d(x_array/xsize, y_array/ysize, zp_array,
-                                       order)
-                    
-                    # evaluate at image grid in pixel coordinates as
-                    # x_array and y_array are in pixel coordinates
-                    x = np.arange(1,xsize+1)
-                    y = np.arange(1,ysize+1)
-                    zp_2dfit = polygrid2d(x/xsize, y/ysize, coeffs).T
+                    f_norm = max(ysize, xsize)
+                    # subtract 1 from coordinate arrays to convert fit
+                    # to pixel indices rather than pixel coordinates,
+                    # and then normalize to have coordinate values
+                    # around 0-1
+                    coeffs = polyfit2d ((x_array-1)/f_norm, (y_array-1)/f_norm,
+                                        zp_array, order=order)
 
+                    # evaluate at image grid in pixel indices
+                    x = np.arange(xsize)
+                    y = np.arange(ysize)
+                    zp_2dfit = polygrid2d(x/f_norm, y/f_norm, coeffs).T
+
+                    # N.B.: polynomials were fit with normalized x and
+                    # y indices (using [f_norm]), so coeffients should
+                    # be scaled accordingly if original image pixel
+                    # indices are used to infer the polynomial fit
+                    # (most natural)
+                    xy = np.arange(order+1)
+                    coeffs_power = np.sum(np.meshgrid(xy,xy), axis=0)
+                    coeffs_scaled = coeffs / (float(f_norm)**coeffs_power)
 
                     # record fit coefficients in header
                     header['PC-ZPFDG'] = (order,
-                                         'zeropoint 2D polynomial fit degree')
-                    for nc, coeff in enumerate(coeffs.ravel()):
+                                          'zeropoint 2D polynomial fit degree')
+                    for nc, coeff in enumerate(coeffs_scaled.ravel()):
                         if np.isfinite(coeff):
                             value = coeff
                         else:
@@ -4382,6 +4405,33 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     #return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std, fftdata_mask
     return fftdata, psf, psf_orig, fftdata_bkg_std, fftdata_mask
     
+
+################################################################################
+
+def create_modify_mask (data, satlevel, data_mask=None):
+    
+    """function to identify the saturated and adjacent pixels in input
+           data and add these to an existing mask or creat a new one
+        """
+    if data_mask is None:
+        data_mask = np.zeros(data.shape, dtype='uint8')
+
+    value = get_par(set_zogy.mask_value['saturated'],tel)
+    mask_sat_check = (data_mask & value == value)
+
+    # if no saturated pixels already present, add them
+    if np.sum(mask_sat_check) == 0:
+        mask_sat = (data >= 0.8*satlevel)
+        data_mask[mask_sat] += get_par(set_zogy.mask_value['saturated'],tel)
+        # pixels connected to saturated pixels
+        mask_sat_adj = ndimage.binary_dilation(mask_sat,structure=
+                                               np.ones((3,3)).astype('bool'))
+        mask_sat_adj[mask_sat] = False
+        data_mask[mask_sat_adj] += get_par(set_zogy.mask_value
+                                           ['saturated-connected'],tel)
+        
+    return data_mask
+
 
 ################################################################################
 
@@ -4913,7 +4963,8 @@ def fixpix (data, log, satlevel=60000., data_mask=None, base=None,
     data_fixed = np.copy(data)
     
     # replace edge pixels with zero
-    mask_edge = (data_mask==mask_value['edge'])
+    value_edge = mask_value['edge']
+    mask_edge = (data_mask & value_edge == value_edge)
     data_fixed[mask_edge] = 0.
     # or with the background
     #data_fixed[mask_edge] = data_bkg[mask_edge]
@@ -5040,7 +5091,7 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3, log=None):
 
 ################################################################################
 
-def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
+def get_back_orig (data, header, objmask, imtype, log, clip=True, fits_mask=None):
     
     """Function that returns the background of the image [data]. A clipped
     median is determined for each subimage which is masked using the
@@ -5127,18 +5178,11 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
     # background images
     if False and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
 
-        if False:
-            # channel correction factors by comparing background
-            # values on edges of adjacent channels
-            bkg_corr = bkg_corr_MLBG (mini_median, mini_std, data, header,
-                                      correct_data=True)
-        else:
-            # channel correction factors determined from low order 2D
-            # polynomial fit and minimizing the residuals            
-            bkg_corr = bkg_corr_MLBG_alt (mini_median, mini_std, data, header,
-                                          correct_data=True, order=2, log=log)
+        # channel correction factors determined from low order 2D
+        # polynomial fit and minimizing the residuals            
+        bkg_corr = bkg_corr_MLBG (mini_median, mini_std, data, header,
+                                  correct_data=True, order=2, log=log)
 
-            
         # save data to fits image if background correction was applied
         if bkg_corr:
             if imtype=='new':
@@ -5186,8 +5230,8 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
         log_timing_memory (t0=t, label='get_back', log=log)
 
 
-    #ds9_arrays(data=data, mask_reject=mask_reject, mini_median=mini_median,
-    #           mini_median_filt=mini_median_filt)
+    ds9_arrays(data=data, mask_reject=mask_reject, mini_median=mini_median,
+               mini_median_filt=mini_median_filt)
 
     # mini_median_filt and mini_std_filt are float64 (which is what
     # sigma_clipped_stats returns); return them as float32 below to
@@ -5199,25 +5243,280 @@ def get_back (data, header, objmask, imtype, log, clip=True, fits_mask=None):
 
 ################################################################################
 
-def fill_zeros_filter (data_mini, size_filter, use_median=True):
+def get_back (data, header, fits_objmask, fits_mask=None, log=None,
+              tel=None, set_zogy=None):
+
     
+    """Function that returns the background of the image [data]. A clipped
+    median and standard deviation is determined for each subimage
+    which is masked using the object mask (created from SExtractor's
+    '-OBJECTS' image, where objects have zero values). The subimages
+    (with size: [set_zogy.bkg_boxsize] are then median filtered. If
+    [use_2Dfit] is True, a low order polynomial 2D fit is performed to
+    the filtered mini background and if the fit value is lower than
+    the filtered image for a particular subimage, that value is
+    used. Subsequently the mini images (background median and standard
+    deviation) are resized to the size of the input image.
+
+    For MeerLICHT/BlackGEM images, the 2D polynomial fit will be used
+    to estimate the channel correction factors, probably due to
+    non-linearity of the different channels at low count levels. For
+    this estimate the function [bkg_corr_MLBG] is used.
+
+    """
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing get_back ...')
+
+    # use the SExtractor '-OBJECTS' image, which is a (SExtractor)
+    # background-subtracted image with all pixels where objects were
+    # detected set to zero (-OBJECTS), as the object mask
+
+    # [objmask] is the mask indicating the zeros in the '-OBJECTS'
+    # image (with True)
+    data_objmask = read_hdulist(fits_objmask)
+    mask_reject = (np.abs(data_objmask)==0)
+
+    # also reject any masked pixel from input mask
+    if fits_mask is not None:
+        data_mask = read_hdulist (fits_mask, dtype='uint8')
+        mask_reject |= (data_mask > 0)
+
+    # let this mask grow a few pixels if masked fraction is not
+    # already above limfrac_reject of all pixels
+    limfrac_reject_image = 0.66
+    mask_reject_old = mask_reject
+    struct = np.ones((3,3), dtype=bool)
+    for i in range(3):
+        if np.sum(mask_reject)/mask_reject.size < limfrac_reject_image:
+            mask_reject = ndimage.binary_dilation(mask_reject,
+                                                  structure=struct,
+                                                  iterations=1)
+
+    if log is not None:
+        log.info ('fraction of masked pixels in OR combination of '
+                  'source-extractor\'s object mask and the input mask: {:.3f}'
+                  .format(np.sum(mask_reject)/mask_reject.size))
+
+        if (np.sum(~np.isfinite(data))) > 0:
+            log.warning ('input data contains infinite or nan values')
+
+
+    # construct masked array
+    data_masked = np.ma.masked_array(data, mask=mask_reject)
+
+    # image size and number of background boxes along x and y
+    ysize, xsize = data.shape
+
+    
+    # reshape the input image in a 3D array of shape (nysubs,
+    # nxsubs, number of pixels in background box), such that when
+    # taking median along last axis, the mini image with the
+    # medians of the subimages are immediately obtained; this
+    # needs to be done in a masked array to be able to discard
+    # pixels in the object mask (note that masked arrays consider
+    # mask values of True to be invalid, i.e. are not used)
+    bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
+    if log is not None and (ysize % bkg_boxsize != 0 or
+                            xsize % bkg_boxsize != 0):
+        log.info('Warning: [bkg_boxsize] does not fit integer times in image; '
+                 'best to pick a boxsize that does')
+
+    # reshape
+    nysubs = int(ysize / bkg_boxsize)
+    nxsubs = int(xsize / bkg_boxsize)
+
+    data_masked_reshaped = data_masked.reshape(
+        nysubs,bkg_boxsize,-1,bkg_boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
+
+    if log is not None:
+        if (np.sum(~np.isfinite(data_masked_reshaped))) > 0:
+            log.warning ('data_masked_reshaped contains infinite or nan values')
+
+    # get clipped statistics; if background box is big enough, do the
+    # statistics on a random subset of pixels
+    t0 = time.time()
+    if bkg_boxsize > 300:
+        index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
+        __, mini_median, mini_std = sigma_clipped_stats (
+            data_masked_reshaped[:,:,index_stat].astype('float64'),
+            sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
+        if log is not None:
+            log.warning ('subset of pixels used for statistics')
+        
+    else:
+        __, mini_median, mini_std = sigma_clipped_stats (
+            data_masked_reshaped.astype('float64'),
+            sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
+
+
+    # check for infinite/nan values that sigma_clipped_stats will return
+    if log is not None:
+        if (np.sum(~np.isfinite(mini_median))) > 0:
+            log.warning ('mini_median contains infinite or nan values')
+        if (np.sum(~np.isfinite(mini_std))) > 0:
+            log.warning ('mini_std contains infinite or nan values')
+            
+        log.info ('time to get statistics: {:.3f}s'.format(time.time()-t0))
+
+
+    # mask subimage if more than some fraction of all subimage pixels
+    # are masked (by OR combination of object mask and input image
+    # mask); do this iteratively starting with a large fraction and
+    # decreasing it to a low fraction, to prevent too many subimages
+    # to be masked - the limit is again defined by
+    # [limfrac_reject_image]
+    for fraction in [1, 0.67, 0.5, 0.33]:
+        npix_lim = fraction * bkg_boxsize**2
+        # if number of invalid pixels along axis 2 is greater than
+        # [mask_minsize] then mask that background subimage
+        npix_bad = np.sum(data_masked_reshaped.mask, axis=2)
+        mask_temp = (npix_bad >= npix_lim)
+        if np.sum(mask_temp)/mask_temp.size < limfrac_reject_image:
+            mask_mini_avoid = mask_temp
+        else:
+            break
+            
+    # include any nan values in mask_mini_avoid
+    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
+    mask_mini_avoid |= ~mask_mini_finite
+    
+    # set masked values to zero
+    mini_median[mask_mini_avoid] = 0
+    mini_std[mask_mini_avoid] = 0
+
+    
+    # report masked fraction of image
+    if log is not None:
+        log.info ('fraction of subimages that were masked: {:.2f}'
+                  .format(np.sum(mask_mini_avoid)/mask_mini_avoid.size))
+
+
+    # fill zeros (if needed) and smooth mini images with
+    # median or mean filter using function [fill_zeros_filter]
+    size_filter = get_par(set_zogy.bkg_filtersize,tel)
+    
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+        mini_median_filt = fill_zeros_filter (mini_median, size_filter,
+                                              use_median=True)
+        mini_std_filt = fill_zeros_filter (mini_std, size_filter,
+                                           use_median=True)
+    else:
+        # for ML/BG this needs to be done per channel separately, to
+        # avoid channels with different average count levels affecting
+        # each other
+        mini_shape = mini_median.shape
+        mini_sec = get_section_MLBG (mini_shape)
+        nchans = np.shape(mini_sec)[0]
+
+        fill_zeros = True
+        apply_filter = True
+        
+        # prepare output arrays and loop channels
+        mini_median_filt = np.zeros_like (mini_median)
+        mini_std_filt = np.zeros_like (mini_std)
+        for i_chan in range(nchans):
+            sec_temp = mini_sec[i_chan]
+            mini_median_filt[sec_temp] = fill_zeros_filter (
+                mini_median[sec_temp], size_filter, use_median=True,
+                apply_filter=apply_filter, fill_zeros=fill_zeros)
+            mini_std_filt[sec_temp] = fill_zeros_filter (
+                mini_std[sec_temp], size_filter, use_median=True,
+                apply_filter=apply_filter, fill_zeros=fill_zeros)
+
+        # if any zeros still left, probably due to an entire channel
+        # having been masked, run the entire image through
+        # fill_zeros_filter
+        if np.any(mini_median_filt==0):
+            mini_median_filt = fill_zeros_filter (
+                mini_median_filt, size_filter, use_median=True,
+                apply_filter=apply_filter, fill_zeros=fill_zeros)
+        if np.any(mini_std_filt==0):
+            mini_std_filt = fill_zeros_filter (
+                mini_std_filt, size_filter, use_median=True,
+                apply_filter=apply_filter, fill_zeros=fill_zeros)
+
+            
+        # now try correcting the small-scale image for the differences
+        # in the channels; if [set_zogy.MLBG_chancorr] is True, then
+        # mini_median_filt, mini_std_filt and data are corrected with
+        # the channel correction factors in place.
+        order_max = 2
+        bkg_corr, mini_median_filt_2Dfit = bkg_corr_MLBG (
+            mini_median_filt, mini_std_filt, data, header,
+            correct_data=get_par(set_zogy.MLBG_chancorr,tel),
+            order_max=order_max, mask_reject=mask_mini_avoid, log=log,
+            tel=tel, set_zogy=set_zogy,
+            limfrac_reject_image=limfrac_reject_image)
+
+        # save data to fits image if background correction was applied
+        if bkg_corr:
+            fits.writeto (fits_objmask.replace('_objmask',''), data, header,
+                          overwrite=True)
+
+        
+        # now that images have been corrected, take the minimum of
+        # mini_median_filt and mini_median_filt_2Dfit
+        if get_par(set_zogy.MLBG_use2Dfit,tel):
+            # take minimimum of mini_median_filt and 2Dfit
+            mini_median_filt = np.amin(
+                [mini_median_filt, mini_median_filt_2Dfit], axis=0)
+        
+
+    # estimate median and std of entire image from the values of the subimages
+    bkg_median = np.median(mini_median_filt)
+    bkg_std = np.median(mini_std_filt)
+
+
+    if log is not None and get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_back', log=log)
+
+
+    # mini_median and mini_std are float64 (which is what
+    # sigma_clipped_stats returns); return them as float32 below to
+    # avoid the data type of the full background and its std image
+    # being float64 as well
+    return (mini_median_filt.astype('float32'), mini_std_filt.astype('float32'),
+            bkg_median, bkg_std)
+
+
+################################################################################
+
+def fill_zeros_filter (data_mini, size_filter, use_median=True,
+                       fill_zeros=True, apply_filter=True):
+
     # fill zeros in data_mini with median of surrounding 3x3
     # pixels, until no more zeros left
-    while (np.sum(data_mini == 0) != 0):
-        mask_zero = (data_mini == 0)
-        data_mini_filt = median_filter (data_mini, ~mask_zero)
-        data_mini[mask_zero] = data_mini_filt[mask_zero]
+    if fill_zeros:
+        if np.all(data_mini==0):
+            # avoid infinite loop in case all data_mini pixels are zero
+            pass
+        else:
+            while (np.sum(data_mini==0) != 0):
+                mask_zero = (data_mini==0)
+                #data_mini_old = data_mini
+                data_mini_filt = median_filter (data_mini, ~mask_zero)
+                data_mini[mask_zero] = data_mini_filt[mask_zero]
 
-    if use_median:
-        # median filter
-        data_mini_filt = ndimage.filters.median_filter(data_mini, size_filter)
-    else:
-        # mean filter
-        weights = np.full((size_filter,size_filter), 1./size_filter**2)
-        data_mini_filt = ndimage.filters.convolve(data_mini, weights)
+                if False:
+                    ds9_arrays (mask_zero=mask_zero,
+                                data_mini_old=data_mini_old,
+                                data_mini_filt=data_mini_filt,
+                                data_mini=data_mini)
+                
+    if apply_filter:
+        if use_median:
+            # median filter
+            data_mini = ndimage.filters.median_filter(data_mini, size_filter)
+        else:
+            # mean filter
+            weights = np.full((size_filter,size_filter), 1./size_filter**2)
+            data_mini = ndimage.filters.convolve(data_mini, weights)
+
+
+    return data_mini
     
-    return data_mini_filt
-
 
 ################################################################################
 
@@ -5235,6 +5534,7 @@ def get_section_MLBG (data_shape):
     ny, nx = 2, 8
     # and size of data section in each channel
     ysize_chan, xsize_chan = ysize//ny, xsize//nx
+
     # channel reduced data section slices; shape=(16,2)
     return tuple([(slice(y,y+ysize_chan), slice(x,x+xsize_chan))
                   for y in range(0,ysize,ysize_chan)
@@ -5243,123 +5543,424 @@ def get_section_MLBG (data_shape):
 
 ################################################################################
 
-def bkg_corr_MLBG_alt (mini_median, mini_std, data, header, correct_data=False,
-                       order=2, log=None):
+def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
+                   order_max=2, mask_reject=None, log=None,
+                   tel=None, set_zogy=None, limfrac_reject_image=None):
+
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing bkg_corr_MLBG ...')
+
     
     # determine channel pixels for full and mini images
     data_sec = get_section_MLBG (data.shape)
     mini_shape = mini_median.shape
     mini_sec = get_section_MLBG (mini_shape)
     nchans = np.shape(mini_sec)[0]
+    npix_chan = mini_median.size // nchans
 
-    # create a set of Parameters
-    params = Parameters()
-    for i_chan in range(nchans):
-        params.add('factor{}'.format(i_chan+1), value=1, min=0.5, max=1.5,
-                   vary=True)
+    # in case mask_reject is None
+    if mask_reject is None:
+        mask_reject = np.zeros(mini_median.shape, dtype=bool)
+
+    # define x, y grid to fit
+    ysize_mini, xsize_mini = mini_median.shape
+    x = np.arange(xsize_mini)
+    y = np.arange(ysize_mini)
+    # normalization factor for polynomial fit, used also inside
+    # function mini2min
+    f_norm = max(ysize_mini, xsize_mini)
+    xx, yy = np.meshgrid(x, y)
+    zz = mini_median
+    xx = xx[~mask_reject]
+    yy = yy[~mask_reject]
+    zz = zz[~mask_reject]
+    
+    # loop different polynomial orders up to [order_max]:
+    chi2red_old = np.inf
+    limfrac_reject_chan = 0.8
+    for order in range(order_max+1):
+
+        # create a set of parameters with factors
+        params = Parameters()
+        for i_chan in range(nchans):
+
+            # fix fit factor to 1 if more than some fraction of the
+            # channel pixels are masked through mask_reject; N.B.:
+            # this does not include any additionally rejected pixels
+            # due to large deviation from the fit below
+            npix_masked = np.sum(mask_reject[mini_sec[i_chan]])
+            if (npix_masked / npix_chan) > limfrac_reject_chan:
+                vary = False
+            else:
+                vary = True
+
+            params.add('factor{}'.format(i_chan+1), value=1, min=0.5, max=1.5,
+                       vary=vary)
+
+        # add polynomial coefficients to fit, with decent starting estimates
+        deg = [order, order]
+        deg = np.asarray(deg)
+        vander = polyvander2d(xx.ravel()/f_norm, yy.ravel()/f_norm, deg)
+        z_temp = zz.reshape((vander.shape[0],))
+        coeffs_init, chi2, rank, s = np.linalg.lstsq(vander, z_temp, rcond=None)
+        # set higher-crossterm coefficients to zero
+        xy = np.arange(order+1)
+        mask_cfit = (np.sum(np.meshgrid(xy,xy), axis=0) <= order).ravel()
+        coeffs_init[~mask_cfit] = 0
+        for i_coeff, coeff_init in enumerate(coeffs_init):
+            params.add('coeff{}'.format(i_coeff), value=coeff_init,
+                       vary=mask_cfit[i_coeff])
+
+        log.info ('start coefficients: {}'.format(coeffs_init))
+
+        # do leastsq polynomial fit in 3 iterations to include rejection
+        # of outliers in residual map
+        mask_reject_temp = np.copy(mask_reject)
+        npix_reject_old = np.sum(mask_reject_temp)
+        for it in range(5):
+            result = minimize (mini2min, params, method='Leastsq',
+                               args=(mini_median, mini_std, mini_sec, order,
+                                     mask_reject_temp, f_norm,))
+            params = result.params
+            chi2red = result.redchi
+            
+            mini_median_corr_temp, mini_std_corr_temp, fit_temp, resid_temp = \
+                mini2min(params, mini_median, mini_std, mini_sec, order,
+                         mask_reject_temp, f_norm, return_resid=False)
+
+            # scale residuals with the chi-square value as standard
+            # deviations (mini_std) are overestimated (e.g. if mean
+            # was used, the error in the means would be divided by
+            # np.sqrt(npixels)
+            resid_temp /= np.sqrt(chi2red)
+            # reject pixels that are outliers in residual map
+            mask_reject_temp |= (np.abs(resid_temp) >= 3)
+            npix_reject = np.sum(mask_reject_temp)
+
+            log.info ('iteration: {}, chi2red: {}, np.sum(mask_reject_temp): {}'
+                      .format(it, chi2red, np.sum(mask_reject_temp)))
+            
+            if (npix_reject == npix_reject_old or
+                npix_reject/mask_reject_temp.size > limfrac_reject_image):
+                break
+            else:
+                npix_reject_old = npix_reject
+
+
+        log.info ('order: {}, chi2red: {}'.format(order, chi2red))
         
-    # do leastsq polynomial fit
-    result = minimize(mini2min, params, method='Leastsq',
-                      args=(mini_median, mini_std, mini_sec, order,))
+        factor_temp = np.zeros(nchans)
+        for i_chan in range(nchans):
+            factor_temp[i_chan] = params['factor{}'.format(i_chan+1)].value
 
-    p = result.params.valuesdict()
+        log.info ('normalized factors for this intermediate fit: {}'
+                  .format(factor_temp/np.mean(factor_temp)))
+            
+        # check formal criterium to use
+        if (chi2red_old / chi2red) > 2:
+            chi2red_old = chi2red
+            order_bf = order
+            chi2red_bf = chi2red
+            params_bf = params
+            mask_reject_bf = mask_reject_temp
+            result_bf = result
+            resid_bf = resid_temp
+            
 
+            
+
+    log.info (fit_report(result_bf))
+    log.info ('order used: {}, reduced chi-square: {}'.format(order_bf,
+                                                              chi2red_bf))
+    p = params_bf
+
+    # save fit factors in numpy array
     factor = np.zeros(nchans)
+    factor_err = np.zeros(nchans)
     for i_chan in range(nchans):
-        factor[i_chan] = p['factor{}'.format(i_chan+1)]
+        factor[i_chan] = p['factor{}'.format(i_chan+1)].value
+        factor_err[i_chan] = p['factor{}'.format(i_chan+1)].stderr
+        # scale with reduced chi2 assuming the fit is of good quality
+        factor_err[i_chan] *= np.sqrt(chi2red_bf)
+        #print ('factor{}: {} +- {}'.format(i_chan+1, factor[i_chan],
+        #                                   factor_err[i_chan]))
         
     # normalize factors such that their mean is 1
-    factor_mean, factor_median, factor_std = sigma_clipped_stats (factor,
-                                                                  mask_value=0)
-    factor /= factor_mean
+    factor_mean = np.mean(factor)
 
-    # if factor range is within limits and correct_data is True,
-    # correct the mini images and original data
-    maxdiff = (np.amax(factor) - np.amin(factor)) / 2
-    if maxdiff < 0.05 and correct_data:
+    # if one channel factor is very different from 1, set it to 1
+    limdev = get_par(set_zogy.MLBG_chancorr_limdev,tel)
+    mask_deviant = (np.abs(factor/factor_mean - 1) > limdev)
+    if np.sum(mask_deviant) > 0:
+        log.warning ('factor deviation for channel(s) {} larger than {}: '
+                     '{}; setting it/them to 1'
+                     .format(list(np.nonzero(mask_deviant)[0]+1), limdev,
+                             factor[mask_deviant]/factor_mean))
+        if False:
+            # only set affected channel to 1
+            factor[mask_deviant] = 1
+            factor_err[mask_deviant] = 0
+        else:
+            # setting all channels to 1
+            factor[:] = 1
+            factor_err[:] = 0
+
+
+    # calculate factor_mean from factors within limits
+    if np.sum(~mask_deviant) > 0:
+        factor_mean = np.mean(factor[~mask_deviant])
+        # normalize factor
+        factor[~mask_deviant] /= factor_mean
+        factor_err[~mask_deviant] /= factor_mean
+    else:
+        # if none is within limits, set them to unity
+        factor_mean = 1
+        factor[:] = 1
+        factor_err[:] = 0
+
+
+    # save fit coefficients in numpy array
+    ncoeffs = (order_bf+1)**2
+    coeff = np.zeros(ncoeffs)
+    coeff_err = np.zeros(ncoeffs)
+    for i_coeff in range(ncoeffs):
+        coeff[i_coeff] = p['coeff{}'.format(i_coeff)].value
+        coeff_err[i_coeff] = p['coeff{}'.format(i_coeff)].stderr
+        # scale with reduced chi2 assuming the fit is of good quality
+        coeff_err[i_coeff] *= np.sqrt(chi2red_bf)
+        #print ('coeff{}: {} +- {}'.format(i_coeff, coeff[i_coeff],
+        #                                  coeff_err[i_coeff]))
+
+    # normalize coefficients with mean factor
+    coeff /= factor_mean
+    coeff_err /= factor_mean
+
+
+    # one more call to mini2min with updated fit parameters
+    params_final = Parameters()
+    for i_chan in range(nchans):
+        params_final.add('factor{}'.format(i_chan+1), value=factor[i_chan])
+    for i_coeff in range(ncoeffs):
+        params_final.add('coeff{}'.format(i_coeff), value=coeff[i_coeff])
+
+    mini_median_corr, mini_std_corr, mini_median_2Dfit, __ = \
+        mini2min(params_final, mini_median, mini_std, mini_sec, order_bf,
+                 mask_reject_bf, f_norm, return_resid=False)
+    
+
+    if False:
+        ds9_arrays (mini_median=mini_median,
+                    mini_std=mini_std,
+                    mini_median_corr=mini_median_corr,
+                    mini_std_corr=mini_std_corr,
+                    mini_median_2Dfit=mini_median_2Dfit,
+                    resid_bf=resid_bf,
+                    mask_reject_bf=mask_reject_bf,
+                    bkg_mini=np.amin([mini_median_corr,mini_median_2Dfit],
+                                     axis=0)
+                    )
+                    
+        
+    if correct_data and not np.all(factor==1):
+
         bkg_corr = True
+
+        # mini median and std
+        mini_median[:] = mini_median_corr
+        mini_std[:] = mini_std_corr
+        
+        # full image data
+        for i_chan in range(nchans):
+            data[data_sec[i_chan]] *= factor[i_chan]
+
         if log is not None:
             log.info ('image channels modified with correction factors: {}'
                       .format(factor))
+
     else:
         bkg_corr = False        
 
+
     # add boolean to header
     header['BKG-CORR'] = (bkg_corr, 'channels corrected for background ratios?')
+    header['BKG-CHI2'] = (chi2red_bf, 'reduced chi2 of background factor/poly fit')
 
-
-    #data_old = np.copy(data)
-    #mini_median_old = np.copy(mini_median)
-    #mini_std_old = np.copy(mini_std)
-    
-
-    # add factors determined to header
+    # add correction factors to header
     for i_chan in range(nchans):
-        
+
         header['BKG-CF{}'.format(i_chan+1)] = (
-            factor[i_chan], 'channel {} correction factor'
-            .format(i_chan+1))
+            factor[i_chan],
+            'channel {} correction factor'.format(i_chan+1))
 
-        # correct the data
-        if bkg_corr:
-
-            # full data
-            data[data_sec[i_chan]] *= factor[i_chan]
-
-            # mini median and std
-            mini_median[mini_sec[i_chan]] *= factor[i_chan]
-            mini_std[mini_sec[i_chan]] *= factor[i_chan]
+        # error estimate can be unreliable because fit parameters are
+        # typically correlated
+        if False:
+            header['BKG-CS{}'.format(i_chan+1)] = (
+                factor_err[i_chan],
+                'sigma (STD) channel {} correction factor'.format(i_chan+1))
 
 
-    #ds9_arrays(data_old=data_old, data=data,
-    #           mini_median_old=mini_median_old, mini_median=mini_median,
-    #           mini_std_old=mini_std_old, mini_std=mini_std)
+    # N.B.: polynomials were fit with normalized x and y pixel indices
+    # (using [f_norm]) of the mini image, so coeffients should be
+    # scaled accordingly if original image pixel indices are used to
+    # infer the polynomial fit (most natural)
+    bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
+    xy = np.arange(order_bf+1)
+    coeff_power = np.sum(np.meshgrid(xy,xy), axis=0).ravel()
+    coeff_scaled = coeff / (float(f_norm * bkg_boxsize)**coeff_power)
+    coeff_err_scaled = coeff_err / (float(f_norm * bkg_boxsize)**coeff_power)
 
-    return bkg_corr
+    # add coefficients to header
+    for i_coeff in range((order_bf+1)**2):
+        
+        header['BKG-FC{}'.format(i_coeff)] = (
+            coeff_scaled[i_coeff],
+            'background 2D poly fit coefficient {}'.format(i_coeff))
+
+        # error estimate can be unreliable because fit parameters are
+        # typically correlated
+        if False:
+            header['BKG-FS{}'.format(i_coeff)] = (
+                coeff_err_scaled[i_coeff],
+                'sigma (STD) background 2D poly fit coefficient {}'.format(i_coeff))
+
+
+    if log is not None and get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='bkg_corr_MLBG', log=log)
+
+
+    return bkg_corr, mini_median_2Dfit
 
 
 ################################################################################
 
-def mini2min (params, data, data_std, data_sec, order):
+def mini2min (params, data, data_std, data_sec, order, mask_reject,
+              f_norm, return_resid=True):
     
     # fit parameters
-    p = params.valuesdict()
-
+    p = params
+    
     # define x, y grid to fit
     x = np.arange(data.shape[1])
     y = np.arange(data.shape[0])
-    xx, yy = np.meshgrid(x, y)
 
     # make copy of input data
     data_corr = np.copy(data)
     data_std_corr = np.copy(data_std)
-    
+
     # modify channel sections with fit parameters
     nchans = np.shape(data_sec)[0]
     for i_chan in range(nchans):
-        factor_chan = p['factor{}'.format(i_chan+1)]
+        factor_chan = p['factor{}'.format(i_chan+1)].value
         data_corr[data_sec[i_chan]] *= factor_chan
         data_std_corr[data_sec[i_chan]] *= factor_chan
+        
+        
+    # exclude pixels where data_std_corr is zero
+    mask_fit = (data_std_corr != 0)
+            
+    # add input mask_reject
+    if mask_reject is not None:
+        mask_fit &= ~mask_reject
 
-
-    # fit 2D polynomial using function polyfit2d
-    coeffs = polyfit2d(xx.ravel(), yy.ravel(), data_corr.ravel(), order)
+    # create model 2D polynomial fit from coefficients
+    coeff = [p['coeff{}'.format(i)].value for i in range((order+1)**2)]
+    coeff = np.array(coeff).reshape((order+1, order+1))
+    fit = polygrid2d(x/f_norm, y/f_norm, coeff).T
     
-    # evaluate at grid
-    fit = polygrid2d(x, y, coeffs).T
-    
-    #resid = np.zeros(data_corr.shape)
-    mask = ((data_corr != 0) & (data_std_corr != 0))
-    resid = (data_corr[mask] - fit[mask]) / data_std_corr[mask]
-
+    # residuals
+    resid = np.zeros(data_corr.shape)
+    resid[mask_fit] = ((data_corr[mask_fit] - fit[mask_fit]) /
+                       data_std_corr[mask_fit])
 
     # return flattened residuals
-    return resid.flatten()
+    if return_resid:
+        return resid[mask_fit].ravel()
+    else:
+        return data_corr, data_std_corr, fit, resid
+
 
 
 ################################################################################
 
-def polyfit2d(x, y, f, deg):
+def polyfcn2d (params, x, y, z, z_err, deg):
+
+    # extract coefficients from params
+    p = params.valuesdict()
+    coeffs = [p['c{}'.format(i)] for i in range((deg+1)**2)]
+    coeffs = np.array(coeffs).reshape(deg+1,deg+1)
+    
+    # determine z_model at x,y with coefficients
+    z_model = polynomial.polyval2d(x, y, coeffs)
+    
+    # determine residuals
+    resid = (z - z_model) / z_err
+    
+    # return residuals
+    return resid.ravel()
+
+
+################################################################################
+
+def polyfit2d (x, y, z, z_err=None, order=2, fit_higher_Xterms=False,
+               verbose=False):
+
+    # exclude higher cross-terms if input parameter
+    # [fit_higher_Xterms] is False
+    if not fit_higher_Xterms:
+        xy = np.arange(order+1)
+        xx, yy = np.meshgrid(xy, xy)
+        mask_fit = (xx+yy <= order).ravel()
+    else:
+        mask_fit = np.ones((order+1)**2, dtype=bool)
+
+    # polynomial fit without considering z_err
+    deg = [order, order]
+    deg = np.asarray(deg)
+    vander = polynomial.polyvander2d(x, y, deg)
+    vander = vander.reshape((-1,vander.shape[-1]))
+    vander[:,~mask_fit] = 0
+    z_temp = z.reshape((vander.shape[0],))
+    coeffs, resid, rank, s = np.linalg.lstsq(vander, z_temp, rcond=None)
+    
+    print ('coeffs.shape: {}'.format(coeffs.shape))
+    
+    if verbose:
+        #print ('vander: {}'.format(vander))
+        print ('resid : {}'.format(resid))
+        print ('rank  : {}'.format(rank))
+        print ('s     : {}'.format(s))
+        print ('coeffs: {}'.format(coeffs))
+
+    if z_err is not None:
+
+        # put coeffients in parameters
+        coeffs[~mask_fit] = 0
+        params = Parameters()
+        nc = coeffs.size
+        for i in range(nc):
+            params.add('c{}'.format(i), value=coeffs[i], vary=mask_fit[i])
+            
+        # do leastsq polynomial fit including z_err
+        result = minimize (polyfcn2d, params, method='Leastsq',
+                           args=(x, y, z, z_err, order,))
+        
+        p = result.params.valuesdict()
+        coeffs = np.array([p['c{}'.format(i)] for i in range(nc)])
+
+        if verbose:
+            print (fit_report(result))
+
+
+    # return fit coefficients
+    return coeffs.reshape(deg+1)
+
+
+################################################################################
+
+def polyfit2d_orig (x, y, f, deg):
 
     """see 2nd most popular answer at
 https://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-order-dependent
@@ -5373,108 +5974,6 @@ https://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-ord
     f = f.reshape((vander.shape[0],))
     c = np.linalg.lstsq(vander, f, rcond=None)[0]
     return c.reshape(deg+1)
-
-
-################################################################################
-
-def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=False):
-    
-
-    # determine channel pixels for full and mini images
-    data_sec = get_section_MLBG (data.shape)
-    mini_shape = mini_median.shape
-    mini_sec = get_section_MLBG (mini_shape)
-
-    
-    # make copy of mini_median data
-    mini_median_corr = np.copy(mini_median)
-    
-    
-    # loop channels 1 through 8 and 9 through 16 and determine
-    # relative correction factors from clipped median of mini pixels
-    # along long edge
-    nchans = np.shape(mini_sec)[0]
-    factor = np.ones(nchans)
-    for i_chan in range(nchans):
-        # do not consider right-most channels
-        if i_chan != 7 and i_chan != 15:
-            last_column = mini_median_corr[mini_sec[i_chan]][:,-1]
-            first_column = mini_median_corr[mini_sec[i_chan+1]][:,-1]
-            mask_nonzero = ((last_column != 0) & (first_column != 0))
-            if np.sum(mask_nonzero) != 0:
-                ratio_mean, ratio_median, ratio_std = sigma_clipped_stats (
-                    last_column[mask_nonzero] / first_column[mask_nonzero])
-                #print ('chan: {}, ratio_mean: {}, ratio_median: {}, ratio_std: {}'
-                #       .format(i_chan+1, ratio_mean, ratio_median, ratio_std))
-
-                # increase factor of channel on the right
-                factor[i_chan+1] *= ratio_median
-                # apply this ratio to channel in mini_median_corr image
-                mini_median_corr[mini_sec[i_chan+1]] *= ratio_median
-
-                    
-    # determine correction factor between top and bottom rows of channels
-    # y_index indicates index of first row of the top channels
-    y_index = mini_shape[0] // 2
-    first_row = mini_median_corr[y_index,:]
-    last_row = mini_median_corr[y_index-1,:]
-    mask_nonzero = ((last_row != 0) & (first_row != 0))
-    if np.sum(mask_nonzero) != 0:
-        ratio_mean, ratio_median, ratio_std = sigma_clipped_stats (
-            last_row[mask_nonzero] / first_row[mask_nonzero])
-        #print ('top/bottom ratio_mean: {}, ratio_median: {}, ratio_std: {}'
-        #       .format(ratio_mean, ratio_median, ratio_std))
-        # increase factor of top row of channels
-        factor[8:16] *= ratio_median
-        
-
-    # normalize factors such that their mean is 1
-    factor_mean, factor_median, factor_std = sigma_clipped_stats (factor,
-                                                                  mask_value=0)
-    factor /= factor_mean
-
-
-    # if factor range is within limits and correct_data is True,
-    # correct the mini images and original data
-    maxdiff = (np.amax(factor) - np.amin(factor)) / 2
-    if maxdiff < 0.02 and correct_data:
-        bkg_corr = True
-    else:
-        bkg_corr = False
-        
-
-    # add boolean to header
-    header['BKG-CORR'] = (bkg_corr, 'channels corrected for background ratios?')
-
-
-    data_old = np.copy(data)
-    mini_median_old = np.copy(mini_median)
-    mini_std_old = np.copy(mini_std)
-    
-
-    # add factors determined to header
-    for i_chan in range(nchans):
-        
-        header['BKG-CF{}'.format(i_chan+1)] = (
-            factor[i_chan], 'channel {} correction factor'
-            .format(i_chan+1))
-
-        # correct the data
-        if bkg_corr:
-
-            # full data
-            data[data_sec[i_chan]] *= factor[i_chan]
-
-            # mini median and std
-            mini_median[mini_sec[i_chan]] *= factor[i_chan]
-            mini_std[mini_sec[i_chan]] *= factor[i_chan]
-
-
-    ds9_arrays(data_old=data_old, data=data,
-               mini_median_old=mini_median_old, mini_median=mini_median,
-               mini_std_old=mini_std_old, mini_std=mini_std)
-
-    return bkg_corr
 
 
 ################################################################################
@@ -5537,11 +6036,12 @@ def get_rand_indices (shape, fraction=0.2):
 
 ################################################################################
 
-def mini2back (data_mini, output_shape, log, order_interp=3, bkg_boxsize=None,
-               timing=True):
-    
-    if timing: t = time.time()
-    log.info('executing mini2back ...')
+def mini2back (data_mini, output_shape, order_interp=3, bkg_boxsize=None,
+               timing=True, log=None, tel=None, set_zogy=None):
+
+    if log is not None:
+        if timing: t = time.time()
+        log.info('executing mini2back ...')
 
 
     def help_mini2back (data_mini, output_shape):
@@ -5551,8 +6051,9 @@ def mini2back (data_mini, output_shape, log, order_interp=3, bkg_boxsize=None,
         # order=1: bilinear spline interpolation
         # order=2: quadratic spline interpolation
         # order=3: cubic spline interpolation
-        background = ndimage.zoom(data_mini, bkg_boxsize, order=order_interp)
-        
+        background = ndimage.zoom(data_mini, bkg_boxsize, order=order_interp,
+                                  mode='nearest')
+
         # if shape of the background is not equal to input
         # [output_data], then pad the background image
         if output_shape != background.shape:
@@ -5561,7 +6062,9 @@ def mini2back (data_mini, output_shape, log, order_interp=3, bkg_boxsize=None,
             ypad = ysize - background.shape[0]
             xpad = xsize - background.shape[1]
             background = np.pad(background, ((0,ypad),(0,xpad)), 'edge')
-            log.info('time to pad: {:.4f}'.format(time.time()-t1))
+
+            if log is not None:
+                log.info('time to pad: {:.4f}'.format(time.time()-t1))
             
             #np.pad seems quite slow; alternative:
             #centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
@@ -5571,9 +6074,13 @@ def mini2back (data_mini, output_shape, log, order_interp=3, bkg_boxsize=None,
 
         return background
 
-            
-    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
 
+    # if ML/BG channels were corrected, then expand the mini image to
+    # the full image in one go; if they were not corected, then this
+    # expansion needs to be done for each channel separately
+    if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or
+        get_par(set_zogy.MLBG_chancorr,tel)):
+        
         data_full = help_mini2back (data_mini, output_shape)
         
     else:
@@ -5590,14 +6097,14 @@ def mini2back (data_mini, output_shape, log, order_interp=3, bkg_boxsize=None,
         channel_shape = np.shape(data_full[data_sec[0]])
         
         for i_chan in range(nchans):
-            
+
             data_full[data_sec[i_chan]] = help_mini2back (
                 data_mini[mini_sec[i_chan]], channel_shape)
 
 
-    if timing:
+    if log is not None and timing:
         log_timing_memory (t0=t, label='mini2back', log=log)
-        
+
     return data_full
 
 
@@ -5800,7 +6307,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                                 get_par(set_zogy.sex_cfg_psffit,tel),
                                 get_par(set_zogy.sex_par_psffit,tel),
                                 pixscale, log, header, fit_psf=True,
-                                update_vignet=False, fwhm=fwhm)
+                                update_vignet=False, fwhm=fwhm,
+                                tel=tel, set_zogy=set_zogy)
         
 
     # If not already done so above, read in PSF output binary table
@@ -5948,7 +6456,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         psf_ima_config = calc_psf_config (data, poldeg, x, y)
 
         # resample PSF image at image pixel scale
-        psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update)
+        psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, mode='nearest')
         # clean and normalize PSF
         psf_ima_resized_norm = clean_norm_psf(psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel))
 
@@ -7636,7 +8144,7 @@ def get_vignet_size (imtype, log):
 def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, header,
                    fit_psf=False, return_fwhm_elong=True, fraction=1.0, fwhm=5.0, 
                    save_bkg=True, update_vignet=True, imtype=None, fits_mask=None, 
-                   npasses=1):
+                   npasses=1, tel=None, set_zogy=None):
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [outcat], using the configuration file [file_config]
@@ -7837,20 +8345,32 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         # been subtracted
         if save_bkg and get_par(set_zogy.bkg_method,tel) == 2 and not bkg_sub:
 
-            # read in SExtractor's object mask created above
-            data_objmask = read_hdulist (fits_objmask)
-            objmask = (data_objmask==0)
-       
-            # read in input image and mask if available
+            # read in input image; do not read header as that would
+            # overwrite the header updates already done in this
+            # function
             data = read_hdulist (image, dtype='float32')
+
+            if False:
             
-            # construct background image using [get_back]; in the case of
-            # the reference image these data need to refer to the image
-            # before remapping
-            data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
-                get_back (data, header, objmask, imtype, log,
-                          fits_mask=fits_mask))
-            
+                # read in SExtractor's object mask created above
+                data_objmask = read_hdulist (fits_objmask)
+                objmask = (data_objmask==0)
+       
+                # construct background image using [get_back]; in the case of
+                # the reference image these data need to refer to the image
+                # before remapping
+                data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
+                    get_back_orig (data, header, objmask, imtype, log,
+                                   fits_mask=fits_mask))
+
+            else:
+                
+                # alternatively
+                data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
+                    get_back (data, header, fits_objmask, fits_mask=fits_mask,
+                              log=log, tel=tel, set_zogy=set_zogy))
+
+
             # write these filtered meshes to fits
             fits.writeto('{}_bkg_mini.fits'.format(base), data_bkg_mini,
                          overwrite=True)
@@ -7868,12 +8388,14 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             # and std of background regions into full background image and
             # its standard deviation
             bkg_size = get_par(set_zogy.bkg_boxsize,tel)
-            data_bkg = mini2back (data_bkg_mini, data.shape, log, order_interp=2,
+            data_bkg = mini2back (data_bkg_mini, data.shape, order_interp=2,
                                   bkg_boxsize=bkg_size,
-                                  timing=get_par(set_zogy.timing,tel))
-            data_bkg_std = mini2back (data_bkg_std_mini, data.shape, log,
+                                  timing=get_par(set_zogy.timing,tel),
+                                  log=log, tel=tel, set_zogy=set_zogy)
+            data_bkg_std = mini2back (data_bkg_std_mini, data.shape,
                                       order_interp=1, bkg_boxsize=bkg_size,
-                                      timing=get_par(set_zogy.timing,tel)) 
+                                      timing=get_par(set_zogy.timing,tel),
+                                      log=log, tel=tel, set_zogy=set_zogy) 
 
             # if [npasses] greater than 1, subtract the background
             # from the image and save this to feed to SExtractor
@@ -7888,16 +8410,14 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             fits.writeto(fits_bkg_std, data_bkg_std, header, overwrite=True)
 
 
+            # for MeerLICHT/BlackGEM: if MLBG_chancorr is True,
+            # overwrite input image with channel-corrected image (but
+            # including the background for now)
+            if (npass==npasses-1 and tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
+                get_par(set_zogy.MLBG_chancorr,tel)):
 
-    if False:
-        # this deletes the 2nd extension in the LDAC catalog; moved
-        # this to the function [ldac2fits]
-        # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
-        data_sexcat = read_hdulist(cat_out)
-        data_sexcat.columns['ALPHAWIN_J2000'].name = 'RA'
-        data_sexcat.columns['DELTAWIN_J2000'].name = 'DEC'    
-        # overwrite [cat_out]
-        fits.writeto(cat_out, data_sexcat, overwrite=True)
+                fits.writeto(image, data, header, overwrite=True)
+
 
 
     if return_fwhm_elong:
