@@ -293,8 +293,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     sex_params, pixscale, log, header, fit_psf=False,
                     return_fwhm_elong=False, fraction=1.0, fwhm=fwhm,
                     save_bkg=True, update_vignet=update_vignet, imtype=imtype,
-                    fits_mask=fits_mask, npasses=get_par(set_zogy.bkg_npasses,tel),
-                    tel=tel, set_zogy=set_zogy)
+                    fits_mask=fits_mask, npasses=2, tel=tel, set_zogy=set_zogy)
             except Exception as e:
                 log.info(traceback.format_exc())
                 log.error('exception was raised during [run_sextractor]: {}'
@@ -3442,8 +3441,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
     log.info('background already subtracted from {}?: {}'
              .format(input_fits, bkg_sub))
-        
-    # if not, then read in background image
+
+    # if not, then read in background image; N.B.: this if block below
+    # is not relevant anymore, since the background is subtracted from
+    # the image in [run_sextractor], but leave it be for now
     if not bkg_sub:
 
         fits_bkg = '{}_bkg.fits'.format(base)
@@ -3473,9 +3474,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         mask_edge = (data_mask & value_edge == value_edge)
         data_wcs[mask_edge] = 0
 
-
-        # overwrite [input_fits] with its background-subtracted image
-        # 2020-04-14: why not keep background in fits image??
 
         # 2020-06-07: create background-subtracted image for the
         # reference image only for SWarp to work on below
@@ -3516,10 +3514,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         
 
     
-    
-
-
-
     # in case the reference image needs to be remapped, SWarp the
     # reference image (already background subtracted), the background
     # STD and the mask to the frame of the new image
@@ -3577,7 +3571,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # when BILINEAR is used.
         # N.B.: SWarp needs to run on the background-subtracted
         # reference image
-        data_ref_remap = help_swarp(fits_bkgsub, data_wcs,
+        if not bkg_sub:
+            fits_temp = fits_bkgsub
+        else:
+            fits_temp = input_fits
+
+        data_ref_remap = help_swarp(fits_temp, data_wcs,
                                     resampling_type='LANCZOS3')
         
         # remap reference image background std; note that with
@@ -8144,7 +8143,7 @@ def get_vignet_size (imtype, log):
 def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, header,
                    fit_psf=False, return_fwhm_elong=True, fraction=1.0, fwhm=5.0, 
                    save_bkg=True, update_vignet=True, imtype=None, fits_mask=None, 
-                   npasses=1, tel=None, set_zogy=None):
+                   npasses=2, tel=None, set_zogy=None):
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [outcat], using the configuration file [file_config]
@@ -8173,6 +8172,12 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
     base = image.replace('.fits','')
     
+    # make copy of input image, as input image will get background
+    # subtracted
+    image_orig = '{}_orig.fits'.format(base)
+    if not os.path.exists(image_orig):
+        shutil.copy2 (image, image_orig)
+
     # if fraction less than one, run SExtractor on specified fraction of
     # the image
     if fraction < 1:
@@ -8246,15 +8251,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
     else:
         bkg_sub = False
 
-
     log.info('background already subtracted?: {}'.format(bkg_sub))
-    
-        
+
+
     for npass in range(npasses):
             
-        # name for background-subtracted image
-        fits_bkgsub = '{}_bkgsub.fits'.format(base)
-
         if npass==0:        
 
             if bkg_sub:
@@ -8269,23 +8270,27 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                    '-BACK_VALUE', str(0.0), # neglected if back_type = 'AUTO'
                    '-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)),
                    '-BACK_FILTERSIZE', str(get_par(set_zogy.bkg_filtersize,tel)),
-                   '-BACKPHOTO_TYPE', 'GLOBAL']
+                   '-BACKPHOTO_TYPE', 'GLOBAL',
+                   '-WEIGHT_TYPE', 'BACKGROUND']
             
         else:
             
             # for FWHM estimate, or if background method is set to 1
             # (SExtractor method) or background had already been
             # subtracted no need to do multiple passes
-            if fraction < 1 or get_par(set_zogy.bkg_method,tel) == 1 or bkg_sub:
+            if fraction < 1 or get_par(set_zogy.bkg_method,tel)==1 or bkg_sub:
                 break
 
             print ('running 2nd pass of SExtractor')
             
-            # run sextractor from the unix command line
-            cmd = ['source-extractor', fits_bkgsub, image, '-c', file_config,
+            cmd = ['source-extractor', image,
+                   '-c', file_config,
                    '-BACK_TYPE', 'MANUAL',
-                   '-BACK_VALUE', str(bkg_median),
-                   '-BACKPHOTO_TYPE', 'GLOBAL']
+                   '-BACK_VALUE', str(0.0),
+                   #'-BACK_VALUE', str(bkg_median),
+                   '-BACKPHOTO_TYPE', 'GLOBAL',
+                   '-WEIGHT_TYPE', 'MAP_RMS',
+                   '-WEIGHT_IMAGE', fits_bkg_std]
 
 
         # add commands relevant for any pass
@@ -8298,12 +8303,13 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                 '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
                 '-STARNNW_NAME', '{}default.nnw'.format(
                     get_par(set_zogy.cfg_dir,tel))]
-        
+
+
         # add commands to produce BACKGROUND, BACKGROUND_RMS and
         # background-subtracted image with all pixels where objects were
         # detected set to zero (-OBJECTS). These are used to build an
         # improved background map. 
-        if save_bkg and not bkg_sub:
+        if save_bkg and npass==0 and not bkg_sub:
             fits_bkg = '{}_bkg.fits'.format(base)
             fits_bkg_std = '{}_bkg_std.fits'.format(base)
             fits_objmask = '{}_objmask.fits'.format(base)
@@ -8343,32 +8349,23 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         # [set_zogy.bkg_method] not set to 1 (= use background
         # determined by SExtractor) and background had not already
         # been subtracted
-        if save_bkg and get_par(set_zogy.bkg_method,tel) == 2 and not bkg_sub:
+        if (save_bkg and npass==0 and get_par(set_zogy.bkg_method,tel)==2 and
+            not bkg_sub):
 
             # read in input image; do not read header as that would
             # overwrite the header updates already done in this
             # function
             data = read_hdulist (image, dtype='float32')
 
-            if False:
+            if fits_mask is not None:
+                data_mask = read_hdulist (fits_mask, dtype='uint8')
             
-                # read in SExtractor's object mask created above
-                data_objmask = read_hdulist (fits_objmask)
-                objmask = (data_objmask==0)
-       
-                # construct background image using [get_back]; in the case of
-                # the reference image these data need to refer to the image
-                # before remapping
-                data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
-                    get_back_orig (data, header, objmask, imtype, log,
-                                   fits_mask=fits_mask))
-
-            else:
-                
-                # alternatively
-                data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
-                    get_back (data, header, fits_objmask, fits_mask=fits_mask,
-                              log=log, tel=tel, set_zogy=set_zogy))
+            # construct background image using [get_back]; in the case of
+            # the reference image these data need to refer to the image
+            # before remapping
+            data_bkg_mini, data_bkg_std_mini, bkg_median, bkg_std = (
+                get_back (data, header, fits_objmask, fits_mask=fits_mask,
+                          log=log, tel=tel, set_zogy=set_zogy))
 
 
             # write these filtered meshes to fits
@@ -8396,13 +8393,21 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                                       order_interp=1, bkg_boxsize=bkg_size,
                                       timing=get_par(set_zogy.timing,tel),
                                       log=log, tel=tel, set_zogy=set_zogy) 
+            
 
-            # if [npasses] greater than 1, subtract the background
-            # from the image and save this to feed to SExtractor
-            # in the next pass
-            if npasses > 1:
-                data_bkgsub = data - data_bkg + bkg_median
-                fits.writeto(fits_bkgsub, data_bkgsub, overwrite=True)
+            # subtract the background
+            data -= data_bkg
+            header['BKG-SUB'] = (True, 'sky background was subtracted?')
+
+            # edge pixels will be negative, best to ensure that they
+            # are set to zero
+            value_edge = get_par(set_zogy.mask_value['edge'],tel)
+            mask_edge = (data_mask & value_edge == value_edge)
+            data[mask_edge] = 0
+
+            # save to fits; this image will be used to feed to
+            # SExtractor in the next pass
+            fits.writeto(image, data, header, overwrite=True)
                     
             # write the improved background and standard deviation to fits
             # overwriting the fits images produced by SExtractor
@@ -8410,14 +8415,17 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             fits.writeto(fits_bkg_std, data_bkg_std, header, overwrite=True)
 
 
-            # for MeerLICHT/BlackGEM: if MLBG_chancorr is True,
-            # overwrite input image with channel-corrected image (but
-            # including the background for now)
-            if (npass==npasses-1 and tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-                get_par(set_zogy.MLBG_chancorr,tel)):
 
-                fits.writeto(image, data, header, overwrite=True)
-
+    # if npasses>1, replace BACKGROUND in the source-extractor output
+    # catalog with values from the improved background
+    if npasses>1:
+        with fits.open(cat_out, mode='update') as hdulist:
+            data_ldac = hdulist[2].data
+            if 'BACKGROUND' in data_ldac.dtype.names:
+                x_indices = (data_ldac['XWIN_IMAGE']-0.5).astype(int)
+                y_indices = (data_ldac['YWIN_IMAGE']-0.5).astype(int)
+                background = data_bkg[y_indices, x_indices]
+                hdulist[2].data['BACKGROUND'] = background
 
 
     if return_fwhm_elong:
