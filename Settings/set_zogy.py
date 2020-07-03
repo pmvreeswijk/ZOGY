@@ -10,6 +10,8 @@ import os
 # full output image
 subimage_size = 1320     # size of subimages
 subimage_border = 40     # border around subimage to avoid edge effects
+#subimage_size = 960      # size of subimages
+#subimage_border = 32     # border around subimage to avoid edge effects
 
 # ZOGY parameters
 fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
@@ -41,12 +43,19 @@ fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
                          # clipped (method 2 only)
-bkg_boxsize = 220        # size of region used to determine
+bkg_boxsize = 60         # size of region used to determine
                          # background (both methods)
 bkg_filtersize = 3       # size of filter used for smoothing the above
                          # regions (both methods)
 bkg_npasses = 1          # number of background iterations
 
+# these parameters are related to MeerLICHT/BlackGEM images only
+MLBG_use2Dfit = True     # use 2D polynomial fit in background estimation
+MLBG_chancorr = True     # apply channel correction factor estimated while
+                         # performing a 2D polynomial fit to the background
+MLBG_chancorr_limdev = 0.05 # single channel correction limiting deviation
+                            # above which none of the corrections are applied
+ 
                          
 #===============================================================================
 # Header keywords
