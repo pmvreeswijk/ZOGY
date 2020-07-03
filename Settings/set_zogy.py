@@ -47,7 +47,7 @@ bkg_boxsize = 60         # size of region used to determine
                          # background (both methods)
 bkg_filtersize = 3       # size of filter used for smoothing the above
                          # regions (both methods)
-bkg_npasses = 1          # number of background iterations
+
 
 # these parameters are related to MeerLICHT/BlackGEM images only
 MLBG_use2Dfit = True     # use 2D polynomial fit in background estimation
