@@ -237,7 +237,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             get_par(set_zogy.sex_par,tel), pixscale, log, header,
             fit_psf=False, return_fwhm_elong=True,
             fraction=get_par(set_zogy.fwhm_imafrac,tel),
-            fwhm=5.0, save_bkg=False, update_vignet=False,
+            fwhm=5.0, update_vignet=False,
             tel=tel, set_zogy=set_zogy)
 
         log.info('fwhm_{}: {:.3f} +- {:.3f}'.format(imtype, fwhm, fwhm_std))
@@ -292,7 +292,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     '{}.fits'.format(base), sexcat, get_par(set_zogy.sex_cfg,tel),
                     sex_params, pixscale, log, header, fit_psf=False,
                     return_fwhm_elong=False, fraction=1.0, fwhm=fwhm,
-                    save_bkg=True, update_vignet=update_vignet, imtype=imtype,
+                    update_vignet=update_vignet, imtype=imtype,
                     fits_mask=fits_mask, npasses=2, tel=tel, set_zogy=set_zogy)
             except Exception as e:
                 log.info(traceback.format_exc())
@@ -5619,7 +5619,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
         mask_reject_temp = np.copy(mask_reject)
         npix_reject_old = np.sum(mask_reject_temp)
         for it in range(5):
-            result = minimize (mini2min, params, method='Leastsq',
+            result = minimize (mini2min, params, method='Leastsq', maxfev=100,
                                args=(mini_median, mini_std, mini_sec, order,
                                      mask_reject_temp, f_norm,))
             params = result.params
@@ -5892,7 +5892,7 @@ def polyfcn2d (params, x, y, z, z_err, deg):
     coeffs = np.array(coeffs).reshape(deg+1,deg+1)
     
     # determine z_model at x,y with coefficients
-    z_model = polynomial.polyval2d(x, y, coeffs)
+    z_model = polyval2d(x, y, coeffs)
     
     # determine residuals
     resid = (z - z_model) / z_err
@@ -5918,13 +5918,11 @@ def polyfit2d (x, y, z, z_err=None, order=2, fit_higher_Xterms=False,
     # polynomial fit without considering z_err
     deg = [order, order]
     deg = np.asarray(deg)
-    vander = polynomial.polyvander2d(x, y, deg)
+    vander = polyvander2d(x, y, deg)
     vander = vander.reshape((-1,vander.shape[-1]))
     vander[:,~mask_fit] = 0
     z_temp = z.reshape((vander.shape[0],))
     coeffs, resid, rank, s = np.linalg.lstsq(vander, z_temp, rcond=None)
-    
-    print ('coeffs.shape: {}'.format(coeffs.shape))
     
     if verbose:
         #print ('vander: {}'.format(vander))
@@ -8142,7 +8140,7 @@ def get_vignet_size (imtype, log):
 
 def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, header,
                    fit_psf=False, return_fwhm_elong=True, fraction=1.0, fwhm=5.0, 
-                   save_bkg=True, update_vignet=True, imtype=None, fits_mask=None, 
+                   update_vignet=True, imtype=None, fits_mask=None, 
                    npasses=2, tel=None, set_zogy=None):
 
     """Function that runs SExtractor on [image], and saves the output
@@ -8253,7 +8251,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
     log.info('background already subtracted?: {}'.format(bkg_sub))
 
-
+    apply_weight = True
+    
     for npass in range(npasses):
             
         if npass==0:        
@@ -8270,27 +8269,35 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                    '-BACK_VALUE', str(0.0), # neglected if back_type = 'AUTO'
                    '-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)),
                    '-BACK_FILTERSIZE', str(get_par(set_zogy.bkg_filtersize,tel)),
-                   '-BACKPHOTO_TYPE', 'GLOBAL',
-                   '-WEIGHT_TYPE', 'BACKGROUND']
-            
+                   '-BACKPHOTO_TYPE', 'GLOBAL']
+
+            if apply_weight:
+                cmd += ['-WEIGHT_TYPE', 'BACKGROUND']
+                
         else:
             
             # for FWHM estimate, or if background method is set to 1
             # (SExtractor method) or background had already been
             # subtracted no need to do multiple passes
-            if fraction < 1 or get_par(set_zogy.bkg_method,tel)==1 or bkg_sub:
+            if return_fwhm_elong or get_par(set_zogy.bkg_method,tel)==1 or bkg_sub:
                 break
 
-            print ('running 2nd pass of SExtractor')
-            
+            log.info ('running 2nd pass of SExtractor')
+
+            # output ldac catalog of 1st run will be overwritten; make copy
+            if True:
+                shutil.copy2(cat_out, cat_out.replace('ldac', 'ldac_run1'))
+
             cmd = ['source-extractor', image,
                    '-c', file_config,
                    '-BACK_TYPE', 'MANUAL',
                    '-BACK_VALUE', str(0.0),
                    #'-BACK_VALUE', str(bkg_median),
-                   '-BACKPHOTO_TYPE', 'GLOBAL',
-                   '-WEIGHT_TYPE', 'MAP_RMS',
-                   '-WEIGHT_IMAGE', fits_bkg_std]
+                   '-BACKPHOTO_TYPE', 'GLOBAL']
+
+            if apply_weight:
+                cmd += ['-WEIGHT_TYPE', 'MAP_RMS',
+                        '-WEIGHT_IMAGE', fits_bkg_std]
 
 
         # add commands relevant for any pass
@@ -8309,7 +8316,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         # background-subtracted image with all pixels where objects were
         # detected set to zero (-OBJECTS). These are used to build an
         # improved background map. 
-        if save_bkg and npass==0 and not bkg_sub:
+        if not return_fwhm_elong and npass==0 and not bkg_sub:
             fits_bkg = '{}_bkg.fits'.format(base)
             fits_bkg_std = '{}_bkg_std.fits'.format(base)
             fits_objmask = '{}_objmask.fits'.format(base)
@@ -8317,10 +8324,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                     '-CHECKIMAGE_NAME', '{},{},{}'
                     .format(fits_bkg, fits_bkg_std, fits_objmask)]
     
-        # in case of fraction being less than 1: only care about
-        # higher S/N detections
-        if fraction < 1.: cmd += ['-DETECT_THRESH',
-                                  str(get_par(set_zogy.fwhm_detect_thresh,tel))]
+        # in case of fwhm/elongation estimate: only care about higher
+        # S/N detections
+        if return_fwhm_elong:
+            cmd += ['-DETECT_THRESH',
+                    str(get_par(set_zogy.fwhm_detect_thresh,tel))]
     
         # provide PSF file from PSFex
         if fit_psf: cmd += ['-PSF_NAME', '{}_psf.fits'.format(base)]
@@ -8349,8 +8357,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         # [set_zogy.bkg_method] not set to 1 (= use background
         # determined by SExtractor) and background had not already
         # been subtracted
-        if (save_bkg and npass==0 and get_par(set_zogy.bkg_method,tel)==2 and
-            not bkg_sub):
+        if (not return_fwhm_elong and npass==0 and
+            get_par(set_zogy.bkg_method,tel)==2 and not bkg_sub):
 
             # read in input image; do not read header as that would
             # overwrite the header updates already done in this
@@ -8416,18 +8424,6 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
 
 
-    # if npasses>1, replace BACKGROUND in the source-extractor output
-    # catalog with values from the improved background
-    if npasses>1:
-        with fits.open(cat_out, mode='update') as hdulist:
-            data_ldac = hdulist[2].data
-            if 'BACKGROUND' in data_ldac.dtype.names:
-                x_indices = (data_ldac['XWIN_IMAGE']-0.5).astype(int)
-                y_indices = (data_ldac['YWIN_IMAGE']-0.5).astype(int)
-                background = data_bkg[y_indices, x_indices]
-                hdulist[2].data['BACKGROUND'] = background
-
-
     if return_fwhm_elong:
         # get estimate of seeing and elongation from output catalog
         fwhm, fwhm_std, elong, elong_std = get_fwhm(
@@ -8440,6 +8436,17 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
         elong = 0.
         elong_std = 0.
 
+        # if npasses>1, replace BACKGROUND in the source-extractor output
+        # catalog with values from the improved background
+        if npasses>1 and get_par(set_zogy.bkg_method,tel)==2 and not bkg_sub:
+            with fits.open(cat_out, mode='update') as hdulist:
+                data_ldac = hdulist[2].data
+                if 'BACKGROUND' in data_ldac.dtype.names:
+                    x_indices = (data_ldac['XWIN_IMAGE']-0.5).astype(int)
+                    y_indices = (data_ldac['YWIN_IMAGE']-0.5).astype(int)
+                    background = data_bkg[y_indices, x_indices]
+                    hdulist[2].data['BACKGROUND'] = background
+        
         
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_sextractor', log=log)
