@@ -66,7 +66,7 @@ matplotlib.use('Agg')
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '0.9.2'
+__version__ = '0.10.0'
 
 
 ################################################################################
@@ -804,6 +804,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)'
                                    .format(get_par(set_zogy.transient_nsigma,tel)))
 
+        # add ratio of ntrans over total number of significant objects detected
+        if 'NOBJECTS' in header_new:
+            nobjects = header_new['NOBJECTS']
+            header_zogy['T-FTRANS'] = (ntrans/nobjects, 'ntrans/nobject ratio: T-NTRANS / NOBJECTS in new image')
+
+        
         # infer limiting magnitudes from corresponding limiting
         # fluxes using zeropoint and median airmass
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
@@ -4069,8 +4075,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             header['PC-P'] = (True, 'successfully processed by phot. calibration?')            
             
         # apply the zeropoint
-        mag_opt, magerr_opt = apply_zp(flux_opt, zp, airmass_sex, exptime, filt, log,
-                                       fluxerr=fluxerr_opt, zp_std=None)
+        mag_opt, magerr_opt = apply_zp(flux_opt, zp, airmass_sex, exptime, filt,
+                                       log, fluxerr=fluxerr_opt, zp_std=None)
 
         # infer limiting magnitudes from limiting flux using zeropoint
         # and median airmass
@@ -4094,28 +4100,31 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                     'zeropoint'.format(i_chan+1))
             for i_chan in range(zp_chan.size):
                 header['PC-NCC{}'.format(i_chan+1)] = (
-                    ncal_chan.ravel()[i_chan], 'channel {} number of photcal stars used'
-                    .format(i_chan+1))
+                    ncal_chan.ravel()[i_chan], 'channel {} number of photcal '
+                    'stars used'.format(i_chan+1))
 
 
         header['PC-EXTCO'] = (get_par(set_zogy.ext_coeff,tel)[filt], 
                               '[mag] filter extinction coefficient (k)')
-        header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration stars')
+        header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration '
+                             'stars')
         header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
                             .format(nsigma))
 
         # if these optimal fluxes and magnitudes already present in catalog,
         # delete them; this could happen in case [set_zogy.redo] is set to True
         if 'FLUX_OPT' in data_sex.dtype.names:
-            data_sex = drop_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT','MAG_OPT','MAGERR_OPT'])
+            data_sex = drop_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT','MAG_OPT',
+                                              'MAGERR_OPT'])
 
         data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
-                                 [flux_opt, fluxerr_opt], usemask=False, asrecarray=True)
+                                 [flux_opt, fluxerr_opt], usemask=False,
+                                 asrecarray=True)
         
         data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
-                                 [mag_opt, magerr_opt], usemask=False, asrecarray=True)
+                                 [mag_opt, magerr_opt], usemask=False,
+                                 asrecarray=True)
 
-        
         
         # discard sources with flux S/N below get_par(set_zogy.source_nsigma,tel)
         # and with negative fluxes
@@ -4137,12 +4146,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         else:
             mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
             
-            
+        header['NOBJECTS'] = (np.sum(mask_nsigma), 'number of >= {}-sigma objects'
+                              .format(nsigma))
+
         # write updated catalog to file
         fits.writeto(sexcat, data_sex[mask_nsigma], overwrite=True)
         
         if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t2, label='creating binary fits table including fluxopt', log=log)
+            log_timing_memory (t0=t2, label='creating binary fits table '
+                               'including fluxopt', log=log)
 
             
     # update header of input fits image with keywords added by PSFEx
@@ -5774,7 +5786,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
         for i_chan in range(nchans):
             data[data_sec[i_chan]] *= factor[i_chan]
 
-        if log is not None:
+        if log is ndegree of background polynomial fitot None:
             log.info ('image channels modified with correction factors: {}'
                       .format(factor))
 
@@ -5811,6 +5823,8 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
     coeff_scaled = coeff / (float(f_norm * bkg_boxsize)**coeff_power)
     coeff_err_scaled = coeff_err / (float(f_norm * bkg_boxsize)**coeff_power)
 
+    header['BKG-FDEG'] = (order_bf, 'degree background 2D polynomial fit')
+    
     # add coefficients to header
     for i_coeff in range((order_bf+1)**2):
         
@@ -7325,7 +7339,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
     index_sort = np.argsort(data_sexcat[column_sort][mask_use])
 
-        # select the brightest objects
+    # select the brightest objects
     nbright = get_par(set_zogy.ast_nbright,tel)
     sexcat_bright = '{}_cat_bright.fits'.format(base)
     #fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:], overwrite=True)
