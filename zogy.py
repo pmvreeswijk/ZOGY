@@ -5786,7 +5786,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
         for i_chan in range(nchans):
             data[data_sec[i_chan]] *= factor[i_chan]
 
-        if log is ndegree of background polynomial fitot None:
+        if log is not None:
             log.info ('image channels modified with correction factors: {}'
                       .format(factor))
 
