@@ -5591,6 +5591,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
     # loop different polynomial orders up to [order_max]:
     chi2red_old = np.inf
     limfrac_reject_chan = 0.8
+    limdev = get_par(set_zogy.MLBG_chancorr_limdev,tel)
     for order in range(order_max+1):
 
         # create a set of parameters with factors
@@ -5626,8 +5627,8 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
 
         log.info ('start coefficients: {}'.format(coeffs_init))
 
-        # do leastsq polynomial fit in 3 iterations to include rejection
-        # of outliers in residual map
+        # do leastsq polynomial fit in several iterations to include
+        # rejection of outliers in residual map
         mask_reject_temp = np.copy(mask_reject)
         npix_reject_old = np.sum(mask_reject_temp)
         for it in range(5):
@@ -5636,7 +5637,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                                      mask_reject_temp, f_norm,))
             params = result.params
             chi2red = result.redchi
-            
+           
             mini_median_corr_temp, mini_std_corr_temp, fit_temp, resid_temp = \
                 mini2min(params, mini_median, mini_std, mini_sec, order,
                          mask_reject_temp, f_norm, return_resid=False)
@@ -5660,14 +5661,49 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                 npix_reject_old = npix_reject
 
 
-        log.info ('order: {}, chi2red: {}'.format(order, chi2red))
-        
+        # define and normalize factor_temp
         factor_temp = np.zeros(nchans)
         for i_chan in range(nchans):
             factor_temp[i_chan] = params['factor{}'.format(i_chan+1)].value
 
+        factor_temp_norm = factor_temp / np.mean(factor_temp)
+
+        # define and normalize coeff_temp
+        ncoeffs = (order+1)**2
+        coeff_temp = np.zeros(ncoeffs)
+        for i_coeff in range(ncoeffs):
+            coeff_temp[i_coeff] = params['coeff{}'.format(i_coeff)].value
+
+        coeff_temp_norm = coeff_temp / np.mean(factor_temp)
+            
+        # fit one more time with factors fixed at normalized best-fit
+        # values, or 1 if any of them deviates more than limdev
+        mask_deviant = (np.abs(factor_temp_norm - 1) > limdev)
+        if np.any(mask_deviant):
+            log.warning ('factor deviation for channel(s) {} larger than {}: '
+                         '{}; setting all channel factors to 1'
+                         .format(list(np.nonzero(mask_deviant)[0]+1), limdev,
+                                 factor_temp_norm[mask_deviant]))
+            factor_temp_norm[:] = 1
+
+        # easier to create new set of fit parameters rather than adjusting them
+        params = Parameters()
+        for i_chan in range(nchans):
+            params.add('factor{}'.format(i_chan+1), value=factor_temp_norm[i_chan],
+                       vary=False)
+        for i_coeff in range(ncoeffs):
+            params.add('coeff{}'.format(i_coeff), value=coeff_temp_norm[i_coeff],
+                       vary=mask_cfit[i_coeff])
+
+        # fit
+        result = minimize (mini2min, params, method='Leastsq', maxfev=100,
+                           args=(mini_median, mini_std, mini_sec, order,
+                                 mask_reject_temp, f_norm,))
+        params = result.params
+        chi2red = result.redchi
+        log.info ('order: {}, chi2red: {}'.format(order, chi2red))
         log.info ('normalized factors for this intermediate fit: {}'
-                  .format(factor_temp/np.mean(factor_temp)))
+                  .format(factor_temp_norm))
             
         # check formal criterium to use
         if (chi2red_old / chi2red) > 2:
@@ -5681,83 +5717,28 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
             
 
             
-
     log.info (fit_report(result_bf))
     log.info ('order used: {}, reduced chi-square: {}'.format(order_bf,
                                                               chi2red_bf))
     p = params_bf
 
-    # save fit factors in numpy array
+    # save fit factors and coefficients in numpy arrays; N.B.: error
+    # estimate is unreliable because factor and coefficients fit
+    # parameters are typically correlated, so not considering the
+    # errors
     factor = np.zeros(nchans)
-    factor_err = np.zeros(nchans)
     for i_chan in range(nchans):
         factor[i_chan] = p['factor{}'.format(i_chan+1)].value
-        factor_err[i_chan] = p['factor{}'.format(i_chan+1)].stderr
-        # scale with reduced chi2 assuming the fit is of good quality
-        factor_err[i_chan] *= np.sqrt(chi2red_bf)
-        #print ('factor{}: {} +- {}'.format(i_chan+1, factor[i_chan],
-        #                                   factor_err[i_chan]))
-        
-    # normalize factors such that their mean is 1
-    factor_mean = np.mean(factor)
 
-    # if one channel factor is very different from 1, set it to 1
-    limdev = get_par(set_zogy.MLBG_chancorr_limdev,tel)
-    mask_deviant = (np.abs(factor/factor_mean - 1) > limdev)
-    if np.sum(mask_deviant) > 0:
-        log.warning ('factor deviation for channel(s) {} larger than {}: '
-                     '{}; setting it/them to 1'
-                     .format(list(np.nonzero(mask_deviant)[0]+1), limdev,
-                             factor[mask_deviant]/factor_mean))
-        if False:
-            # only set affected channel to 1
-            factor[mask_deviant] = 1
-            factor_err[mask_deviant] = 0
-        else:
-            # setting all channels to 1
-            factor[:] = 1
-            factor_err[:] = 0
-
-
-    # calculate factor_mean from factors within limits
-    if np.sum(~mask_deviant) > 0:
-        factor_mean = np.mean(factor[~mask_deviant])
-        # normalize factor
-        factor[~mask_deviant] /= factor_mean
-        factor_err[~mask_deviant] /= factor_mean
-    else:
-        # if none is within limits, set them to unity
-        factor_mean = 1
-        factor[:] = 1
-        factor_err[:] = 0
-
-
-    # save fit coefficients in numpy array
     ncoeffs = (order_bf+1)**2
     coeff = np.zeros(ncoeffs)
-    coeff_err = np.zeros(ncoeffs)
     for i_coeff in range(ncoeffs):
         coeff[i_coeff] = p['coeff{}'.format(i_coeff)].value
-        coeff_err[i_coeff] = p['coeff{}'.format(i_coeff)].stderr
-        # scale with reduced chi2 assuming the fit is of good quality
-        coeff_err[i_coeff] *= np.sqrt(chi2red_bf)
-        #print ('coeff{}: {} +- {}'.format(i_coeff, coeff[i_coeff],
-        #                                  coeff_err[i_coeff]))
-
-    # normalize coefficients with mean factor
-    coeff /= factor_mean
-    coeff_err /= factor_mean
 
 
-    # one more call to mini2min with updated fit parameters
-    params_final = Parameters()
-    for i_chan in range(nchans):
-        params_final.add('factor{}'.format(i_chan+1), value=factor[i_chan])
-    for i_coeff in range(ncoeffs):
-        params_final.add('coeff{}'.format(i_coeff), value=coeff[i_coeff])
-
+    # one more call to mini2min with final fit parameters
     mini_median_corr, mini_std_corr, mini_median_2Dfit, __ = \
-        mini2min(params_final, mini_median, mini_std, mini_sec, order_bf,
+        mini2min(p, mini_median, mini_std, mini_sec, order_bf,
                  mask_reject_bf, f_norm, return_resid=False)
     
 
@@ -5805,13 +5786,6 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
             factor[i_chan],
             'channel {} correction factor'.format(i_chan+1))
 
-        # error estimate can be unreliable because fit parameters are
-        # typically correlated
-        if False:
-            header['BKG-CS{}'.format(i_chan+1)] = (
-                factor_err[i_chan],
-                'sigma (STD) channel {} correction factor'.format(i_chan+1))
-
 
     # N.B.: polynomials were fit with normalized x and y pixel indices
     # (using [f_norm]) of the mini image, so coeffients should be
@@ -5821,7 +5795,6 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
     xy = np.arange(order_bf+1)
     coeff_power = np.sum(np.meshgrid(xy,xy), axis=0).ravel()
     coeff_scaled = coeff / (float(f_norm * bkg_boxsize)**coeff_power)
-    coeff_err_scaled = coeff_err / (float(f_norm * bkg_boxsize)**coeff_power)
 
     header['BKG-FDEG'] = (order_bf, 'degree background 2D polynomial fit')
     
@@ -5831,13 +5804,6 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
         header['BKG-FC{}'.format(i_coeff)] = (
             coeff_scaled[i_coeff],
             'background 2D poly fit coefficient {}'.format(i_coeff))
-
-        # error estimate can be unreliable because fit parameters are
-        # typically correlated
-        if False:
-            header['BKG-FS{}'.format(i_coeff)] = (
-                coeff_err_scaled[i_coeff],
-                'sigma (STD) background 2D poly fit coefficient {}'.format(i_coeff))
 
 
     if log is not None and get_par(set_zogy.timing,tel):
@@ -7311,9 +7277,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
 
     # read SExtractor catalogue (this is also used further down below in this function)
     data_sexcat = read_hdulist (sexcat)
-    nobjects = data_sexcat.shape[0]
-    header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
-    log.info('number of objects detected by SExtractor: {}'.format(nobjects))
+    #nobjects = data_sexcat.shape[0]
+    #header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
+    #log.info('number of objects detected by SExtractor: {}'.format(nobjects))
     
     # feed Astrometry.net only with brightest sources; N.B.:
     # keeping only objects with zero FLAGS does not work well in crowded fields
@@ -8158,24 +8124,24 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                    npasses=2, tel=None, set_zogy=None):
 
     """Function that runs SExtractor on [image], and saves the output
-       catalog in [outcat], using the configuration file [file_config]
-       and the parameters defining the output recorded in the
-       catalogue [file_params]. If [fit_psf] is True, SExtractor will
-       perform PSF fitting photometry using the PSF built by PSFex. If
-       [return_fwhm_elong] is True, an estimate of the image median
-       FWHM and ELONGATION and their standard deviations are returned
-       using SExtractor's seeing estimate of the detected sources; if
-       False, it will return zeros. If [fraction] is less than the
-       default 1.0, SExtractor will be run on a fraction [fraction] of
-       the area of the full image. Sextractor will use the input value
-       [fwhm], which is important for the star-galaxy
-       classification. If [save-bkg] is True, the background image,
-       its standard deviation and the -OBJECTS image
-       (background-subtracted image with all objects masked with zero
-       values), all produced by SExtractor, will be saved. If
-       [set_zogy.bkg_method] is not set to 1 (use SExtractor's background),
-       then improve the estimates of the background and its standard
-       deviation.
+       catalog in [cat_out], using the configuration file
+       [file_config] and the parameters defining the output recorded
+       in the catalogue [file_params]. If [fit_psf] is True,
+       SExtractor will perform PSF fitting photometry using the PSF
+       built by PSFex. If [return_fwhm_elong] is True, an estimate of
+       the image median FWHM and ELONGATION and their standard
+       deviations are returned using SExtractor's seeing estimate of
+       the detected sources; if False, it will return zeros. If
+       [fraction] is less than the default 1.0, SExtractor will be run
+       on a fraction [fraction] of the area of the full
+       image. Sextractor will use the input value [fwhm], which is
+       important for the star-galaxy classification. If [save-bkg] is
+       True, the background image, its standard deviation and the
+       -OBJECTS image (background-subtracted image with all objects
+       masked with zero values), all produced by SExtractor, will be
+       saved. If [set_zogy.bkg_method] is not set to 1 (use
+       SExtractor's background), then improve the estimates of the
+       background and its standard deviation.
 
     """
 
@@ -8194,7 +8160,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
     # the image
     if fraction < 1:
 
-        # read in input image and header
+        # read input image and header
         data, header = read_hdulist (image, get_header=True)
         # get input image size from header
         ysize, xsize = read_header(header, ['naxis2', 'naxis1'], log)
@@ -8215,7 +8181,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
         # make image point to image_fraction
         image = image_fraction
-        cat_out = '{}_cat_fraction.fits'.format(base)
+        cat_out = '{}_ldac_fraction.fits'.format(base)
 
 
     # the input fwhm determines the SEEING_FWHM (important for
@@ -8265,7 +8231,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
     log.info('background already subtracted?: {}'.format(bkg_sub))
 
-    apply_weight = True
+    apply_weight = False
     
     for npass in range(npasses):
             
@@ -8283,7 +8249,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                    '-BACK_VALUE', str(0.0), # neglected if back_type = 'AUTO'
                    '-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)),
                    '-BACK_FILTERSIZE', str(get_par(set_zogy.bkg_filtersize,tel)),
-                   '-BACKPHOTO_TYPE', 'GLOBAL']
+                   '-BACKPHOTO_TYPE', 'GLOBAL',
+                   '-VERBOSE_TYPE', 'NORMAL']
 
             if apply_weight:
                 cmd += ['-WEIGHT_TYPE', 'BACKGROUND']
@@ -8298,16 +8265,16 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
             log.info ('running 2nd pass of SExtractor')
 
-            # output ldac catalog of 1st run will be overwritten; make copy
-            if True:
-                shutil.copy2(cat_out, cat_out.replace('ldac', 'ldac_run1'))
+            # save catalog of 1st/initial run to different filename
+            os.rename (cat_out, cat_out.replace('ldac', 'ldac_init'))
 
             cmd = ['source-extractor', image,
                    '-c', file_config,
                    '-BACK_TYPE', 'MANUAL',
                    '-BACK_VALUE', str(0.0),
                    #'-BACK_VALUE', str(bkg_median),
-                   '-BACKPHOTO_TYPE', 'GLOBAL']
+                   '-BACKPHOTO_TYPE', 'GLOBAL',
+                   '-VERBOSE_TYPE', 'NORMAL']
 
             if apply_weight:
                 cmd += ['-WEIGHT_TYPE', 'MAP_RMS',
@@ -8460,8 +8427,18 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                     y_indices = (data_ldac['YWIN_IMAGE']-0.5).astype(int)
                     background = data_bkg[y_indices, x_indices]
                     hdulist[2].data['BACKGROUND'] = background
+
+
+    # add number of objects to header
+    if data_ldac not in locals():
+        with fits.open(cat_out) as hdulist:
+            data_ldac = hdulist[2].data
         
-        
+    nobjects = data_ldac.size
+    header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
+    log.info('number of objects detected by SExtractor: {}'.format(nobjects))
+
+            
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_sextractor', log=log)
 
