@@ -164,7 +164,9 @@ source_nsigma = 5             # required S/N in total flux (optimal or psffit)
                               # for source to be included in output catalog
                               # this also determines level of limiting flux
                               # and magnitudes of images
-
+source_minpixfrac = 0.67      # required fraction of good pixels in footprint
+                              # for source to be included in output catalog
+                              
 # Photometric calibration
 # telescope latitude in degrees (North)
 obs_lat = {'ML1': -32.3799, 'BG': -29.2575}  

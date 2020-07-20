@@ -2681,13 +2681,18 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
 
         else:
 
-            # use only those pixels that are not affected
-            # by any bad pixels, cosmic rays, saturation, etc.
+            # use only those pixels that are not affected by any bad
+            # pixels, cosmic rays, saturation, edge pixels, etc.
             mask_use = (D_mask_sub==0)
             
-            # if the fraction of affected pixels is larger than half,
-            # then return
-            if np.sum(mask_use) < 0.5*D_sub.size:
+            # if the fraction of good pixels around the source is less
+            # than set_zogy.source_minpixfrac, then return; optimal
+            # flux will be zero and source will not be included in
+            # output catalog - may result in very saturated stars not
+            # ending up in output catalog
+            mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+            if (np.sum(mask_use & mask_central)/np.sum(mask_central) <
+                get_par(set_zogy.source_minpixfrac,tel)):
                 return
             
             # perform optimal photometry measurements
@@ -2943,7 +2948,7 @@ def flux_psffit(P, D, bkg_var, flux_opt, xshift, yshift,
     
     # create mask with pixel values above 6 percent of the peak of the
     # PSF (corresponding to a radius of about 1xFWHM if Gaussian) used
-    # to determine the chi-square of this region
+    # to determine the chi-square of this region 
     mask_inner = (P >= 0.06 * np.amax(P))
     chi2_inner = np.sum(fcn2min(result.params, P, D, bkg_var, mask_inner)**2)
     chi2red_inner = chi2_inner / (np.sum(mask_inner) - result.nvarys)
