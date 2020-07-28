@@ -98,7 +98,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     Written by Paul Vreeswijk (pmvreeswijk@gmail.com) with vital input
     from Barak Zackay and Eran Ofek. Adapted by Kerry Paterson for
-    integration into pipeline for MeerLICHT (ptrker004@myuct.ac.za).
+    integration into pipeline for MeerLICHT.
 
     """
 
@@ -4038,10 +4038,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                     
                     header['PC-NSUBS'] = (int(ysize/subsize)**2, 'number of '
                                           'subimages for zeropoint statistics')
-                    header['PC-MZPD'] = (max_diff, 'maximum zeropoint '
-                                          'difference between subimages')
-                    header['PC-MZPS'] = (max_std, 'maximum zeropoint sigma (STD) '
-                                         'of subimages')
+                    header['PC-MZPD'] = (max_diff, '[mag] maximum zeropoint '
+                                         'difference between subimages')
+                    header['PC-MZPS'] = (max_std, '[mag] maximum zeropoint sigma '
+                                         '(STD) of subimages')
 
                     
                     mask_nonzero = (zp_mini != 0)
@@ -4180,6 +4180,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     else:
         data = data_wcs
 
+
+    # ensure (once more) that edge pixels are set to zero
+    value_edge = get_par(set_zogy.mask_value['edge'],tel)
+    mask_edge = (data_mask & value_edge == value_edge)
+    data[mask_edge] = 0
+        
 
     # determine cutouts; in case ref image has different size than new
     # image, redefine [ysize] and [xsize] as up to this point they
@@ -4427,8 +4433,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 def create_modify_mask (data, satlevel, data_mask=None):
     
     """function to identify the saturated and adjacent pixels in input
-           data and add these to an existing mask or creat a new one
-        """
+       data and add these to an existing mask, or create a new mask if
+       [data_mask] is not provided
+
+    """
+
     if data_mask is None:
         data_mask = np.zeros(data.shape, dtype='uint8')
 
@@ -4981,7 +4990,7 @@ def fixpix (data, log, satlevel=60000., data_mask=None, base=None,
     # replace edge pixels with zero
     value_edge = mask_value['edge']
     mask_edge = (data_mask & value_edge == value_edge)
-    data_fixed[mask_edge] = 0.
+    data_fixed[mask_edge] = 0
     # or with the background
     #data_fixed[mask_edge] = data_bkg[mask_edge]
     
@@ -5019,7 +5028,8 @@ def fixpix (data, log, satlevel=60000., data_mask=None, base=None,
         kernel = Gaussian2DKernel(1, x_size=3, y_size=3)
     
         # replace bad pixels with nans
-        mask_bad = (data_mask == mask_value['bad'])
+        value_bad = mask_value['bad']
+        mask_bad = (data_mask & value_bad == value_bad)
         data_fixed[mask_bad] = np.nan
         
         # astropy's convolution replaces the NaN pixels with a kernel-weighted
@@ -7545,7 +7555,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                             'number of brightest stars used for WCS')
         header['A-NAMAX'] = (get_par(set_zogy.ast_nbright,tel),
                              'input max. number of stars to use for WCS')
-        
+
         # calculate means, stds and medians
         dra_mean, dra_median, dra_std = sigma_clipped_stats(
             dra_array.astype('float64'), sigma=5, mask_value=0)
@@ -8695,7 +8705,7 @@ def clean_norm_psf(psf_array, clean_factor):
     
     if clean_factor != 0:
         mask_clean = (psf_array < (np.amax(psf_array) * clean_factor))
-        psf_array[mask_clean] = 0.
+        psf_array[mask_clean] = 0
 
     # normalize
     psf_array_norm = psf_array / np.sum(psf_array)
