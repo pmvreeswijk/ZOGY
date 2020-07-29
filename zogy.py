@@ -1854,7 +1854,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     data_D_var = ( data_new + data_new_bkg_std**2 +
                   (data_ref + data_ref_bkg_std**2) * fratio)
 
+    
+    # get coordinates of edge pixels to use inside loop
+    xcoords_edge, ycoords_edge = get_edge_coords (data_new_mask)
 
+    
     t1 = time.time()
     # loop over the regions:
     for i in range(nregions):
@@ -1922,7 +1926,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
             
         # discard if region area is too small or too big
         npix_region = len(coords)
-        if npix_region < 5 or npix_region > 1000:
+        if npix_region < 5 or npix_region > 500:
             log.info ('transient region around x,y={},{} is too small/big; npix_region: {}'
                       .format(x_temp, y_temp, npix_region))
             continue
@@ -1974,6 +1978,15 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
             if (np.amax(np.abs(data_Scorr_ref)) >= 5 and 
                 data_Scorr_ref[index_minmax]*Scorr_peak[i] < 0):
                 continue
+
+
+        # discard candidate if too close to CCD edge
+        if len(xcoords_edge) != 0 and len(ycoords_edge != 0):
+            dist_pix = np.sqrt((x_peak[i]-xcoords_edge)**2 +
+                               (y_peak[i]-ycoords_edge)**2)
+            if np.amin(dist_pix) < 10:
+                continue
+
 
         # keep this region
         mask_keep[i] = True
@@ -2259,6 +2272,34 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         log_timing_memory (t0=t, label='get_trans', log=log)
         
     return ntrans
+
+
+################################################################################
+
+def get_edge_coords (data_mask):
+    
+    """function to extract x- and y-coordinates (not indices!) of the
+    inner pixels of the edge pixels in the input boolean mask; returns
+    two numpy arrays, one for x and one for y. If no edge pixels are
+    present in the input mask, the arrays will be empty.
+
+    """
+
+    # identify edge pixels
+    value_edge = get_par(set_zogy.mask_value['edge'],tel)
+    mask_edge = (data_mask & value_edge == value_edge)
+
+    # grow edge with one pixel and subtract the original edge mask
+    mask_edge_inner = ndimage.binary_dilation(mask_edge).astype('bool')
+    mask_edge_inner[mask_edge] = False
+
+    # convert the resulting mask into x- and y-coordinates
+    ysize, xsize = data_mask.shape
+    x = np.arange(xsize)+1
+    y = np.arange(ysize)+1
+    xx, yy = np.meshgrid(x, y)
+
+    return xx[mask_edge_inner], yy[mask_edge_inner]
 
 
 ################################################################################
