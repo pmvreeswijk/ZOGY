@@ -526,12 +526,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # - this is to make a comparison plot of the input and output flux
         if get_par(set_zogy.nfakestars,tel)>0:
             nfake = nsubs * get_par(set_zogy.nfakestars,tel)
-            fakestar_xcoord = np.ndarray(nfake, dtype=int)
-            fakestar_ycoord = np.ndarray(nfake, dtype=int)
-            fakestar_flux_input = np.ndarray(nfake)
-            fakestar_flux_output = np.ndarray(nfake)
-            fakestar_fluxerr_output = np.ndarray(nfake)        
-            fakestar_s2n_output = np.ndarray(nfake)
+            fakestar_xcoord = np.zeros(nfake, dtype=int)
+            fakestar_ycoord = np.zeros(nfake, dtype=int)
+            fakestar_flux_input = np.zeros(nfake)
+            fakestar_flux_output = np.zeros(nfake)
+            fakestar_fluxerr_output = np.zeros(nfake)        
+            fakestar_s2n_output = np.zeros(nfake)
 
             # add the fake stars to the new subimages
             for nsub in range(nsubs):
@@ -610,17 +610,22 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # into output images
 
         # first initialize full output images
-        data_D_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        #data_S_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_Scorr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_Fpsf_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_Fpsferr_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
+        data_D_full = np.zeros((ysize_new, xsize_new), dtype='float32')
+        #data_S_full = np.zeros_like(data_D_full)
+        data_Scorr_full = np.zeros_like(data_D_full)
+        data_Fpsf_full = np.zeros_like(data_D_full)
+        data_Fpsferr_full = np.zeros_like(data_D_full)
 
-        data_new_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_ref_full = np.ndarray((ysize_new, xsize_new), dtype='float32')
-        data_new_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
-        data_ref_mask_full = np.ndarray((ysize_new, xsize_new), dtype='uint8')
+        data_new_full = np.zeros_like(data_D_full)
+        data_ref_full = np.zeros_like(data_D_full)
 
+        data_new_bkg_std_full = np.zeros_like(data_D_full)
+        data_ref_bkg_std_full = np.zeros_like(data_D_full)
+
+        data_new_mask_full = np.zeros_like(data_D_full, dtype='uint8')
+        data_ref_mask_full = np.zeros_like(data_D_full, dtype='uint8')
+
+        
         #objgraph.show_most_common_types()
 
         for nsub in range(nsubs):
@@ -652,9 +657,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             # put sub images without the borders into output frames
             subcut = cuts_ima[nsub]
-            index_subcut = tuple([slice(subcut[0],subcut[1]), slice(subcut[2],subcut[3])])
-            x1, y1 = get_par(set_zogy.subimage_border,tel), get_par(set_zogy.subimage_border,tel)
-            x2, y2 = x1+get_par(set_zogy.subimage_size,tel), y1+get_par(set_zogy.subimage_size,tel)
+            index_subcut = tuple([slice(subcut[0],subcut[1]),
+                                  slice(subcut[2],subcut[3])])
+            x1, y1 = (get_par(set_zogy.subimage_border,tel),
+                      get_par(set_zogy.subimage_border,tel))
+            x2, y2 = (x1+get_par(set_zogy.subimage_size,tel),
+                      y1+get_par(set_zogy.subimage_size,tel))
             index_extract = tuple([slice(y1,y2), slice(x1,x2)])
 
             data_D_full[index_subcut] = data_D[index_extract] #/ gain_new
@@ -668,9 +676,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             data_new_mask_full[index_subcut] = data_new_mask[nsub][index_extract]
             data_ref_mask_full[index_subcut] = data_ref_mask[nsub][index_extract]
 
+            data_new_bkg_std_full[index_subcut] = data_new_bkg_std[nsub][index_extract]
+            data_ref_bkg_std_full[index_subcut] = data_ref_bkg_std[nsub][index_extract]
+
             nysubs = ysize/get_par(set_zogy.subimage_size,tel)
-            if get_par(set_zogy.display,tel) and (nsub==0 or nsub==nysubs-1 or nsub==int(nsubs/2) or
-                                                  nsub==nsubs-nysubs or nsub==nsubs-1):
+            if (get_par(set_zogy.display,tel) and
+                (nsub==0 or nsub==nysubs-1 or nsub==int(nsubs/2) or
+                 nsub==nsubs-nysubs or nsub==nsubs-1)):
 
                 subend = 'sub{}.fits'.format(nsub)
 
@@ -787,7 +799,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         ntrans = get_trans (data_new_full, data_ref_full, 
                             data_D_full, data_Scorr_full,
                             data_Fpsf_full, data_Fpsferr_full,
-                            data_new_mask_full, data_ref_mask_full, 
+                            data_new_mask_full, data_ref_mask_full,
+                            data_new_bkg_std_full, data_ref_bkg_std_full,
                             header_new, header_ref, header_zogy,
                             '{}_psf.fits'.format(base_new),
                             '{}_psf.fits'.format(base_ref),
@@ -1721,7 +1734,8 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 ################################################################################
 
 def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
-               data_new_mask, data_ref_mask, header_new, header_ref, header_zogy,
+               data_new_mask, data_ref_mask, data_new_bkg_std, data_ref_bkg_std,
+               header_new, header_ref, header_zogy,
                psfex_bintable_new, psfex_bintable_ref,
                fits_cat_new, fits_cat_ref, log):
 
@@ -1833,9 +1847,14 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # use sum of variances of new and ref images (where ref image
     # needs to be scaled with flux ratio fn/fr) as variance image to
     # use in psf fitting to D image (in get_psfoptflux_xycoords)
-    data_D_var = data_new + sn**2 + fratio * (data_ref + sr**2)
+    # initially used sn and sr as scalar estimate of the new and
+    # ref image background standard deviation:
+    #data_D_var = data_new + sn**2 + fratio * (data_ref + sr**2)
+    # using full background STD images - which may be overkill:
+    data_D_var = ( data_new + data_new_bkg_std**2 +
+                  (data_ref + data_ref_bkg_std**2) * fratio)
 
-    
+
     t1 = time.time()
     # loop over the regions:
     for i in range(nregions):
@@ -7213,11 +7232,11 @@ def centers_cutouts(subsize, ysize, xsize, log=None, get_remainder=False):
     if log is not None:
         log.info('nxsubs: {}, nysubs: {}, nsubs: {}'.format(nxsubs, nysubs, nsubs))
 
-    centers = np.ndarray((nsubs, 2), dtype=int)
-    cuts_ima = np.ndarray((nsubs, 4), dtype=int)
-    cuts_ima_fft = np.ndarray((nsubs, 4), dtype=int)
-    cuts_fft = np.ndarray((nsubs, 4), dtype=int)
-    sizes = np.ndarray((nsubs, 2), dtype=int)
+    centers = np.zeros((nsubs, 2), dtype=int)
+    cuts_ima = np.zeros((nsubs, 4), dtype=int)
+    cuts_ima_fft = np.zeros((nsubs, 4), dtype=int)
+    cuts_fft = np.zeros((nsubs, 4), dtype=int)
+    sizes = np.zeros((nsubs, 2), dtype=int)
 
     border = get_par(set_zogy.subimage_border,tel)
     ysize_fft = subsize + 2*border
