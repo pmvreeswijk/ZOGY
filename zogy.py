@@ -2055,12 +2055,13 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
 
     # helper function to discard transient based on input table and
-    # limits set for the ratio of source fwhm and elongation with
-    # respect to the image average
-    def help_discard_trans (table, ra, dec, fwhm_mean, elong_mean,
-                            dist_max=2./3600, fwhm_ratio_limit=0.7,
-                            elong_ratio_limit=1.5):
-        
+    # limits set for the ratio of source fwhm with respect to the
+    # image average; previously elongation was included, but it is too
+    # dangerous to discard transient based on high elongation - e.g.
+    # transient on top of elongated galaxy will have a high elongation
+    def help_discard_trans (table, ra, dec, fwhm_mean,
+                            dist_max=3./3600, ratio_limit=0.7):
+
         # check for match in input catalog
         index = find_stars (table['RA'], table['DEC'], ra, dec, dist_max,
                             search='circle', sort=True)
@@ -2069,40 +2070,35 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         if len(index) > 0:
             # take closest object if more than a single match
             index = index[0]
-            
+
             # determine which transients to discard
             if fwhm_mean != 0:
                 fwhm_source = table['FWHM_IMAGE'][index]
-                if fwhm_source / fwhm_mean < fwhm_ratio_limit:
+                if fwhm_source / fwhm_mean < ratio_limit:
                     discard = True
 
-            # elongation cut below is switched off as it is too
-            # dangerous: viable transients on top of elongated
-            # galaxies are likely to be discarded too
-            if False:
-                if elong_mean != 0:
-                    elong_source = table['ELONGATION'][index]
-                    if elong_source / elong_mean > elong_ratio_limit:
-                        discard = True
-                        
         return discard
-        
+    
 
     # loop transients and find match in new and ref catalog within
     # some distance using function find_stars
     mask_discard = np.zeros(ntrans, dtype=bool)
 
-    for i in range(ntrans):
-
-        mask_discard[i] = help_discard_trans (
-            table_cat_new, ra_peak[mask_keep][i], dec_peak[mask_keep][i],
-            psf_fwhm_new, elong_new)
+    # switch this off for now; see if machine-learning can get rid of
+    # these remaining cosmics
+    if False:
         
-        # if not discarded based on new catalog, check ref catalog
-        if not mask_discard[i]:
+        for i in range(ntrans):
+
             mask_discard[i] = help_discard_trans (
-                table_cat_ref, ra_peak[mask_keep][i], dec_peak[mask_keep][i],
-                psf_fwhm_ref, elong_ref)
+                table_cat_new, ra_peak[mask_keep][i], dec_peak[mask_keep][i],
+                psf_fwhm_new)
+        
+            # if not discarded based on new catalog, check ref catalog
+            if not mask_discard[i]:
+                mask_discard[i] = help_discard_trans (
+                    table_cat_ref, ra_peak[mask_keep][i], dec_peak[mask_keep][i],
+                    psf_fwhm_ref)
 
     
     # update mask_keep
@@ -2110,7 +2106,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # number of transients left
     mk = mask_keep
     ntrans = np.sum(mk)
-    log.info('ntrans after FWHM/ELONGATION loop: {}'.format(ntrans))
+    log.info('ntrans after FWHM loop: {}'.format(ntrans))
     
         
     # try fitting P_D (combination of PSFs of new and ref images)
@@ -6387,7 +6383,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                                 pixscale, log, header, fit_psf=True,
                                 update_vignet=False, fwhm=fwhm,
                                 tel=tel, set_zogy=set_zogy, n_threads=nthreads)
-        
+
 
     # If not already done so above, read in PSF output binary table
     # from psfex, containing the polynomial coefficient images
@@ -8154,9 +8150,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
             if get_par(set_zogy.show_plots,tel): plt.show()
             plt.close()
             
-
+            
     # show catalog entries with very low FWHM
-    if True:
+    if get_par(set_zogy.make_plots,tel):
         mask_lowfwhm = (data['FWHM_IMAGE'] < fwhm_median-3*fwhm_std)
         result = prep_ds9regions('{}_lowfwhm_ds9regions.txt'
                                  .format(cat_ldac.replace('.fits','')),
