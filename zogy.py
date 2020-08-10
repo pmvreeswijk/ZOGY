@@ -293,7 +293,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     sex_params, pixscale, log, header, fit_psf=False,
                     return_fwhm_elong=False, fraction=1.0, fwhm=fwhm,
                     update_vignet=update_vignet, imtype=imtype,
-                    fits_mask=fits_mask, npasses=2, tel=tel, set_zogy=set_zogy)
+                    fits_mask=fits_mask, npasses=2, tel=tel, set_zogy=set_zogy,
+                    n_threads=nthreads)
             except Exception as e:
                 log.info(traceback.format_exc())
                 log.error('exception was raised during [run_sextractor]: {}'
@@ -1505,7 +1506,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
-        'THUMBNAIL_SCORR':[thumbnail_fmt, 'e-' ], #, 'flt16' ]
+        'THUMBNAIL_SCORR':[thumbnail_fmt, 'sigma'], #, 'flt16' ]
     }
 
 
@@ -1650,7 +1651,8 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                     
                     # record in data_col
                     try:
-                        data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]                        
+                        data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]
+
                     except ValueError as ve:
                         if log is not None:
                             log.info('skipping object at x,y: {:.0f},{:.0f} due to '
@@ -2925,7 +2927,7 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
 ################################################################################
 
 def flux_psffit(P, D, bkg_var, flux_opt, xshift, yshift,
-                mask_use=None, maxfev=100, log=None):
+                mask_use=None, max_nfev=100, log=None):
 
 
     # define objective function: returns the array to be minimized
@@ -2994,7 +2996,7 @@ def flux_psffit(P, D, bkg_var, flux_opt, xshift, yshift,
     # use minimize wrapper to combine above 2 lines into 1
     result = minimize(fcn2min, params, method='Leastsq', 
                       args=(P, D, bkg_var, mask_use),
-                      maxfev=maxfev)
+                      max_nfev=max_nfev)
 
     xshift = result.params['xshift'].value
     yshift = result.params['yshift'].value
@@ -3553,8 +3555,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         if imtype == 'ref':
             fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
         else:
-            # not needed, but make one for the new image also
-            if True:
+            # could also make one for the new image, but not needed
+            if False:
                 fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
 
             
@@ -3992,6 +3994,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 # discard SExtractor catalog entries with negative
                 # flux and FLAGS higher than 1
                 mask_zp = ((flux_opt>0.) & (flags_sex<=1))
+                log.info ('number of sextractor catalog entries left: {}'
+                          .format(np.sum(mask_zp)))
 
                 # collect individual zeropoints across entire image
                 x_array, y_array, zp_array = collect_zps (
@@ -4010,7 +4014,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                      'stars used')
                 
                 # for MeerLICHT and BlackGEM only
-                if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+                if ncal_used >= 30 and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
 
                     # calculate zeropoint for each channel
                     zp_chan, zp_std_chan, ncal_chan = calc_zp (
@@ -4092,12 +4096,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                     # the maximum relative difference between the
                     # boxes' medians
                     mask_nonzero = ((zp_mini != 0) & (zp_std_mini != 0))
-                    max_diff = (np.amax(zp_mini[mask_nonzero]) -
-                                np.amin(zp_mini[mask_nonzero]))
-                    max_std = np.amax(zp_std_mini[mask_nonzero])
-                    
-                    header['PC-NSUBS'] = (int(ysize/subsize)**2, 'number of '
-                                          'subimages for zeropoint statistics')
+                    n_zps = np.sum(mask_nonzero)
+                    if n_zps > 1:
+                        max_diff = (np.amax(zp_mini[mask_nonzero]) -
+                                    np.amin(zp_mini[mask_nonzero]))
+                        max_std = np.amax(zp_std_mini[mask_nonzero])
+                    else:
+                        max_diff = 'None'
+                        max_std = 'None'
+
+                        
+                    header['PC-TNSUB'] = (int(ysize/subsize)**2, 'total number '
+                                          'of subimages available')
+                    header['PC-NSUB'] = (n_zps, 'number of subimages used for '
+                                         'ZP statistics')
                     header['PC-MZPD'] = (max_diff, '[mag] maximum zeropoint '
                                          'difference between subimages')
                     header['PC-MZPS'] = (max_std, '[mag] maximum zeropoint sigma '
@@ -4556,19 +4568,22 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
 
     ncal = np.shape(ra_cal)[0]
     nmatch = 0
-    # loop calibration stars and find a match in SExtractor sources
+    # loop calibration stars and find closest match in SExtractor sources
     for i in range(ncal):
         
         index_match = find_stars (ra_sex, dec_sex, ra_cal[i], dec_cal[i],
                                   dist_max, search='circle', log=log)
 
-        if len(index_match)==1:
-            # there's one match, calculate its zeropoint
-            # need to calculate airmass for each star, as around A=2,
-            # difference in airmass across the FOV is 0.1, i.e. a 5% change
+        if len(index_match) > 0:
+            # take closest object if more than a single match
+            index_match = index_match[0]
+
+            # calculate its zeropoint; need to calculate airmass for
+            # each star, as around A=2, difference in airmass across
+            # the FOV is 0.1, i.e. a 5% change
             zp_array[index_match] = (mag_cal[i] - mag_sex_inst[index_match] +
-                                    airmass_sex[index_match] *
-                                    get_par(set_zogy.ext_coeff,tel)[filt])
+                                     airmass_sex[index_match] *
+                                     get_par(set_zogy.ext_coeff,tel)[filt])
 
             #if get_par(get_par(set_zogy.verbose,tel):
             #    if 'spectype' in data_cal.dtype.names:
@@ -4649,14 +4664,20 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
     nmatch = 0
     # loop calibration stars and find a match in SExtractor sources
     for i in range(ncal):
-        
+
         index_match = find_stars (ra_sex, dec_sex, ra_cal_sort[i], dec_cal_sort[i],
                                   dist_max, search='circle')
 
-        if len(index_match)==1:
-            # there's one match, calculate its zeropoint
-            # need to calculate airmass for each star, as around A=2,
-            # difference in airmass across the FOV is 0.1, i.e. a 5% change
+        if log is not None:
+            log.info ('i: {}, index_match: {}'.format(i, index_match))
+
+        if len(index_match) > 0:
+            # take closest object if more than a single match
+            index_match = index_match[0]
+
+            # calculate its zeropoint; need to calculate airmass for
+            # each star, as around A=2, difference in airmass across
+            # the FOV is 0.1, i.e. a 5% change
             zp_array[i] = (mag_cal_sort[i] - mag_sex_inst[index_match] +
                            airmass_sex[index_match] *
                            get_par(set_zogy.ext_coeff,tel)[filt])
@@ -4672,12 +4693,17 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
                     break
 
 
+    mask_nonzero = (zp_array != 0)
+
     if log is not None:
+
+        log.info ('number of matches in collect_zps: {}'
+                  .format(np.sum(mask_nonzero)))
+        
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='collect_zps', log=log)
 
 
-    mask_nonzero = (zp_array != 0)
     return x_array[mask_nonzero], y_array[mask_nonzero], zp_array[mask_nonzero]
 
 
@@ -5707,7 +5733,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
         mask_reject_temp = np.copy(mask_reject)
         npix_reject_old = np.sum(mask_reject_temp)
         for it in range(5):
-            result = minimize (mini2min, params, method='Leastsq', maxfev=100,
+            result = minimize (mini2min, params, method='Leastsq', max_nfev=100,
                                args=(mini_median, mini_std, mini_sec, order,
                                      mask_reject_temp, f_norm,))
             params = result.params
@@ -5771,7 +5797,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                        vary=mask_cfit[i_coeff])
 
         # fit
-        result = minimize (mini2min, params, method='Leastsq', maxfev=100,
+        result = minimize (mini2min, params, method='Leastsq', max_nfev=100,
                            args=(mini_median, mini_std, mini_sec, order,
                                  mask_reject_temp, f_norm,))
         params = result.params
@@ -6360,7 +6386,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                                 get_par(set_zogy.sex_par_psffit,tel),
                                 pixscale, log, header, fit_psf=True,
                                 update_vignet=False, fwhm=fwhm,
-                                tel=tel, set_zogy=set_zogy)
+                                tel=tel, set_zogy=set_zogy, n_threads=nthreads)
         
 
     # If not already done so above, read in PSF output binary table
@@ -6758,7 +6784,7 @@ def fit_moffat(psf_ima, nx, ny, header, pixscale, base_output, log,
 ################################################################################
 
 def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False, 
-                       fwhm=5, maxfev=100, log=None):
+                       fwhm=5, max_nfev=100, log=None):
     
     #if get_par(set_zogy.timing,tel): t = time.time()
     
@@ -6796,7 +6822,7 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     # do leastsq model fit
     result = minimize(moffat2min, params, method='Leastsq', 
                       args=(image, xx, yy, fit_gauss, image_err, mask_use),
-                      maxfev=maxfev)
+                      max_nfev=max_nfev)
 
     p = result.params.valuesdict()
     chi2red = result.redchi
@@ -7329,7 +7355,7 @@ def ds9_arrays(regions=None, **kwargs):
     for name, array in kwargs.items():
         # write array to fits
         fitsfile = 'ds9_{}.fits'.format(name)
-        fits.writeto(fitsfile, np.array(array).astype('float32'), overwrite=True)            
+        fits.writeto(fitsfile, np.array(array), overwrite=True)
         # append to command
         cmd.append(fitsfile)
 
@@ -8196,7 +8222,7 @@ def get_vignet_size (imtype, log):
 def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, header,
                    fit_psf=False, return_fwhm_elong=True, fraction=1.0, fwhm=5.0, 
                    update_vignet=True, imtype=None, fits_mask=None, 
-                   npasses=2, tel=None, set_zogy=None):
+                   npasses=2, tel=None, set_zogy=None, n_threads=0):
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [cat_out], using the configuration file
@@ -8362,7 +8388,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                 '-PIXEL_SCALE', str(pixscale),
                 '-SEEING_FWHM', str(seeing),
                 '-PHOT_APERTURES',apphot_diams_str,
-                '-NTHREADS', str(nthreads),
+                '-NTHREADS', str(n_threads),
                 '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
                 '-STARNNW_NAME', '{}default.nnw'.format(
                     get_par(set_zogy.cfg_dir,tel))]
@@ -8480,6 +8506,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
 
 
 
+    data_ldac_read = False
+
     if return_fwhm_elong:
         # get estimate of seeing and elongation from output catalog
         fwhm, fwhm_std, elong, elong_std = get_fwhm(
@@ -8503,9 +8531,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                     background = data_bkg[y_indices, x_indices]
                     hdulist[2].data['BACKGROUND'] = background
 
+            data_ldac_read = True
+                    
 
     # add number of objects to header
-    if data_ldac not in locals():
+    if not data_ldac_read:
         with fits.open(cat_out) as hdulist:
             data_ldac = hdulist[2].data
         
