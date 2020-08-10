@@ -63,6 +63,15 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
+# needed for Zafiirah's machine learning modules
+import pandas as pd
+from meerCRAB_code.model import compile_model, model_save
+from keras.utils import np_utils
+from time import gmtime, strftime
+from meerCRAB_code.util import makedirs, ensure_dir
+from meerCRAB_code.prediction_phase import load_new_candidate, realbogus_prediction
+from tensorflow.python.keras.models import model_from_json
+
 # from memory_profiler import profile
 # import objgraph
 
@@ -1000,7 +1009,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                               data_Scorr_full]
             thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
                               'THUMBNAIL_SCORR']
-
+            
             # orient data arrays to North up, East left using function
             # [orient_data]; if header keyword is provided, it is
             # checked if image is already in correct orientation;
@@ -1011,7 +1020,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             data_D_full = orient_data (data_D_full)
             data_Scorr_full = orient_data (data_Scorr_full)
 
-            
             # need to take care of objects closer than 32/2 pixels to
             # the full image edge in creation of thumbnails - results
             # in an error if transients are close to the edge
@@ -1021,6 +1029,20 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  thumbnail_size=get_par(set_zogy.size_thumbnails,tel), 
                                  header_toadd=header_newzogy, exptime=exptime_new, 
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel))
+
+
+            if get_par(set_zogy.ML_calc_prob,tel):
+
+                # apply Zafiirah's machine learning module to the
+                # thumbnails in the transient catalog just created
+                # using the function get_ML_prob_real
+                ML_prob_real = get_ML_prob_real (cat_trans_out)
+
+                # update 'ML_PROB_REAL' field in the transient catalog
+                with fits.open(cat_trans_out, mode='update') as hdulist:
+                    hdulist[-1].data['ML_PROB_REAL'] = ML_prob_real
+            
+
         else:
             result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
                                  header_toadd=header_newzogy, exptime=exptime_new, 
@@ -1081,6 +1103,48 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     elif ref:
         return header_ref
     
+
+################################################################################
+
+def get_ML_prob_real (fits_table, factor_norm=255.):
+
+    # split set_zogy.ML_model parameter into model path and name
+    model_path, model_name = os.path.split(get_par(set_zogy.ML_model,tel))
+
+    # read fits table
+    table = Table.read(fits_table)
+
+    # above image cubes are 100x100 pixels, need to extract the
+    # central 30x30 pixels
+    index_30x30 = (slice(None,None), slice(35,65), slice(35,65))
+
+    # stack the 30x30 data arrays into an array with
+    # shape (nrows in table, 30, 30, 3 or 4)
+    if 'NRDS' in model_name:
+        # all 4 thumbnails are used
+        data_stack = np.stack((table['THUMBNAIL_RED'][index_30x30],
+                               table['THUMBNAIL_REF'][index_30x30],
+                               table['THUMBNAIL_D'][index_30x30],
+                               table['THUMBNAIL_SCORR'][index_30x30]), axis=3)
+    else:
+        # 3 thumbnails are used:
+        data_stack = np.stack((table['THUMBNAIL_RED'][index_30x30],
+                               table['THUMBNAIL_REF'][index_30x30],
+                               table['THUMBNAIL_D'][index_30x30]), axis=3)
+
+    # normalize
+    data_stack /= factor_norm
+
+    # generate some transient ID (not important)
+    id_trans = np.arange(len(table))
+    # threshold (not important)
+    prob_thresh = 0.5
+
+    ML_real_prob, __ = realbogus_prediction(model_name, data_stack, id_trans,
+                                            prob_thresh, model_path=model_path)
+
+    return ML_real_prob
+
 
 ################################################################################
 

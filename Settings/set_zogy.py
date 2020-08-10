@@ -33,6 +33,15 @@ nfakestars = 0           # number of fake stars to be added to each subimage; fi
                          # is at the center, the rest (if any) is randomly distributed
 fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars    
 
+
+#===============================================================================
+# Machine Learning - trained on MeerLICHT data!
+#===============================================================================
+ML_calc_prob = True
+ML_model = ('{}/meerCRAB_model/NET3_threshold_9_NRD'
+            .format(os.environ['MEERCRABHOME']))
+
+
 #===============================================================================
 # Background
 #===============================================================================
@@ -55,8 +64,8 @@ MLBG_chancorr = True     # apply channel correction factor estimated while
                          # performing a 2D polynomial fit to the background
 MLBG_chancorr_limdev = 0.05 # single channel correction limiting deviation
                             # above which none of the corrections are applied
- 
-                         
+                          
+
 #===============================================================================
 # Header keywords
 #===============================================================================
@@ -94,6 +103,7 @@ fwhm_class_sort = False  # sort objects according to CLASS_STAR (T)
 fwhm_frac = 0.33         # fraction of objects, sorted in brightness
                          # or class_star, used for fwhm estimate
 
+
 #===============================================================================
 # PSF parameters
 #===============================================================================
@@ -122,6 +132,7 @@ psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
                          # (don't set this too high as otherwise the PSF
                          #  will be mainly based on bright stars)
                          
+
 #===============================================================================
 # Astrometry
 #===============================================================================
@@ -148,6 +159,7 @@ ast_nbright = 1000       # brightest no. of objects in the field to
                          # of positions obtained against calibration
                          # catalog
 ast_filter = 'r'         # magnitude column to sort in brightness
+
 
 #===============================================================================
 # Photometry
@@ -192,6 +204,7 @@ phot_ncal_min = 10  # min no. of stars below which filter requirements are dropp
 # provided or a particular field does not contain any calibration stars
 zp_default = {'ML1': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41},
               'BG': {'u':22.5, 'g':23.44, 'q':23.89, 'r':22.87, 'i':22.35, 'z':21.41}}
+
 
 #===============================================================================
 # Configuration
