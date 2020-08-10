@@ -16,7 +16,7 @@ subimage_border = 40     # border around subimage to avoid edge effects
 # ZOGY parameters
 fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
-transient_nsigma = 7     # required significance in Scorr for transient detection
+transient_nsigma = 6     # required significance in Scorr for transient detection
 chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter transients
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
@@ -219,5 +219,5 @@ redo = False             # execute functions even if output file exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+make_plots = False       # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
