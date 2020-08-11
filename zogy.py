@@ -4771,9 +4771,6 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
         index_match = find_stars (ra_sex, dec_sex, ra_cal_sort[i], dec_cal_sort[i],
                                   dist_max, search='circle')
 
-        if log is not None:
-            log.info ('i: {}, index_match: {}'.format(i, index_match))
-
         if len(index_match) > 0:
             # take closest object if more than a single match
             index_match = index_match[0]
