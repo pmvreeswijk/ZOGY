@@ -1043,11 +1043,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     ML_processed = True
 
                 finally:
-                    header_newzogy['ML-P'] = (ML_processed, 'successfully '
-                                              'processed ML probabilities?')
+                    header_newzogy['MC-P'] = (ML_processed, 'successfully '
+                                              'processed by MeerCRAB?')
+                    # set version by hand
                     ML_version = '3.0.0'
-                    header_newzogy['ML-V'] = (ML_version, 'MeerCRAB version used')
-                    header_newzogy['ML-model'] = (ML_model,
+                    header_newzogy['MC-V'] = (ML_version, 'MeerCRAB version used')
+                    header_newzogy['MC-MODEL'] = (ML_model,
                                                   'MeerCRAB training model used')
                     
 
