@@ -63,14 +63,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
-# needed for Zafiirah's machine learning modules
-import pandas as pd
-from meerCRAB_code.model import compile_model, model_save
-from keras.utils import np_utils
-from time import gmtime, strftime
-from meerCRAB_code.util import makedirs, ensure_dir
-from meerCRAB_code.prediction_phase import load_new_candidate, realbogus_prediction
-from tensorflow.python.keras.models import model_from_json
+# needed for Zafiirah's machine learning package MeerCRAB
+from meerCRAB_code.prediction_phase import realbogus_prediction
 
 # from memory_profiler import profile
 # import objgraph
@@ -1031,17 +1025,37 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel))
 
 
+
+            # apply Zafiirah's machine learning module to the
+            # thumbnails in the transient catalog just created using
+            # the function get_ML_prob_real
             if get_par(set_zogy.ML_calc_prob,tel):
 
-                # apply Zafiirah's machine learning module to the
-                # thumbnails in the transient catalog just created
-                # using the function get_ML_prob_real
-                ML_prob_real = get_ML_prob_real (cat_trans_out)
+                try:
+                    ML_processed = False
+                    ML_model = get_par(set_zogy.ML_model,tel)
+                    ML_prob_real = get_ML_prob_real (cat_trans_out, ML_model)
+                except Exception as e:
+                    log.info(traceback.format_exc())
+                    log.error('exception was raised during [get_ML_prob_real]: '
+                              '{}'.format(e))
+                else:
+                    ML_processed = True
+
+                finally:
+                    header_newzogy['ML-P'] = (ML_processed, 'successfully '
+                                              'processed ML probabilities?')
+                    ML_version = '3.0.0'
+                    header_newzogy['ML-V'] = (ML_version, 'MeerCRAB version used')
+                    header_newzogy['ML-model'] = (ML_model,
+                                                  'MeerCRAB training model used')
+                    
 
                 # update 'ML_PROB_REAL' field in the transient catalog
                 with fits.open(cat_trans_out, mode='update') as hdulist:
                     hdulist[-1].data['ML_PROB_REAL'] = ML_prob_real
-            
+                    hdulist[-1].header = header_newzogy
+                    
 
         else:
             result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
@@ -1106,38 +1120,54 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 ################################################################################
 
-def get_ML_prob_real (fits_table, factor_norm=255.):
+def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
+    
+    """function based on Zafiirah's Jupyter notebook (see
+    https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
+    function [realbogus_prediction] to calculate the probability that
+    a transient candidate is real, using the image thumbnails in
+    [fits_table] in combination with the trained model [model]. Most
+    models require the central 30x30 pixels to be used rather than the
+    full (100x100) thumbnails. The normalisation factor 255 is the one
+    applied by Zafiirah to the thumbnails during the ML training.
 
-    # split set_zogy.ML_model parameter into model path and name
-    model_path, model_name = os.path.split(get_par(set_zogy.ML_model,tel))
+    """
+
 
     # read fits table
     table = Table.read(fits_table)
 
-    # above image cubes are 100x100 pixels, need to extract the
-    # central 30x30 pixels
-    index_30x30 = (slice(None,None), slice(35,65), slice(35,65))
+    # split set_zogy.ML_model parameter into model path and name
+    model_path, model_name = os.path.split(model)
 
+    # above image cubes are 100x100 pixels, need to extract the
+    # central 30x30 pixels for most models
+    if use_30x30:
+        index = (slice(None,None), slice(35,65), slice(35,65))
+    else:
+        index = (slice(None,None), slice(None,None), slice(None,None))
+
+        
     # stack the 30x30 data arrays into an array with
     # shape (nrows in table, 30, 30, 3 or 4)
     if 'NRDS' in model_name:
         # all 4 thumbnails are used
-        data_stack = np.stack((table['THUMBNAIL_RED'][index_30x30],
-                               table['THUMBNAIL_REF'][index_30x30],
-                               table['THUMBNAIL_D'][index_30x30],
-                               table['THUMBNAIL_SCORR'][index_30x30]), axis=3)
+        data_stack = np.stack((table['THUMBNAIL_RED'][index],
+                               table['THUMBNAIL_REF'][index],
+                               table['THUMBNAIL_D'][index],
+                               table['THUMBNAIL_SCORR'][index]), axis=3)
     else:
         # 3 thumbnails are used:
-        data_stack = np.stack((table['THUMBNAIL_RED'][index_30x30],
-                               table['THUMBNAIL_REF'][index_30x30],
-                               table['THUMBNAIL_D'][index_30x30]), axis=3)
+        data_stack = np.stack((table['THUMBNAIL_RED'][index],
+                               table['THUMBNAIL_REF'][index],
+                               table['THUMBNAIL_D'][index]), axis=3)
 
-    # normalize
+    # normalise
     data_stack /= factor_norm
 
-    # generate some transient ID (not important)
+    # generate some transient ID (not important but required)
     id_trans = np.arange(len(table))
-    # threshold (not important)
+    # threshold (not important but required)
     prob_thresh = 0.5
 
     ML_real_prob, __ = realbogus_prediction(model_name, data_stack, id_trans,
