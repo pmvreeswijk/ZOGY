@@ -1025,12 +1025,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel))
 
 
-
-            # apply Zafiirah's machine learning module to the
-            # thumbnails in the transient catalog just created using
-            # the function get_ML_prob_real
-            if get_par(set_zogy.ML_calc_prob,tel):
-
+            # apply Zafiirah's MeerCRAB module to the thumbnails in
+            # the transient catalog just created, using the function
+            # get_ML_prob_real
+            if (get_par(set_zogy.ML_calc_prob,tel) and
+                tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+                
                 try:
                     ML_processed = False
                     ML_model = get_par(set_zogy.ML_model,tel)
@@ -1180,7 +1180,7 @@ def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
 ################################################################################
 
 def orient_data (data, header=None):
-                    
+
     # for MeerLICHT and BlackGEM, orient arrays to North
     # up, East left orientation
     if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
@@ -1506,7 +1506,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
 
         # not a dummy catalog created from the header only
         dummy_cat = False
-            
+
     else:
         # if no [cat_in] is provided, just define the header using
         # [header_toadd]
@@ -1644,8 +1644,20 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
                           'RA_MOFFAT', 'DEC_MOFFAT', 
                           'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT']
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+        if (get_par(set_zogy.ML_calc_prob,tel) and
+            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+            
             keys_to_record.append('ML_PROB_REAL')
+            
+            if cat_in is not None:
+                # field ML_PROB_REAL is not yet included in data, so
+                # append it initialised to -1; the actual
+                # probabilities will be added after this function is
+                # done when MeerCRAB is processed
+                ml_prob_real = -np.ones(len(data))
+                data = append_fields(data, 'ML_PROB_REAL', ml_prob_real,
+                                     usemask=False, asrecarray=True)
 
 
     # rename any of the keys using this dictionary, such as the
