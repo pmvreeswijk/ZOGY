@@ -786,8 +786,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             zp = header_new['PC-ZP']
             airm = header_new['AIRMASSC']
-            data_limmag = apply_zp(get_par(set_zogy.transient_nsigma,tel)*data_Fpsferr_full, 
-                                   zp, airm, exptime, filt, log).astype('float32')
+            data_limmag = apply_zp( (get_par(set_zogy.transient_nsigma,tel) *
+                                     data_Fpsferr_full),
+                                    zp, airm, exptime, filt, log).astype('float32')
         
         
         # add header keyword(s):
@@ -816,15 +817,18 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         header_zogy['T-NSIGMA'] = (get_par(set_zogy.transient_nsigma,tel),
                                    '[sigma] input transient detection threshold')
         lflux = float(get_par(set_zogy.transient_nsigma,tel)) * median_Fpsferr
-        header_zogy['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient {}-sigma limit. flux'
-                                  .format(get_par(set_zogy.transient_nsigma,tel)))
-        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients (pre-vetting)'
-                                   .format(get_par(set_zogy.transient_nsigma,tel)))
+        header_zogy['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient '
+                                  '{}-sigma limit. flux'.format(
+                                      get_par(set_zogy.transient_nsigma,tel)))
+        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients '
+                                   '(pre-vetting)'.format(
+                                       get_par(set_zogy.transient_nsigma,tel)))
 
         # add ratio of ntrans over total number of significant objects detected
         if 'NOBJECTS' in header_new:
             nobjects = header_new['NOBJECTS']
-            header_zogy['T-FTRANS'] = (ntrans/nobjects, 'ntrans/nobject ratio: T-NTRANS / NOBJECTS in new image')
+            header_zogy['T-FTRANS'] = (ntrans/nobjects, 'ntrans/nobject ratio: '
+                                       'T-NTRANS / NOBJECTS in new image')
 
         
         # infer limiting magnitudes from corresponding limiting
@@ -835,8 +839,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             zeropoint = header_new['PC-ZP']
             airmass = header_new['AIRMASSC']
             [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log)
-            header_zogy['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma limiting mag' 
-                                     .format(get_par(set_zogy.transient_nsigma,tel)))
+            header_zogy['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
+                                     'limiting mag'.format(
+                                         get_par(set_zogy.transient_nsigma,tel)))
 
 
         if get_par(set_zogy.nfakestars,tel)==0:
@@ -844,34 +849,44 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # still write these header keywords
             header_zogy['T-NFAKE'] = (get_par(set_zogy.nfakestars,tel), 
                                       'number of fake stars added to full frame')
-            header_zogy['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel), 'fake stars input S/N')
+            header_zogy['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
+                                       'fake stars input S/N')
             
         else:
 
             # compare input and output flux
-            fluxdiff = (fakestar_flux_input - fakestar_flux_output) / fakestar_flux_input
+            fluxdiff = ((fakestar_flux_input - fakestar_flux_output) /
+                        fakestar_flux_input)
             fluxdiff_err = fakestar_fluxerr_output / fakestar_flux_input
             
-            fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff.astype('float64'))
-            fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err
-                                                                      .astype('float64'))
+            fd_mean, fd_median, fd_std = sigma_clipped_stats(
+                fluxdiff.astype('float64'))
+            fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(
+                fluxdiff_err.astype('float64'))
 
             # add header keyword(s):
             nfake = len(fakestar_flux_input)
-            header_zogy['T-NFAKE'] = (nfake, 'number of fake stars added to full frame')
-            header_zogy['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel), 'fake stars input S/N')
+            header_zogy['T-NFAKE'] = (nfake,
+                                      'number of fake stars added to full frame')
+            header_zogy['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
+                                       'fake stars input S/N')
 
             # write to ascii file
             filename = '{}_fakestars.dat'.format(base_new)
             f = open(filename, 'w')
             f.write('{:1} {:11} {:11} {:12} {:12} {:16} {:11} {:11}\n'
-                    .format('#', 'xcoord[pix]', 'ycoord[pix]', 'flux_in[e-]', 'flux_out[e-]',
-                            'fluxerr_out[e-]', 'S/N_input', 'S/N_output'))
+                    .format('#', 'xcoord[pix]', 'ycoord[pix]', 'flux_in[e-]',
+                            'flux_out[e-]', 'fluxerr_out[e-]', 'S/N_input',
+                            'S/N_output'))
+
             for i in range(nfake):
-                f.write('{:11.2f} {:11.2f} {:12.2e} {:12.2e} {:16.2e} {:11.2f} {:11.2f}\n'
+                f.write('{:11.2f} {:11.2f} {:12.2e} {:12.2e} {:16.2e} {:11.2f} '
+                        '{:11.2f}\n'
                         .format(fakestar_xcoord[i], fakestar_ycoord[i],
-                                fakestar_flux_input[i], fakestar_flux_output[i], fakestar_fluxerr_output[i],
-                                get_par(set_zogy.fakestar_s2n,tel), fakestar_s2n_output[i]))
+                                fakestar_flux_input[i], fakestar_flux_output[i],
+                                fakestar_fluxerr_output[i],
+                                get_par(set_zogy.fakestar_s2n,tel),
+                                fakestar_s2n_output[i]))
             f.close()
 
             # make comparison plot of flux input and output
@@ -879,7 +894,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             
                 x = np.arange(nsubs*get_par(set_zogy.nfakestars,tel))+1
                 y = fakestar_flux_input
-                plt.plot(x, y, 'o', color='tab:blue', markersize=7, markeredgecolor='k')
+                plt.plot(x, y, 'o', color='tab:blue', markersize=7,
+                         markeredgecolor='k')
                 plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
                 plt.ylabel('true flux (e-)')
                 plt.title('fake stars true input flux')
@@ -888,19 +904,23 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 plt.close()
 
                 #plt.axis((0,nsubs,0,2))
-                plt.errorbar(x, fluxdiff, yerr=fluxdiff_err, linestyle='None', ecolor='k', capsize=2)
-                plt.plot(x, fluxdiff, 'o', color='tab:blue', markersize=7, markeredgecolor='k')
+                plt.errorbar(x, fluxdiff, yerr=fluxdiff_err, linestyle='None',
+                             ecolor='k', capsize=2)
+                plt.plot(x, fluxdiff, 'o', color='tab:blue', markersize=7,
+                         markeredgecolor='k')
                 plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
                 plt.ylabel('(true flux - ZOGY flux) / true flux')
-                plt.title('true flux vs. ZOGY Fpsf; mean:{:.3f}, std:{:.3f}, data err:{:.3f}'
-                          .format(fd_mean, fd_std, fderr_mean))
-                plt.savefig('{}_fakestar_flux_input_vs_ZOGYoutput.pdf'.format(base_newref))
+                plt.title('true flux vs. ZOGY Fpsf; mean:{:.3f}, std:{:.3f}, '
+                          'data err:{:.3f}'.format(fd_mean, fd_std, fderr_mean))
+                plt.savefig('{}_fakestar_flux_input_vs_ZOGYoutput.pdf'
+                            .format(base_newref))
                 if get_par(set_zogy.show_plots,tel): plt.show()
                 plt.close()
 
                 # same for S/N as determined by Scorr
                 y = fakestar_s2n_output
-                plt.plot(x, y, 'o', color='tab:blue', markersize=7, markeredgecolor='k')
+                plt.plot(x, y, 'o', color='tab:blue', markersize=7,
+                         markeredgecolor='k')
                 plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
                 plt.ylabel('S/N from Scorr')
                 plt.title('fakestars signal-to-noise ratio from Scorr')
@@ -939,7 +959,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # about 0.03 mag in the output image) then save as 'uint8'
         # leading to an fpacked image size of about 15MB; otherwise
         # use float32 which can be compressed to ~45MB using q=1
-        header_newzogy['COMMENT'] = ('transient limiting magnitude image threshold: {}-sigma'
+        header_newzogy['COMMENT'] = ('transient limiting magnitude image threshold: '
+                                     '{}-sigma'
                                      .format(get_par(set_zogy.transient_nsigma,tel)))
 
         header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
@@ -2298,37 +2319,47 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # this low flux could well be due to stars being present in master flat
     
     # need to convert psf fluxes to magnitudes by applying the zeropoint
-    keywords = ['exptime', 'filter']
-    exptime, filt = read_header(header_new, keywords, log)
+    keywords = ['exptime', 'filter', 'obsdate']
+    exptime, filt, obsdate = read_header(header_new, keywords, log)
+
     # get zeropoint from [header_new]
     if 'PC-ZP' in header_new:
         zp = header_new['PC-ZP']
     else:
         zp = get_par(set_zogy.zp_default,tel)[filt]
+
     # get airmass from [header_new]
     if 'AIRMASSC' in header_new:
         airmass = header_new['AIRMASSC']
     elif 'PC-AIRM' in header_new:
         airmass = header_new['PC-AIRM']
 
+    # determine individual airmasses of transients to be able to
+    # determine their magnitudes accurately also at high airmass
+    lat = get_par(set_zogy.obs_lat,tel)
+    lon = get_par(set_zogy.obs_lon,tel)
+    height = get_par(set_zogy.obs_height,tel)
+    airmass_trans = get_airmass(ra_peak, dec_peak, obsdate, 
+                                lat, lon, height, log=log)
+        
     # get magnitudes corresponding to absolute fluxes; fluxes, which
     # can be negative for e.g. an object detected in the reference
     # image but not in the new image, are first converted to positive
     # fluxes. That it was a negative flux object is still clear from
     # the sign of Scorr_peak.
     flux_peak = np.abs(flux_peak)
-    mag_peak, magerr_peak = apply_zp(flux_peak, zp, airmass, exptime, 
-                                     filt, log, fluxerr=np.abs(fluxerr_peak),
-                                     zp_std=None)
+    mag_peak, magerr_peak = apply_zp (flux_peak, zp, airmass_trans, exptime, 
+                                      filt, log, fluxerr=np.abs(fluxerr_peak),
+                                      zp_std=None)
     flux_psf_D = np.abs(flux_psf_D)
-    mag_psf_D, magerr_psf_D = apply_zp(flux_psf_D, zp, airmass, exptime, 
-                                       filt, log, fluxerr=np.abs(fluxerr_psf_D),
-                                       zp_std=None)
+    mag_psf_D, magerr_psf_D = apply_zp (flux_psf_D, zp, airmass_trans, exptime, 
+                                        filt, log, fluxerr=np.abs(fluxerr_psf_D),
+                                        zp_std=None)
     flux_opt_D = np.abs(flux_opt_D)
-    mag_opt_D, magerr_opt_D = apply_zp(flux_opt_D, zp, airmass, exptime, 
-                                       filt, log, fluxerr=np.abs(fluxerr_opt_D),
-                                       zp_std=None)
-
+    mag_opt_D, magerr_opt_D = apply_zp (flux_opt_D, zp, airmass_trans, exptime, 
+                                        filt, log, fluxerr=np.abs(fluxerr_opt_D),
+                                        zp_std=None)
+    
     log.info ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
 
     # determine RA and DEC corresponding to x_psf_D and y_psf_D
