@@ -128,7 +128,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     start_time1 = os.times()
 
-    # initialise log
+    # initialise log if not provided as input
     if log is None:
         log = logging.getLogger()  # create logger
         log.setLevel(logging.INFO)  # set level of logger
@@ -250,10 +250,24 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # add header keyword(s):
         header['Z-V'] = (__version__, 'ZOGY version used')
+        if np.isfinite(fwhm) and np.isfinite(fwhm_std):
+            seeing = fwhm * pixscale
+            seeing_std = fwhm_std * pixscale
+        else:
+            fwhm = 'None'
+            fwhm_std = 'None'
+            seeing = 'None'
+            seeing_std = 'None'
+
         header['S-FWHM'] = (fwhm, '[pix] Sextractor FWHM estimate')
         header['S-FWSTD'] = (fwhm_std, '[pix] sigma (STD) FWHM estimate')
-        header['S-SEEING'] = (fwhm*pixscale, '[arcsec] SExtractor seeing estimate')
-        header['S-SEESTD'] = (fwhm_std*pixscale, '[arcsec] sigma (STD) SExtractor seeing')
+        header['S-SEEING'] = (seeing, '[arcsec] SExtractor seeing estimate')
+        header['S-SEESTD'] = (seeing_std, '[arcsec] sigma (STD) SExtractor seeing')
+
+        if not (np.isfinite(elong) and np.isfinite(elong_std)):
+            elong = 'None'
+            elong_std = 'None'            
+            
         header['S-ELONG'] = (elong, 'SExtractor ELONGATION (A/B) estimate')
         header['S-ELOSTD'] = (elong_std, 'sigma (STD) SExtractor ELONGATION (A/B)')
         
@@ -1161,7 +1175,9 @@ def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
 
     # split set_zogy.ML_model parameter into model path and name
     model_path, model_name = os.path.split(model)
-
+    # model_path input into [realbogus_prediction] requires trailing /
+    model_path += '/'
+    
     # above image cubes are 100x100 pixels, need to extract the
     # central 30x30 pixels for most models
     if use_30x30:
@@ -1350,14 +1366,16 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
         fits_file_read = fits_file
 
     else:
-        # if fits_file does not exist, try looking for compressed
-        # versions
+        # if fits_file does not exist, look for compressed versions or
+        # files without the .fz or .gz extension
         if os.path.exists('{}.fz'.format(fits_file)):
             fits_file_read = '{}.fz'.format(fits_file)
-            
+        elif os.path.exists(fits_file.replace('.fz','')):
+            fits_file_read = fits_file.replace('.fz','')
         elif os.path.exists('{}.gz'.format(fits_file)):
             fits_file_read = '{}.gz'.format(fits_file)
-            
+        elif os.path.exists(fits_file.replace('.gz','')):
+            fits_file_read = fits_file.replace('.gz','')
         else:
             raise FileNotFoundError ('file not found: {}'.format(fits_file))
 
@@ -4244,9 +4262,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                           'of subimages available')
                     header['PC-NSUB'] = (n_zps, 'number of subimages used for '
                                          'ZP statistics')
-                    header['PC-MZPD'] = (max_diff, '[mag] maximum zeropoint '
+                    header['PC-MZPD'] = (max_diff, '[mag] max. zeropoint '
                                          'difference between subimages')
-                    header['PC-MZPS'] = (max_std, '[mag] maximum zeropoint sigma '
+                    header['PC-MZPS'] = (max_std, '[mag] max. zeropoint sigma '
                                          '(STD) of subimages')
 
                     
@@ -4816,12 +4834,6 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
             y_array[i] = ycoords_sex[index_match]
 
             nmatch += 1
-            
-            if False:
-                # if single zeropoint is needed, break out of loop
-                # when number of matches equals [set_zogy.phot_ncal_max]
-                if nmatch == get_par(set_zogy.phot_ncal_max,tel):
-                    break
 
 
     mask_nonzero = (zp_array != 0)
@@ -4882,16 +4894,17 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
 
     elif zp_type == 'background':
 
-        # determine zeropoints on the scale of the background boxsize
+        # determine zeropoints on the scale of the input boxsize
         ysize, xsize = data_shape
-        if ysize % boxsize != 0 or xsize % boxsize !=0:
-            log.info('Warning: [set_zogy.bkg_boxsize] does not fit integer '
-                     'times in image')
+        if log is not None:
+            if ysize % boxsize != 0 or xsize % boxsize !=0:
+                log.warning ('input boxsize in function calc_zp does not fit '
+                             'integer times in image')
         nysubs = int(ysize / boxsize)
         nxsubs = int(xsize / boxsize)
         zp_median, zp_std, nmatch = zps_medarray (x_array, y_array, zp_array,
                                                   boxsize, boxsize,
-                                                  (nysubs, nxsubs), nval_min=1)
+                                                  (nysubs, nxsubs), nval_min=3)
 
     if log is not None:
 
@@ -5319,10 +5332,11 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3, log=None):
             fit_spline = interpolate.UnivariateSpline(x_fit, y_fit, w=w_fit, k=k, 
                                                   check_finite=True)
         except Exception as e:
-            log.info('Warning: spline fit in [inter_pix] to region {} with '
-                     'slice {} failed; pixel values not updated'
-                     .format(i, obj_slices[i]))
-            log.info(traceback.format_exc())
+            if log is not None:
+                log.info('Warning: spline fit in [inter_pix] to region {} with '
+                         'slice {} failed; pixel values not updated'
+                         .format(i, obj_slices[i]))
+                log.info(traceback.format_exc())
         else:    
             # replace masked entries with interpolated values
             x_fill = x_row[mask_row]
