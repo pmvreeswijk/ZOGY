@@ -69,7 +69,7 @@ from meerCRAB_code.prediction_phase import realbogus_prediction
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '0.10.0'
+__version__ = '1.0.0'
 
 
 ################################################################################
@@ -235,6 +235,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # function to run SExtractor on fraction of the image, applied
     # below to new and/or ref image
     def sex_fraction (base, sexcat, pixscale, imtype, header, log):
+
         fwhm, fwhm_std, elong, elong_std = run_sextractor(
             '{}.fits'.format(base), sexcat, get_par(set_zogy.sex_cfg,tel),
             get_par(set_zogy.sex_par,tel), pixscale, log, header,
@@ -244,9 +245,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             tel=tel, set_zogy=set_zogy)
 
         log.info('fwhm_{}: {:.3f} +- {:.3f}'.format(imtype, fwhm, fwhm_std))
-        # if SEEING keyword exists, report its value in the log
-        if 'SEEING' in header:
-            log.info('fwhm from header: {}'.format(header['SEEING']))
 
         # add header keyword(s):
         header['Z-V'] = (__version__, 'ZOGY version used')
@@ -278,20 +276,31 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # [fwhm_new] and [fwhm_max]
     fwhm_new = 0
     if new:
+        sexcat_new = '{}_ldac.fits'.format(base_new)
         # run SExtractor for seeing estimate of new_fits and ref_fits;
         # both new and ref need to have their fwhm determined before
         # continuing, as both [fwhm_new] and [fwhm_ref] are required
         # to determine the VIGNET size set in the full SExtractor run
-        sexcat_new = '{}_ldac.fits'.format(base_new)
-        fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
-            base_new, sexcat_new, pixscale_new, 'new', header_new, log)
+        keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
+        if np.all([k in header_new for k in keys_temp]):
+            fwhm_new, fwhm_std_new, elong_new, elong_std_new = [
+                header_new[k] for k in keys_temp]
+        else:
+            fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
+                base_new, sexcat_new, pixscale_new, 'new', header_new, log)
 
     fwhm_ref = 0
     if ref:
         # do the same for the reference image
         sexcat_ref = '{}_ldac.fits'.format(base_ref)
-        fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = sex_fraction(
-            base_ref, sexcat_ref, pixscale_ref, 'ref', header_ref, log)
+
+        keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
+        if np.all([k in header_ref for k in keys_temp]):
+            fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = [
+                header_ref[k] for k in keys_temp]
+        else:
+            fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = sex_fraction(
+                base_ref, sexcat_ref, pixscale_ref, 'ref', header_ref, log)
 
 
     # function to run SExtractor on full image, followed by Astrometry.net
@@ -1083,15 +1092,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     # set version by hand
                     ML_version = '3.0.0'
                     header_newzogy['MC-V'] = (ML_version, 'MeerCRAB version used')
-                    header_newzogy['MC-MODEL'] = (ML_model,
+                    header_newzogy['MC-MODEL'] = (ML_model.split('/')[-1],
                                                   'MeerCRAB training model used')
-                    
 
                 # update 'ML_PROB_REAL' field in the transient catalog
                 with fits.open(cat_trans_out, mode='update') as hdulist:
                     hdulist[-1].data['ML_PROB_REAL'] = ML_prob_real
-                    hdulist[-1].header = header_newzogy
-                    
+                    # update header with above MeerCRAB keywords
+                    for key in header_newzogy:
+                        if 'MC-' in key:
+                            hdulist[-1].header[key] = (
+                                header_newzogy[key], header_newzogy.comments[key])
 
         else:
             result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
@@ -2157,10 +2168,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     ntrans = np.sum(mk)
     log.info('ntrans after regions loop: {}'.format(ntrans))
 
-    for i in range(ntrans):
-        log.info('{} {} {} {} {}'
-                 .format(x_peak[mk][i], y_peak[mk][i], Scorr_peak[mk][i],
-                         flux_peak[mk][i], fluxerr_peak[mk][i]))
+    if False:
+        for i in range(ntrans):
+            log.info('{} {} {} {} {}'
+                     .format(x_peak[mk][i], y_peak[mk][i], Scorr_peak[mk][i],
+                             flux_peak[mk][i], fluxerr_peak[mk][i]))
         
     #print ('[get_trans] time after regions loop: {}'.format(time.time()-t))
 
