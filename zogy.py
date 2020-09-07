@@ -320,7 +320,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     return_fwhm_elong=False, fraction=1.0, fwhm=fwhm,
                     update_vignet=update_vignet, imtype=imtype,
                     fits_mask=fits_mask, npasses=2, tel=tel, set_zogy=set_zogy,
-                    n_threads=nthreads)
+                    nthreads=nthreads)
             except Exception as e:
                 log.info(traceback.format_exc())
                 log.error('exception was raised during [run_sextractor]: {}'
@@ -1555,7 +1555,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
             header += header_toadd
 
         # not a dummy catalog created from the header only
-        dummy_cat = False
+        dumcat = False
 
     else:
         # if no [cat_in] is provided, just define the header using
@@ -1563,7 +1563,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         header = header_toadd
 
         # a dummy catalog created from the header only
-        dummy_cat = True
+        dumcat = True
         
         
         
@@ -1830,8 +1830,11 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
     
-    # header keyword indicating 
-    header['DUMMYCAT'] = (dummy_cat, 'dummy catalog without actual sources?')
+    # header keyword indicating catalog is a dummy without sources or not
+    if cat_type == 'trans':
+        header['TDUMCAT'] = (dumcat, 'dummy transient catalog without sources?')
+    else:
+        header['DUMCAT'] = (dumcat, 'dummy catalog without sources?')
 
     #if get_par(set_zogy.timing,tel) and log is not None:
     #    log_timing_memory (t0=t, label='format_cat', log=log)
@@ -3573,7 +3576,7 @@ def read_header(header, keywords, log):
         # from either the variable defined in settings file, or from
         # the fits header using the keyword name defined in the
         # settings file
-        value = get_keyvalue(key, header, log)
+        value = get_keyvalue(key, header, log=log)
         if key=='filter':
             value = str(value)
         values.append(value)
@@ -3586,7 +3589,7 @@ def read_header(header, keywords, log):
 
 ################################################################################
 
-def get_keyvalue (key, header, log):
+def get_keyvalue (key, header, log=None):
     
     # check if [key] is defined in settings file
     var = 'set_zogy.{}'.format(key)
@@ -3598,19 +3601,22 @@ def get_keyvalue (key, header, log):
         try:
             key_name = eval('set_zogy.key_{}'.format(key))
         except:
-            log.critical('either [{}] or [key_{}] needs to be defined in [settings_file]'.
-                         format(key, key))
+            if log is not None:
+                log.critical('either [{}] or [key_{}] needs to be defined in '
+                             '[settings_file]'.format(key, key))
             raise RuntimeError
         else:
             if key_name in header:
                 value = header[key_name]
             else:
-                log.critical('keyword {} not present in header'.format(key_name))
+                if log is not None:
+                    log.critical('keyword {} not present in header'
+                                 .format(key_name))
                 raise RuntimeError
 
-    if get_par(set_zogy.verbose,tel):
+    if log is not None:
         log.info('keyword: {}, adopted value: {}'.format(key, value))
-            
+
     return value
 
 
@@ -3711,6 +3717,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         mask_edge = (data_mask & value_edge == value_edge)
         data_wcs[mask_edge] = 0
 
+        # update header with new background
+        if 'S-BKG' in header:
+            bkg_temp = header['S-BKG'] - np.median(data_bkg_mini)
+            header['S-BKG'] = (bkg_temp, '[e-] median background full image')
 
         # 2020-06-07: create background-subtracted image for the
         # reference image only for SWarp to work on below
@@ -3789,12 +3799,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             fits_out = fits2remap.replace('.fits', '_remap.fits')
             fits_out = get_remap_name(fits2remap2, fits2remap, fits_out)
             result = run_remap(fits2remap2, fits2remap, fits_out,
-                               [ysize_new, xsize_new], gain=gain, log=log,
+                               (ysize_new, xsize_new), gain=gain, log=log,
                                config=get_par(set_zogy.swarp_cfg,tel),
                                resampling_type=resampling_type,
                                dtype=data2remap.dtype.name,
                                value_edge=value_edge,
-                               timing=get_par(set_zogy.timing,tel))
+                               timing=get_par(set_zogy.timing,tel),
+                               nthreads=nthreads)
             data_remapped = read_hdulist (fits_out)
 
             return data_remapped
@@ -3850,25 +3861,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         data_ref_bkg_std_remap *= gain
         # fix pixels using function [fixpix] also in remapped reference image
         data_ref_remap = fixpix (data_ref_remap, log, satlevel=satlevel,
-                                 data_mask=data_ref_remap_mask, base=base, imtype=imtype,
+                                 data_mask=data_ref_remap_mask, base=base,
+                                 imtype=imtype,
                                  mask_value=get_par(set_zogy.mask_value,tel),
                                  timing=get_par(set_zogy.timing,tel))
         if False:
             ds9_arrays (data_ref_remap=data_ref_remap)
             
-
-    # add header keyword(s) regarding background
-    # pre-fixed with S as background is produced in SExtractor module
-    # why is this not done in SExtractor module?
-    #bkg_mean, bkg_median, bkg_std = sigma_clipped_stats(data_bkg, sigma=10, mask_value=0)
-    if 'S-BKG' not in header:
-        if bkg_sub:
-            val_temp = 0
-        else:
-            val_temp = np.median(data_bkg)
-        header['S-BKG'] = (val_temp, '[e-] median background full image')
-    if 'S-BKGSTD' not in header:
-        header['S-BKGSTD'] = (np.median(data_bkg_std), '[e-] sigma (STD) background full image')
 
 
     # determine psf of input image with get_psf function - needs to be
@@ -6543,7 +6542,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
                                 get_par(set_zogy.sex_par_psffit,tel),
                                 pixscale, log, header, fit_psf=True,
                                 update_vignet=False, fwhm=fwhm,
-                                tel=tel, set_zogy=set_zogy, n_threads=nthreads)
+                                tel=tel, set_zogy=set_zogy, nthreads=nthreads)
 
 
     # If not already done so above, read in PSF output binary table
@@ -8073,11 +8072,11 @@ def ldac2fits (cat_ldac, cat_fits, log):
     
 ################################################################################
     
-def run_remap(image_new, image_ref, image_out, image_out_size,
-              gain, log, config=None, resample='Y', resampling_type='LANCZOS3',
+def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
+              log=None, config=None, resample='Y', resampling_type='LANCZOS3',
               projection_err=0.001, mask=None, header_only='N',
               resample_suffix='_resamp.fits', resample_dir='.', dtype='float32',
-              value_edge=0, timing=True):
+              value_edge=0, timing=True, nthreads=0, oversampling=0):
         
     """Function that remaps [image_ref] onto the coordinate grid of
        [image_new] and saves the resulting image in [image_out] with
@@ -8093,21 +8092,27 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
     run_alt = True
     
     if timing: t = time.time()
-    log.info('executing run_remap ...')
+    if log is not None:
+        log.info('executing run_remap ...')
 
     header_new = read_hdulist (image_new, get_data=False, get_header=True)
     header_ref = read_hdulist (image_ref, get_data=False, get_header=True)
     
     # create .head file with header info from [image_new]
-    header_out = header_new[:]
-    # copy some keywords from header_ref
-    for key in ['exptime', 'satlevel', 'gain']:
-        value = get_keyvalue(key, header_ref, log)
-        try:
-            key_name = eval('set_zogy.key_{}'.format(key))
-        except:
-            key_name = key.capitalize()
-        header_out[key_name] = value
+    header_out = header_new
+
+    # not necessary to copy these reference image keywords to the
+    # remapped image as its header is not used anyway
+    if False:
+        # copy some keywords from header_ref
+        for key in ['exptime', 'satlevel', 'gain']:
+            value = get_keyvalue(key, header_ref, log=log)
+            try:
+                key_name = eval('set_zogy.key_{}'.format(key))
+            except:
+                key_name = key.capitalize()
+            header_out[key_name] = value
+
 
     # delete some others
     for key in ['WCSAXES', 'NAXIS1', 'NAXIS2']:
@@ -8118,11 +8123,12 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         for card in header_out.cards:
             newrefhdr.write('{}\n'.format(card))
 
-    size_str = '{},{}'.format(image_out_size[1], image_out_size[0])
+    size_str = '{},{}'.format(image_out_shape[1], image_out_shape[0])
     cmd = ['swarp', image_ref, '-c', config, '-IMAGEOUT_NAME', image_out, 
            '-IMAGE_SIZE', size_str, '-GAIN_DEFAULT', str(gain),
            '-RESAMPLE', resample,
            '-RESAMPLING_TYPE', resampling_type,
+           '-OVERSAMPLING', str(oversampling),
            '-PROJECTION_ERR', str(projection_err),
            '-NTHREADS', str(nthreads)]
 
@@ -8169,13 +8175,15 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         # size
         ysize_resample, xsize_resample = np.shape(data_resample)
         # create zero output image with correct dtype
-        data_remap = np.zeros(image_out_size, dtype=dtype)
+        data_remap = np.zeros(image_out_shape, dtype=dtype)
         # or with value [value_edge] if it is nonzero
         if value_edge != 0:
             data_remap += value_edge        
         # and place resampled image in output image
-        data_remap[y0:y0+ysize_resample,
-                   x0:x0+xsize_resample] = data_resample
+        index_resample = tuple([slice(y0,y0+ysize_resample),
+                                slice(x0,x0+xsize_resample)])
+
+        data_remap[index_resample] = data_resample
 
         # write to fits [image_out] with correct header; since name of
         # remapped reference bkg/std/mask image will currently be the
@@ -8184,7 +8192,8 @@ def run_remap(image_new, image_ref, image_out, image_out_size,
         #if not os.path.isfile(image_out) or get_par(set_zogy.redo,tel):
         header_out['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(image_out, data_remap, header_out, overwrite=True)
-    
+
+        
     if timing:
         log_timing_memory (t0=t, label='run_remap', log=log)
 
@@ -8376,10 +8385,10 @@ def get_vignet_size (imtype, log):
 
 ################################################################################
 
-def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, header,
-                   fit_psf=False, return_fwhm_elong=True, fraction=1.0, fwhm=5.0, 
-                   update_vignet=True, imtype=None, fits_mask=None, 
-                   npasses=2, tel=None, set_zogy=None, n_threads=0):
+def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
+                   header, fit_psf=False, return_fwhm_elong=True, fraction=1.0,
+                   fwhm=5.0, update_vignet=True, imtype=None, fits_mask=None, 
+                   npasses=2, tel=None, set_zogy=None, nthreads=0):
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [cat_out], using the configuration file
@@ -8545,7 +8554,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
                 '-PIXEL_SCALE', str(pixscale),
                 '-SEEING_FWHM', str(seeing),
                 '-PHOT_APERTURES',apphot_diams_str,
-                '-NTHREADS', str(n_threads),
+                '-NTHREADS', str(nthreads),
                 '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
                 '-STARNNW_NAME', '{}default.nnw'.format(
                     get_par(set_zogy.cfg_dir,tel))]
@@ -8646,6 +8655,11 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             data -= data_bkg
             header['BKG-SUB'] = (True, 'sky background was subtracted?')
 
+            header['S-BKG'] = (np.median(data_bkg_mini), '[e-] median background '
+                               'full image')
+            header['S-BKGSTD'] = (np.median(data_bkg_std_mini), '[e-] sigma '
+                                  '(STD) background full image')
+
             # edge pixels will be negative, best to ensure that they
             # are set to zero
             value_edge = get_par(set_zogy.mask_value['edge'],tel)
@@ -8691,16 +8705,27 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log, head
             data_ldac_read = True
                     
 
+
     # add number of objects to header
     if not data_ldac_read:
-        with fits.open(cat_out) as hdulist:
-            data_ldac = hdulist[2].data
+        data_ldac = read_hdulist (cat_out)
         
     nobjects = data_ldac.size
     header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
     log.info('number of objects detected by SExtractor: {}'.format(nobjects))
 
-            
+
+    # also add header keyword(s) regarding background in case
+    # background was determined by source-extractor
+    if (get_par(set_zogy.bkg_method,tel)==1 and not return_fwhm_elong):
+        data_bkg = read_hdulist (fits_bkg)
+        header['S-BKG'] = (np.median(data_bkg), '[e-] median background '
+                           'full image')
+        data_bkg_std = read_hdulist (fits_bkg_std)
+        header['S-BKGSTD'] = (np.median(data_bkg_std), '[e-] sigma '
+                              '(STD) background full image')
+        
+        
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_sextractor', log=log)
 
