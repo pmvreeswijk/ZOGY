@@ -132,7 +132,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if log is None:
         log = logging.getLogger()  # create logger
         log.setLevel(logging.INFO)  # set level of logger
-        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")  # set format of logger
+        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')  # set format of logger
         logging.Formatter.converter = time.gmtime  # convert time in logger to UCT
         if new_fits is not None:
             filehandler = logging.FileHandler(new_fits.replace('.fits', '.log'), 'w+')  # create log file
@@ -1116,17 +1116,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         dt_sys  = end_time[3] - start_time2[3]
         dt_wall = end_time[4] - start_time2[4]
 
-        log.info("Elapsed user time in {0}:  {1:.3f} sec".format("optsub", dt_usr))
-        log.info("Elapsed CPU time in {0}:  {1:.3f} sec".format("optsub", dt_sys))
-        log.info("Elapsed wall time in {0}:  {1:.3f} sec".format("optsub", dt_wall))
+        log.info('Elapsed user time in optsub: {:.2f}s'.format(dt_usr))
+        log.info('Elapsed CPU time in optsub:  {:.2f}s'.format(dt_sys))
+        log.info('Elapsed wall time in optsub: {:.2f}s'.format(dt_wall))
         
     dt_usr  = end_time[2] - start_time1[2]
     dt_sys  = end_time[3] - start_time1[3]
     dt_wall = end_time[4] - start_time1[4]
 
-    log.info("Elapsed user time in {0}:  {1:.3f} sec".format("total", dt_usr))
-    log.info("Elapsed CPU time in {0}:  {1:.3f} sec".format("total", dt_sys))
-    log.info("Elapsed wall time in {0}:  {1:.3f} sec".format("total", dt_wall))
+    log.info('Elapsed user time in zogy:   {:.2f}s'.format(dt_usr))
+    log.info('Elapsed CPU time in zogy:    {:.2f}s'.format(dt_sys))
+    log.info('Elapsed wall time in zogy:   {:.2f}s'.format(dt_wall))
 
     if new and ref:
         # and display
@@ -2835,7 +2835,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
             xshift *= psf_samp_update
             yshift *= psf_samp_update
             # shift PSF
-            psf_ima_shift = ndimage.shift(psf_ima_config, (yshift, xshift), order=order)
+            psf_ima_shift = ndimage.shift(psf_ima_config, (yshift, xshift),
+                                          order=order)
             # using Eran's function:
             #psf_ima_shift = image_shift_fft(psf_ima_config, xshift, yshift)
             # resample PSF image at image pixel scale
@@ -2851,17 +2852,20 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
             psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update,
                                            order=order, mode='nearest')
             # shift PSF
-            psf_ima_shift_resized = ndimage.shift(psf_ima_resized, (yshift, xshift), order=order)
+            psf_ima_shift_resized = ndimage.shift(psf_ima_resized,
+                                                  (yshift, xshift), order=order)
             # using Eran's function:
             #psf_ima_shift_resized = image_shift_fft(psf_ima_resized, xshift, yshift)
 
 
         # clean and normalize PSF
-        psf_shift = clean_norm_psf(psf_ima_shift_resized, get_par(set_zogy.psf_clean_factor,tel))
+        psf_shift = clean_norm_psf(psf_ima_shift_resized,
+                                   get_par(set_zogy.psf_clean_factor,tel))
         # also return normalized PSF without any shift
         # only required if psf-fitting is performed
         if psffit:
-            psf_noshift = clean_norm_psf(psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel))
+            psf_noshift = clean_norm_psf(psf_ima_resized,
+                                         get_par(set_zogy.psf_clean_factor,tel))
         
         P_shift = psf_shift[index_P]
         # only required if psf-fitting is performed
@@ -3726,7 +3730,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # reference image only for SWarp to work on below
         header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits_bkgsub = input_fits.replace('.fits', '_bkgsub.fits')
-        if imtype == 'ref':
+        if imtype=='ref':
             fits.writeto(fits_bkgsub, data_wcs, header, overwrite=True)
         else:
             # could also make one for the new image, but not needed
@@ -3975,7 +3979,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             
 
         # now that [exptime] is known, add n-sigma limiting flux in e-/s to header
-        header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
+        if imtype=='new':
+            header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
+        else:
+            # for reference image, do not apply S/N >= nsigma cut
+            # below to go as deep as possible and not discard any
+            # faint galaxies
+            header['NSIGMA'] = (0, '[sigma] source detection threshold')
+
         header['LIMFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
                              'limiting flux'.format(nsigma))
 
@@ -4380,14 +4391,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                  ((flux[mask_ok]/fluxerr[mask_ok]) >= nsigma))
             return mask_all
 
-        
-        if mypsffit:
-            mask_nsigma = get_mask(flux_psf, fluxerr_psf, nsigma)
-        else:
-            mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
-            
-        header['NOBJECTS'] = (np.sum(mask_nsigma), 'number of >= {}-sigma objects'
-                              .format(nsigma))
+
+        if imtype=='ref':
+            # for ref image, set the limit at 0 sigma, i.e. still
+            # discard objects with negative flux or flux errors
+            nsigma = 0
+
+        # filter out objects lower than S/N=nsigma
+        # according to optimal flux measurements
+        mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
+        # update header
+        header['NOBJECTS'] = (np.sum(mask_nsigma), 'number of >= {}-sigma '
+                              'objects'.format(nsigma))
 
         # write updated catalog to file
         fits.writeto(sexcat, data_sex[mask_nsigma], overwrite=True)
@@ -5060,8 +5075,8 @@ def field_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
     ra_cat_cut = ra_cat[mask_cut]
     dec_cat_cut = dec_cat[mask_cut]
     
-    center = SkyCoord(ra*u.deg, dec*u.deg, frame="icrs")
-    targets = SkyCoord(ra=ra_cat_cut*u.deg, dec=dec_cat_cut*u.deg, frame="icrs")
+    center = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
+    targets = SkyCoord(ra=ra_cat_cut*u.deg, dec=dec_cat_cut*u.deg, frame='icrs')
     separation = center.separation(targets).deg
 
     if search=='circle':
@@ -6600,7 +6615,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     nxsubs = xsize / subimage_size
     nysubs = ysize / subimage_size
 
-    if imtype == 'ref':
+    if imtype=='ref':
         # in case of the ref image, the PSF was determined from the
         # original image, while it will be applied to the remapped ref
         # image. So the centers of the cutouts in the remapped ref
@@ -6645,7 +6660,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         log.info('final image PSF size:         {}'.format(psf_size))
     # now change psf_samp slightly:
     psf_samp_update = float(psf_size) / float(psf_size_config)
-    if imtype == 'new': psf_size_new = psf_size
+    if imtype=='new': psf_size_new = psf_size
     # [psf_ima] is the corresponding cube of PSF subimages
     psf_ima = np.zeros((nsubs,psf_size,psf_size))
     # [psf_ima_center] is [psf_ima] at the center of images of xsize_fft
@@ -8346,7 +8361,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
 def get_vignet_size (imtype, log):
 
-    if imtype=="ref":
+    if imtype=='ref':
         # set vignet size to the value defined in [set_zogy.size_vignet_ref]
         size_vignet = get_par(set_zogy.size_vignet_ref,tel)
     else:
@@ -8460,7 +8475,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     seeing = fwhm * pixscale
     # prepare aperture diameter string to provide to SExtractor 
     apphot_diams = np.array(get_par(set_zogy.apphot_radii,tel)) * 2 * fwhm
-    apphot_diams_str = ",".join(apphot_diams.astype(str))
+    apphot_diams_str = ','.join(apphot_diams.astype(str))
 
     if update_vignet or fits_mask is not None:
         # create named temporary file
