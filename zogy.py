@@ -13,6 +13,7 @@ import traceback
 import warnings
 warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 from functools import partial
+import math
 
 from multiprocessing.dummy import Pool as ThreadPool
 import numpy as np
@@ -41,6 +42,7 @@ from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
 
 from scipy import ndimage
 from scipy import interpolate
+from scipy.ndimage import affine_transform
 from skimage import restoration, measure
 from skimage.util.shape import view_as_windows, view_as_blocks
 
@@ -176,7 +178,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     # global parameters
     if new:
-        global base_new, fwhm_new, pixscale_new
+        global base_new, fwhm_new, pixscale_new, ysize_new, xsize_new
         # define the base names of input fits files as global so they
         # can be used in any function in this module
         base_new = new_fits.split('.fits')[0]
@@ -369,6 +371,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 log.error('exception was raised during [run_wcs]: {}'.format(e))
             else:
                 WCS_processed = True
+                # update pixscale_new or pixscale_ref
+                if 'A-PSCALE' in header:
+                    if imtype=='new':
+                        pixscale_new = header['A-PSCALE']
+                    if imtype=='ref':
+                        pixscale_ref = header['A-PSCALE']
+
             finally:
                 # add header keyword(s):
                 header['A-P'] = (WCS_processed, 'successfully processed by Astrometry.net?')
@@ -707,9 +716,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             data_ref_bkg_std_full[index_subcut] = data_ref_bkg_std[nsub][index_extract]
 
             nysubs = ysize/get_par(set_zogy.subimage_size,tel)
-            if (get_par(set_zogy.display,tel) and
-                (nsub==0 or nsub==nysubs-1 or nsub==int(nsubs/2) or
-                 nsub==nsubs-nysubs or nsub==nsubs-1)):
+
+
+            # display subset of subimages if asked for, using function [show_sub]
+            if get_par(set_zogy.display,tel) and show_sub(nsub):
 
                 subend = 'sub{}.fits'.format(nsub)
 
@@ -748,16 +758,16 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              data_ref_mask[nsub].astype('uint8'), overwrite=True)
             
                 # and display
-                im_VSn = '{}_VSn.fits'.format(base_newref)
-                im_VSr = '{}_VSr.fits'.format(base_newref)
-                im_VSn_ast = '{}_VSn_ast.fits'.format(base_newref)
-                im_VSr_ast = '{}_VSr_ast.fits'.format(base_newref)
-                im_Sn = '{}_Sn.fits'.format(base_newref)
-                im_Sr = '{}_Sr.fits'.format(base_newref)
-                im_kn = '{}_kn.fits'.format(base_newref)
-                im_kr = '{}_kr.fits'.format(base_newref)
-                im_Pn_hat = '{}_Pn_hat.fits'.format(base_newref)
-                im_Pr_hat = '{}_Pr_hat.fits'.format(base_newref)
+                im_VSn = '{}_VSn_{}'.format(base_newref, subend)
+                im_VSr = '{}_VSr_{}'.format(base_newref, subend)
+                im_VSn_ast = '{}_VSn_ast_{}'.format(base_newref, subend)
+                im_VSr_ast = '{}_VSr_ast_{}'.format(base_newref, subend)
+                im_Sn = '{}_Sn_{}'.format(base_newref, subend)
+                im_Sr = '{}_Sr_{}'.format(base_newref, subend)
+                im_kn = '{}_kn_{}'.format(base_newref, subend)
+                im_kr = '{}_kr_{}'.format(base_newref, subend)
+                im_Pn_hat = '{}_Pn_hat_{}'.format(base_newref, subend)
+                im_Pr_hat = '{}_Pr_hat_{}'.format(base_newref, subend)
                 
                 cmd = ['ds9','-zscale','-frame','lock','image',
                        im_new, im_ref, im_D, im_S, im_Scorr,
@@ -1047,16 +1057,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                               data_Scorr_full]
             thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
                               'THUMBNAIL_SCORR']
-            
-            # orient data arrays to North up, East left using function
-            # [orient_data]; if header keyword is provided, it is
-            # checked if image is already in correct orientation;
-            # N.B.: the function only applies to MeerLICHT and
-            # BlackGEM data!
-            data_new_full = orient_data (data_new_full)
-            data_ref_full = orient_data (data_ref_full, header=header_ref)
-            data_D_full = orient_data (data_D_full)
-            data_Scorr_full = orient_data (data_Scorr_full)
 
             # need to take care of objects closer than 32/2 pixels to
             # the full image edge in creation of thumbnails - results
@@ -1066,7 +1066,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  thumbnail_keys=thumbnail_keys,
                                  thumbnail_size=get_par(set_zogy.size_thumbnails,tel), 
                                  header_toadd=header_newzogy, exptime=exptime_new, 
-                                 apphot_radii=get_par(set_zogy.apphot_radii,tel))
+                                 header_ref=header_ref,
+                                 apphot_radii=get_par(set_zogy.apphot_radii,tel),
+                                 ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel))
 
 
             # apply Zafiirah's MeerCRAB module to the thumbnails in
@@ -1167,6 +1169,26 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 ################################################################################
 
+def show_sub (nsub):
+
+    # if nsub is corner or central subimage of subimage array,
+    # return True, otherwise return False
+
+    # create 2D integer array of subimages
+    subsize = get_par(set_zogy.subimage_size,tel)
+    nx = int(xsize_new / subsize)
+    ny = int(ysize_new / subsize)
+    arr = np.arange(nx*ny).reshape(ny,nx)
+    subs2show = [arr[0,0], arr[0,-1], arr[ny//2,nx//2], arr[-1,0], arr[-1,-1]]
+
+    if nsub in subs2show:
+        return True
+    else:
+        return False
+
+
+################################################################################
+
 def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
     
     """function based on Zafiirah's Jupyter notebook (see
@@ -1227,35 +1249,139 @@ def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
 
 ################################################################################
 
-def orient_data (data, header=None):
+def orient_data (data, header, header_out=None, thumbs_up=False, log=None):
 
-    # for MeerLICHT and BlackGEM, orient arrays to North
-    # up, East left orientation
-    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+    """Function to remap [data] from the CD matrix defined in [header] to
+    the CD matrix taken from [header_out].  If the latter is not
+    provided the output orientation will be North up, East left.
 
-        # for reference image, check if already oriented correctly
-        if header is not None:
-            if 'CD1_2' in header and 'CD2_1' in header:
-                # CHECK if this condition is correct
-                if header['CD1_2'] == 0 and header['CD2_1']==0:
-                    # no need to change input data
-                    return data
-                    
-        # rotate data by exactly 90 degrees (for ML/BG this is to
-        # within a few degrees of the actual rotation
-        data = np.rot90(data)
+    If [thumbs_up] is switched on and the data is from MeerLICHT or
+    BlackGEM, the data will be oriented within a few degrees from
+    North up, East left while preserving the pixel values.
+
+    """
+    
+    # rotation matrix:
+    # R = [[dx * cos(theta),  dy * -sin(theta)],
+    #      [dx * sin(theta),  dy * cos(theta)]]
+    # with theta=0: North aligned with positive y-axis
+    # and East with the positive x-axis (RA increases to the East)
+    #
+    # N.B.: np.dot(R, [[x], [y]]) = np.dot([x,y], R.T)
+    #
+    # matrices below are defined using the (WCS) header keywords
+    # CD?_?:
+    #
+    # [ CD1_1  CD2_1 ]
+    # [ CD1_2  CD2_2 ]
+    #
+    # orient [data] with its orientation defined in [header] to the
+    # orientation defined in [header_out]. If the latter is not
+    # provided, the output orientation will be North up, East left.
+
+    # check if input data is square; if it is not, the transformation
+    # will not be done properly.
+    assert data.shape[0] == data.shape[1]
+
+    # define data CD matrix, assumed to be in [header]
+    CD_data = read_CD_matrix (header, log=log)    
         
-        # also flip East-West for ML
+    # determine output CD matrix, either from [header_out] or North
+    # up, East left
+    if header_out is not None:
+        CD_out = read_CD_matrix (header_out, log=log)    
+    else:
+        # define de CD matrix with North up and East left, using the
+        # pixel scale from the input [header]
+        pixscale = read_header(header, ['pixscale'])
+        cdelt = pixscale/3600
+        CD_out = np.array([[-cdelt, 0], [0, cdelt]])
+
+        if log is not None:
+            log.info('remapping data to North up, East left orientation')
+        
+
+    # check if values of CD_data and CD_out are similar
+    CD_close = [math.isclose(CD_data[i,j], CD_out[i,j], rel_tol=1e-3)
+                for i in range(2) for j in range(2)]
+
+    if np.all(CD_close):
+
+        # if CD matrix values are all very similar, do not bother to
+        # do the remapping
+        data2return = data
+
+    elif False and thumbs_up and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        
+        # rotate data by exactly 90 degrees and for ML1 also flip in
+        # the East-West direction; for ML/BG this will result in an
+        # image within a few degrees of the North up, East left
+        # orientation while preserving the original pixel values
+
+        data2return = np.rot90(data)
+
         if tel=='ML1':
-            data = np.flip(data, 1)
-            
-        return data
+            data2return = np.fliplr(data2return)
+    
+    else:
+        
+        # transformation matrix, which is the dot product of the
+        # output CD matrix and the inverse of the data CD matrix
+        CD_data_inv = np.linalg.inv(CD_data)
+        CD_trans = np.dot(CD_out, CD_data_inv)
+
+        # transpose and flip because [affine_transform] performs
+        # np.dot(matrix, [[y],[x]]) rather than np.dot([x,y], matrix)
+        matrix = np.flip(CD_trans.T)
+
+        # offset, calculated from
+        #
+        # [xi - dxi, yo - dyo] = np.dot( [xo - dxo, yo - dyo], CD_trans )
+        #
+        # where xi, yi are the input coordinates corresponding to the
+        # output coordinates xo, yo in data and dxi/o, dyi/o are the
+        # corresponding offsets from the point of
+        # rotation/transformation, resulting in
+        #
+        # [xi, yi] = np.dot( [xo, yo], CD_trans ) + offset
+        # with
+        # offset = -np.dot( [dxo, dyo], CD_trans ) + [dxi, dyi]
+        # setting [dx0, dy0] and [dxi, dyi] to the center
+        center = (np.array(data.shape)-1)/2
+        offset = -np.dot(center, np.flip(CD_trans)) + center
+
+        # infer transformed data
+        data2return = affine_transform(data, matrix, offset=offset,
+                                       mode='nearest')
+
+
+    return data2return
+
+
+################################################################################
+
+def read_CD_matrix (header, log=None):
+
+    if ('CD1_1' in header and 'CD1_2' in header and
+        'CD2_1' in header and 'CD2_2' in header):
+
+        data2return = np.array([[header['CD1_1'], header['CD2_1']],
+                                [header['CD1_2'], header['CD2_2']]])
+    else:
+        if log is not None:
+            log.error ('one of CD?_? keywords not in header')
+            raise KeyError('one of CD?_? keywords not in header')
+
+        data2return = None
+
+
+    return data2return
 
 
 ################################################################################
 
 def get_par (par, tel):
-
+    
     """Function to check if [par] is a dictionary with one of the keys
        being [tel] or the alphabetic part of [tel] (e.g. 'BG'), and if
        so, return the corresponding value. Otherwise just return the
@@ -1287,22 +1413,25 @@ def add_fakestars (psf, data, bkg_std, fwhm, log):
     bkg_std; the input [fwhm] is only used to double-check the S/N
     calculation performed by function [flux_optimal_s2n] with two
     different functions [get_s2n_ZO] and [get_optflux_Naylor]. The
-    size of the image regions that are updated is half that of the
-    global parameter [psf_size_new].
-
+    size of the image regions that are updated is half that of
+    [psf_size] which is inferred from the shape of the input [psf]
+    with shape (psf_size, psf_size).
+    
     The function returns lists that contain: 1) the x pixel
     coordinates, 2) the y pixel coordinates and 3) the fluxes of the
     fake stars that were added.
 
     """
 
-    ysize_fft = get_par(set_zogy.subimage_size,tel) + 2*get_par(set_zogy.subimage_border,tel)
-    xsize_fft = get_par(set_zogy.subimage_size,tel) + 2*get_par(set_zogy.subimage_border,tel)
-    psf_hsize = int(psf_size_new/2)
+    ysize_fft = (get_par(set_zogy.subimage_size,tel) +
+                 2*get_par(set_zogy.subimage_border,tel))
+    xsize_fft = ysize_fft
+
+    psf_hsize = int(psf.shape[0]/2)
     
     # place stars in random positions across the image, keeping
-    # set_zogy.subimage_border + psf_size_new/2 pixels off each edge
-    edge = get_par(set_zogy.subimage_border,tel) + int(psf_size_new/2) + 1
+    # set_zogy.subimage_border + psf_size/2 pixels off each edge
+    edge = get_par(set_zogy.subimage_border,tel) + psf_hsize + 1
     xpos = (np.random.rand(get_par(set_zogy.nfakestars,tel))*(xsize_fft-2*edge) + edge).astype(int)
     ypos = (np.random.rand(get_par(set_zogy.nfakestars,tel))*(ysize_fft-2*edge) + edge).astype(int)
     # place first star at the center of the image
@@ -1532,7 +1661,8 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 
 def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 thumbnail_keys=None, thumbnail_size=64, header_toadd=None, 
-                exptime=0., apphot_radii=None):
+                header_ref=None, exptime=0, apphot_radii=None,
+                ML_calc_prob=False):
     
     """Function that formats binary fits table [cat_in] according to
         MeerLICHT/BlackGEM specifications for [cat_type] 'new', 'ref'
@@ -1695,11 +1825,10 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'RA_MOFFAT', 'DEC_MOFFAT', 
                           'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT']
 
-        if (get_par(set_zogy.ML_calc_prob,tel) and
-            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+
+        if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
             
             keys_to_record.append('ML_PROB_REAL')
-            
             if cat_in is not None:
                 # field ML_PROB_REAL is not yet included in data, so
                 # append it initialised to -1; the actual
@@ -1778,9 +1907,6 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
     # add [thumbnails]
     if thumbnail_keys is not None:
         
-        # number of thumbnail images to add
-        nthumbnails = len(thumbnail_keys)
-        
         if thumbnail_data is not None:
             # coordinates to loop
             xcoords = data['X_PEAK']
@@ -1788,10 +1914,9 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
             ncoords = len(xcoords)
 
         # loop thumbnails
-        for i_tn in range(nthumbnails):
-
+        for i_tn, key in enumerate(thumbnail_keys):
+            
             dim_str = '({},{})'.format(thumbnail_size, thumbnail_size)
-            key = thumbnail_keys[i_tn]
                         
             if thumbnail_data is not None:
 
@@ -1808,7 +1933,27 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                     
                     # record in data_col
                     try:
+
                         data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]
+
+                        # if [orient_thumbnails] in Settings file is
+                        # switched on, orient the thumbnails in
+                        # North-up, East left orientation
+                        if get_par(set_zogy.orient_thumbnails,tel):
+
+                            # for the reference thumbnail, make sure
+                            # to use the reference image header, as it
+                            # might have a different orientation from
+                            # the others, i.e. NEW, D and SCORR, which
+                            # all have the same orientation
+                            if 'REF' in key:
+                                header_tmp = header_ref
+                            else:
+                                header_tmp = header_toadd
+
+                            data_col[i_pos] = orient_data (data_col[i_pos],
+                                                           header_tmp,
+                                                           thumbs_up=True)
 
                     except ValueError as ve:
                         if log is not None:
@@ -2731,6 +2876,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
     else:
         if psf_size % 2 != 0:
             psf_size += 1
+
     # now change psf_samp slightly:
     psf_samp_update = float(psf_size) / float(psf_size_config)
 
@@ -3027,9 +3173,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
 def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
                     psf_hsize, polzero1, polscal1, polzero2, polscal2, poldeg):
 
-    # extract data around position to use
-    # indices of pixel in which [x],[y] is located
-    # in case of odd-sized psf:
+    # extract data around position to use indices of pixel in which
+    # [x],[y] is located in case of odd-sized psf:
     if psf_oddsized:
         xpos = int(xcoord-0.5)
         ypos = int(ycoord-0.5)
@@ -3078,20 +3223,23 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
                 y1 += 1
     index = tuple([slice(y1,y2),slice(x1,x2)])
 
-    # get P_shift and P_noshift
+    # construct PSF at x,y
     x = (int(xcoord) - polzero1) / polscal1
     y = (int(ycoord) - polzero2) / polscal2
-
-    # construct PSF at x,y
     psf_ima_config = calc_psf_config (data, poldeg, x, y)
 
-    # extract subsection from psf_shift and psf_noshift
+    # extract subsection
     y1_P = y1 - (ypos - psf_hsize)
     x1_P = x1 - (xpos - psf_hsize)
     y2_P = y2 - (ypos - psf_hsize)
     x2_P = x2 - (xpos - psf_hsize)
     index_P = tuple([slice(y1_P,y2_P),slice(x1_P,x2_P)])
 
+    # index are the indices of the PSF footprint of the full image,
+    # while index_P are the indices of the PSF image with size
+    # psf_hsize x psf_hsize, which is needed in case the PSF footprint
+    # is partially off the full image
+    
     return psf_ima_config, index, index_P
             
 
@@ -3570,7 +3718,7 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0
         
 ################################################################################
 
-def read_header(header, keywords, log):
+def read_header(header, keywords, log=None):
 
     # list with values to return
     values = []
@@ -3776,16 +3924,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # versions), but these fail when there is rotation between the
         # images, resulting in rotated masks.
 
+
         # local function to help with remapping
         def help_swarp (fits2remap, data2remap, header2remap=header,
                         fits2remap2='{}.fits'.format(base_new), value_edge=0,
                         resampling_type='NEAREST', update_header=False):
 
-            header_new = read_hdulist (fits2remap2, get_data=False,
-                                       get_header=True)
-            keywords = ['naxis2', 'naxis1']
-            ysize_new, xsize_new = read_header(header_new, keywords, log)
-                
             # update header of fits image with that of the original
             # wcs-corrected reference image (needed if header does not
             # correspond to that of the reference image, e.g. for the mask)
@@ -3875,8 +4019,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
 
     # determine psf of input image with get_psf function - needs to be
-    # done before optimal fluxes are determined
-    psf, psf_orig = get_psf(input_fits, header, nsubs, imtype, fwhm, pixscale, log)
+    # done before the optimal fluxes are determined, as it will run
+    # PSFEx and create the _psf.fits file that is used in the optimal
+    # flux determination
+    psf, psf_orig = get_psf (input_fits, header, nsubs, imtype, fwhm, pixscale,
+                             remap, log)
 
 
     # -------------------------------
@@ -6456,12 +6603,12 @@ def plot_scatter_hist (x, y, limits, color='tab:blue', marker='o', xlabel=None,
 
 ################################################################################
 
-def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
+def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
 
     """Function that takes in [image] and determines the actual Point
     Spread Function as a function of position from the full frame, and
     returns a cube containing the psf for each subimage in the full
-    frame.
+    frame. 
 
     PSFEx runs on a SExtractor catalog and not on an image, and
     therefore the input [image] parameter is only used to print out
@@ -6472,8 +6619,6 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing get_psf ...')
-
-    global psf_size_new
 
     if imtype=='new':
         base = base_new
@@ -6486,7 +6631,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     nx = int(xsize / subsize)
     ny = int(ysize / subsize)
 
-    
+
     # run psfex on SExtractor output catalog
     #
     # If the PSFEx output file is already present with the same
@@ -6627,9 +6772,9 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         # first infer ra, dec corresponding to x, y pixel positions
         # (centers[:,1] and centers[:,0], respectively, using the WCS
         # solution in [new].wcs file from Astrometry.net
-        header_new_temp = read_hdulist ('{}.fits'.format(base_new),
-                                        get_data=False, get_header=True)
-        wcs = WCS(header_new_temp)
+        header_new = read_hdulist ('{}.fits'.format(base_new),
+                                   get_data=False, get_header=True)
+        wcs = WCS(header_new)
         ra_temp, dec_temp = wcs.all_pix2world(centers[:,1], centers[:,0], 1)
         # then convert ra, dec back to x, y in the original ref image;
         # since this block concerns the reference image, the input [header]
@@ -6637,6 +6782,7 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         wcs = WCS(header)
         centers[:,1], centers[:,0] = wcs.all_world2pix(ra_temp, dec_temp, 1)
         
+
     # initialize output PSF array
 
     # [psf_size] is the PSF size in image pixels:
@@ -6649,7 +6795,8 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     # If [set_zogy.psf_sampling] is set to zero, [psf_samp] is determined as follows:
     #   [psf_samp] = [set_zogy.psf_samp_fwhmfrac] * FWHM in pixels
     # where [set_zogy.psf_samp_fwhmfrac] is a global parameter which should be set
-    # to about 0.25 so for an oversampled image with FWHM~8: [psf_samp]~2,
+    # to about 0.25 so
+    # for an oversampled image with FWHM~8: [psf_samp]~2,
     # while an undersampled image with FWHM~2: [psf_samp]~1/4
     psf_size = np.int(np.ceil(psf_size_config * psf_samp))
     # if this is even, make it odd
@@ -6658,13 +6805,20 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     if get_par(set_zogy.verbose,tel):
         log.info('FWHM:                         {}'.format(fwhm))
         log.info('final image PSF size:         {}'.format(psf_size))
+
     # now change psf_samp slightly:
     psf_samp_update = float(psf_size) / float(psf_size_config)
-    if imtype=='new': psf_size_new = psf_size
+    if imtype=='ref' and remap:
+        # if the pixel scales in the new and ref image differ, then
+        # [psf_samp_update] needs to be corrected for this ratio such
+        # that [psf_ima_config] in loop below is sampled at the new
+        # image pixel scale
+        psf_samp_update *= pixscale_ref / pixscale_new
+
     # [psf_ima] is the corresponding cube of PSF subimages
     psf_ima = np.zeros((nsubs,psf_size,psf_size))
-    # [psf_ima_center] is [psf_ima] at the center of images of xsize_fft
-    # x ysize_fft
+    # [psf_ima_center] is [psf_ima] or [psf_ima_remap] at the center
+    # of images of xsize_fft x ysize_fft
     psf_ima_center = np.zeros((nsubs,ysize_fft,xsize_fft))
     # [psf_ima_shift] is [psf_ima_center] shifted - this is
     # the input PSF image needed in the [run_ZOGY] function
@@ -6692,11 +6846,10 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
     # loop through nsubs and construct psf at the center of each
     # subimage, using the output from PSFex that was run on the full
     # image
-    #for nsub in range(nsubs):
-    #
-    # previously this was a loop; now turned to a function to
-    # try pool.map multithreading below
-    def loop_psf_sub(nsub):
+    for nsub in range(nsubs):
+        # alternatively, turn loop into a function to
+        # try pool.map multithreading below
+        #def loop_psf_sub(nsub):
     
         x = (centers[nsub,1] - polzero1) / polscal1
         y = (centers[nsub,0] - polzero2) / polscal2
@@ -6704,12 +6857,28 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         # construct PSF at x,y
         psf_ima_config = calc_psf_config (data, poldeg, x, y)
 
-        # resample PSF image at image pixel scale
-        psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update, mode='nearest')
-        # clean and normalize PSF
-        psf_ima_resized_norm = clean_norm_psf(psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel))
+        # if remapping is done and the new and ref image have
+        # different orientations, the PSF of the ref image needs
+        # to be transformed to that of the new image
+        if imtype=='ref' and remap:
+            # remap [psf_ima_config] from the ref frame to the new
+            # frame using the function [orient_data]
+            psf_ima_config = orient_data (psf_ima_config, header,
+                                          header_out=header_new,
+                                          log=log)
 
+
+        # resample PSF image at image pixel scale
+        psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update,
+                                       mode='nearest')
+        # clean and normalize PSF
+        psf_ima_resized_norm = clean_norm_psf(
+            psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel))
+
+        # record psf image in [psf_ima] cube to be used for the Moffat
+        # and Gaussian fits to the PSFs at the end of this function
         psf_ima[nsub] = psf_ima_resized_norm
+
         if get_par(set_zogy.verbose,tel) and nsub==0:
             log.info('psf_samp: {}, psf_samp_update: {}'
                      .format(psf_samp, psf_samp_update))
@@ -6740,36 +6909,40 @@ def get_psf(image, header, nsubs, imtype, fwhm, pixscale, log):
         # perform fft shift
         psf_ima_shift[nsub] = fft.fftshift(psf_ima_center[nsub])
         
-        if get_par(set_zogy.display,tel) and (nsub==0 or nsub==nysubs-1 or nsub==int(nsubs/2) or
-                        nsub==nsubs-nysubs or nsub==nsubs-1):
+        if get_par(set_zogy.display,tel) and show_sub(nsub):
+
             if imtype=='new':
                 base = base_new
             else:
                 base = base_ref
+
             fits.writeto('{}_psf_ima_config_sub{}.fits'.format(base, nsub),
                          psf_ima_config, overwrite=True)
             fits.writeto('{}_psf_ima_resized_norm_sub{}.fits'.format(base, nsub),
                          psf_ima_resized_norm.astype('float32'), overwrite=True)
             fits.writeto('{}_psf_ima_center_sub{}.fits'.format(base, nsub),
-                         psf_ima_center[nsub].astype('float32'), overwrite=True)            
+                         psf_ima_center[nsub].astype('float32'), overwrite=True)
             fits.writeto('{}_psf_ima_shift_sub{}.fits'.format(base, nsub),
-                         psf_ima_shift[nsub].astype('float32'), overwrite=True)            
+                         psf_ima_shift[nsub].astype('float32'), overwrite=True)
 
 
     # call above function [get_psf_sub] with pool.map
-    if get_par(set_zogy.timing,tel): t1 = time.time()
-    pool = ThreadPool(nthreads)
-    pool.map(loop_psf_sub, range(nsubs))
-    pool.close()
-    pool.join()
+    #if get_par(set_zogy.timing,tel): t1 = time.time()
+    #
+    #pool = ThreadPool(nthreads)
+    #pool.map(loop_psf_sub, range(nsubs))
+    #pool.close()
+    #pool.join()
+    #
+    #if get_par(set_zogy.timing,tel):
+    #    log_timing_memory (t0=t1, label='loop_psf_sub pool', log=log)
 
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t1, label='loop_psf_sub pool', log=log)
-    
-        
+
     # now that PSFEx is done, fit elliptical Moffat and Gauss
     # functions to centers of subimages across the frame using the
-    # [fit_moffat] function
+    # [fit_moffat] function. N.B.: in case the ref image has a
+    # different orientation than the new image, the Moffat/Gauss fits
+    # are done in the orientation of the new frame!
     if get_par(set_zogy.make_plots,tel):
         try:
             base_psf = '{}_psf'.format(base)
@@ -7679,19 +7852,21 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     header_wcs['A-INDEX'] = (anet_index, 'name of index file WCS solution')
 
     # and pixelscale
-    cd1_1 = header_wcs['CD1_1']  # CD1_1 = CDELT1 * cos (CROTA2)
-    cd1_2 = header_wcs['CD1_2']  # CD1_2 = -CDELT2 * sin (CROTA2)
-    cd2_1 = header_wcs['CD2_1']  # CD2_1 = CDELT1 * sin (CROTA2)
-    cd2_2 = header_wcs['CD2_2']  # CD2_2 = CDELT2 * cos (CROTA2)
+    cd1_1 = header_wcs['CD1_1']  # CD1_1 = CDELT1 *  cos (CROTA2)
+    cd1_2 = header_wcs['CD1_2']  # CD1_2 = CDELT2 *  sin (CROTA2)
+    cd2_1 = header_wcs['CD2_1']  # CD2_1 = CDELT1 * -sin (CROTA2)
+    cd2_2 = header_wcs['CD2_2']  # CD2_2 = CDELT2 *  cos (CROTA2)
 
-    anet_pixscale_x = np.sqrt(cd1_1**2 + cd1_2**2) * 3600.
-    anet_pixscale_y = np.sqrt(cd2_2**2 + cd2_1**2) * 3600.
+
+    anet_pixscale_x = np.sqrt(cd1_1**2 + cd2_1**2) * 3600.
+    anet_pixscale_y = np.sqrt(cd1_2**2 + cd2_2**2) * 3600.
     anet_pixscale = np.average([anet_pixscale_x, anet_pixscale_y])
+
 
     # and rotation with the angle between the North and the second
     # axis (y-axis) of the image, counted positive to the East
-    anet_rot_x = np.arctan2( cd1_2, cd1_1) * (180./np.pi)
-    anet_rot_y = np.arctan2(-cd2_1, cd2_2) * (180./np.pi)
+    anet_rot_x = np.arctan2(-cd2_1, cd1_1) * (180./np.pi)
+    anet_rot_y = np.arctan2( cd1_2, cd2_2) * (180./np.pi)
     anet_rot = np.average([anet_rot_x, anet_rot_y])
 
     # add header keywords
@@ -9056,12 +9231,12 @@ def zogy_subloop (nsub, data_ref, data_new, psf_ref, psf_new,
             log.info('sn: {}, sr: {}'.format(sn, sr))
 
             
-    return run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, log=log)
+    return run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, nsub=nsub, log=log)
 
 
 ################################################################################
     
-def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, log=None):
+def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, nsub=None, log=None):
 
     if get_par(set_zogy.timing,tel) and log is not None:
         t = time.time()
@@ -9161,27 +9336,28 @@ def run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, log=None):
     VSr_ast = dx2 * dSrdx**2 + dy2 * dSrdy**2
 
 
-    if get_par(set_zogy.display,tel):
+    if get_par(set_zogy.display,tel) and show_sub(nsub):
         base = base_newref
-        fits.writeto('{}_Pn_hat.fits'.format(base),
+        subend = 'sub{}.fits'.format(nsub)
+        fits.writeto('{}_Pn_hat_{}'.format(base, subend),
                      np.real(Pn_hat).astype('float32'), overwrite=True)
-        fits.writeto('{}_Pr_hat.fits'.format(base),
+        fits.writeto('{}_Pr_hat_{}'.format(base, subend),
                      np.real(Pr_hat).astype('float32'), overwrite=True)
-        fits.writeto('{}_kr.fits'.format(base),
+        fits.writeto('{}_kr_{}'.format(base, subend),
                      np.real(kr).astype('float32'), overwrite=True)
-        fits.writeto('{}_kn.fits'.format(base),
+        fits.writeto('{}_kn_{}'.format(base, subend),
                      np.real(kn).astype('float32'), overwrite=True)
-        fits.writeto('{}_Sr.fits'.format(base),
+        fits.writeto('{}_Sr_{}'.format(base, subend),
                      Sr.astype('float32'), overwrite=True)
-        fits.writeto('{}_Sn.fits'.format(base),
+        fits.writeto('{}_Sn_{}'.format(base, subend),
                      Sn.astype('float32'), overwrite=True)
-        fits.writeto('{}_VSr.fits'.format(base),
+        fits.writeto('{}_VSr_{}'.format(base, subend),
                      VSr.astype('float32'), overwrite=True)
-        fits.writeto('{}_VSn.fits'.format(base),
+        fits.writeto('{}_VSn_{}'.format(base, subend),
                      VSn.astype('float32'), overwrite=True)
-        fits.writeto('{}_VSr_ast.fits'.format(base),
+        fits.writeto('{}_VSr_ast_{}'.format(base, subend),
                      VSr_ast.astype('float32'), overwrite=True)
-        fits.writeto('{}_VSn_ast.fits'.format(base),
+        fits.writeto('{}_VSn_ast_{}'.format(base, subend),
                      VSn_ast.astype('float32'), overwrite=True)
 
         

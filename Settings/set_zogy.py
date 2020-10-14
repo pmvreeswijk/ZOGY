@@ -26,6 +26,7 @@ transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
 save_thumbnails = True   # save thumbnails of reduced image, remapped reference
                          # image and ZOGY products D and Scorr in transient catalog
 size_thumbnails = 100    # size of square thumbnail arrays in (new) image pixels
+orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
 # add optional fake stars for testing purposes
