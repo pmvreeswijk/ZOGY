@@ -1037,7 +1037,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'FORMAT-P' not in header_cat:
             result = format_cat (cat_new, cat_new_out, cat_type='new', log=log,
                                  header_toadd=header_new, exptime=exptime_new,
-                                 apphot_radii=get_par(set_zogy.apphot_radii,tel))
+                                 apphot_radii=get_par(set_zogy.apphot_radii,tel),
+                                 tel=tel)
     # ref catalogue
     if ref:
         exptime_ref = read_header(header_ref, ['exptime'], log)
@@ -1047,7 +1048,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'FORMAT-P' not in header_cat:
             result = format_cat (cat_ref, cat_ref_out, cat_type='ref', log=log,
                                  header_toadd=header_ref, exptime=exptime_ref,
-                                 apphot_radii=get_par(set_zogy.apphot_radii,tel))
+                                 apphot_radii=get_par(set_zogy.apphot_radii,tel),
+                                 tel=tel)
     # trans catalogue
     if new and ref:
         cat_trans = '{}.transcat'.format(base_newref)
@@ -1068,7 +1070,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  header_toadd=header_newzogy, exptime=exptime_new, 
                                  header_ref=header_ref,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                                 ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel))
+                                 ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
+                                 tel=tel)
 
 
             # apply Zafiirah's MeerCRAB module to the thumbnails in
@@ -1107,10 +1110,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                 header_newzogy[key], header_newzogy.comments[key])
 
         else:
+            # if thumbnails are not saved, then MeerCRAB cannot be applied either,
+            # so format_cat without thumbnails and without ML_calc_prob
             result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
                                  header_toadd=header_newzogy, exptime=exptime_new, 
-                                 apphot_radii=get_par(set_zogy.apphot_radii,tel))
-            
+                                 apphot_radii=get_par(set_zogy.apphot_radii,tel),
+                                 tel=tel)
+
             
     end_time = os.times()
     if new and ref:
@@ -1662,8 +1668,8 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 thumbnail_keys=None, thumbnail_size=64, header_toadd=None, 
                 header_ref=None, exptime=0, apphot_radii=None,
-                ML_calc_prob=False):
-    
+                ML_calc_prob=False, tel=None):
+
     """Function that formats binary fits table [cat_in] according to
         MeerLICHT/BlackGEM specifications for [cat_type] 'new', 'ref'
         or 'trans', and saves the resulting binary fits table
@@ -1688,6 +1694,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         dumcat = False
 
     else:
+
         # if no [cat_in] is provided, just define the header using
         # [header_toadd]
         header = header_toadd
@@ -1790,6 +1797,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         # the data columns
         if cat_in is not None:
             keys_to_record = data.dtype.names
+
     elif cat_type == 'ref':
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
@@ -1804,6 +1812,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'FLUX_ISO', 'FLUXERR_ISO', 'ISOAREA_IMAGE', 'MU_MAX', 'FLUX_RADIUS',
                           'FLUX_PETRO', 'FLUXERR_PETRO', 'PETRO_RADIUS',
                           'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+
     elif cat_type == 'new':
         keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
                           'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
@@ -1811,7 +1820,8 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                           'ELONGATION', 'RA', 'DEC',
                           'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
                           'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
-                          'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+                          'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
+
     elif cat_type == 'trans':
         keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK', 'RA_PEAK', 'DEC_PEAK',
                           'SCORR_PEAK', 
@@ -1829,6 +1839,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
             
             keys_to_record.append('ML_PROB_REAL')
+
             if cat_in is not None:
                 # field ML_PROB_REAL is not yet included in data, so
                 # append it initialised to -1; the actual
@@ -2146,10 +2157,10 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     sn, sr, fratio = 1, 1, 1
     if 'Z-FNR' in header_zogy:
         fratio = header_zogy['Z-FNR']
-    if 'S-BKGSTD' in header_new:
-        sn = header_new['S-BKGSTD']
-    if 'S-BKGSTD' in header_ref:
-        sr = header_ref['S-BKGSTD']
+    #if 'S-BKGSTD' in header_new:
+    #    sn = header_new['S-BKGSTD']
+    #if 'S-BKGSTD' in header_ref:
+    #    sr = header_ref['S-BKGSTD']
         
     # use sum of variances of new and ref images (where ref image
     # needs to be scaled with flux ratio fn/fr) as variance image to
@@ -4904,8 +4915,8 @@ def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal
             index_match = index_match[0]
 
             # calculate its zeropoint; need to calculate airmass for
-            # each star, as around A=2, difference in airmass across
-            # the FOV is 0.1, i.e. a 5% change
+            # each star because around A=2 difference in airmass
+            # across the FOV is 0.1, i.e. a 5% change
             zp_array[index_match] = (mag_cal[i] - mag_sex_inst[index_match] +
                                      airmass_sex[index_match] *
                                      get_par(set_zogy.ext_coeff,tel)[filt])
