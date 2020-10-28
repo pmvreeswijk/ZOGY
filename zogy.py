@@ -225,13 +225,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         t = time.time()
         header_new = read_hdulist (new_fits, get_data=False, get_header=True)
         ysize_new, xsize_new, gain_new, satlevel_new, ra_new, dec_new, pixscale_new = (
-            read_header(header_new, keywords, log))
+            read_header(header_new, keywords, log=log))
 
     if ref:
         # read in header of ref_fits
         header_ref = read_hdulist (ref_fits, get_data=False, get_header=True)
         ysize_ref, xsize_ref, gain_ref, satlevel_ref, ra_ref, dec_ref, pixscale_ref = (
-            read_header(header_ref, keywords, log))
+            read_header(header_ref, keywords, log=log))
 
 
     # function to run SExtractor on fraction of the image, applied
@@ -815,7 +815,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # convert Fpsferr image to limiting magnitude image
         index_zero = np.nonzero(data_Fpsferr_full==0)
         data_Fpsferr_full[index_zero] = median_Fpsferr
-        exptime, filt = read_header(header_new, ['exptime', 'filter'], log)
+        exptime, filt = read_header(header_new, ['exptime', 'filter'], log=log)
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             zp = header_new['PC-ZP']
             airm = header_new['AIRMASSC']
@@ -868,7 +868,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # fluxes using zeropoint and median airmass
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             keywords = ['exptime', 'filter']
-            exptime, filt = read_header(header_new, keywords, log)
+            exptime, filt = read_header(header_new, keywords, log=log)
             zeropoint = header_new['PC-ZP']
             airmass = header_new['AIRMASSC']
             [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log)
@@ -1030,7 +1030,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     # new catalogue
     if new:
-        exptime_new = read_header(header_new, ['exptime'], log)
+        exptime_new = read_header(header_new, ['exptime'], log=log)
         cat_new = '{}_cat.fits'.format(base_new)
         cat_new_out = cat_new
         header_cat = read_hdulist(cat_new, get_data=False, get_header=True)
@@ -1041,7 +1041,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  tel=tel)
     # ref catalogue
     if ref:
-        exptime_ref = read_header(header_ref, ['exptime'], log)
+        exptime_ref = read_header(header_ref, ['exptime'], log=log)
         cat_ref = '{}_cat.fits'.format(base_ref)
         cat_ref_out = cat_ref
         header_cat = read_hdulist(cat_ref, get_data=False, get_header=True)
@@ -1055,23 +1055,27 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
         if get_par(set_zogy.save_thumbnails,tel):
-            thumbnail_data = [data_new_full, data_ref_full, data_D_full, 
-                              data_Scorr_full]
-            thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
-                              'THUMBNAIL_SCORR']
+            #thumbnail_data = [data_new_full, data_ref_full, data_D_full, 
+            #                  data_Scorr_full]
+            #thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
+            #                  'THUMBNAIL_SCORR']
 
             # need to take care of objects closer than 32/2 pixels to
             # the full image edge in creation of thumbnails - results
             # in an error if transients are close to the edge
             result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
-                                 thumbnail_data=thumbnail_data, 
-                                 thumbnail_keys=thumbnail_keys,
+                                 thumbnail_data=[data_new_full, data_ref_full,
+                                                 data_D_full, data_Scorr_full],
+                                 thumbnail_keys=['THUMBNAIL_RED', 'THUMBNAIL_REF',
+                                                 'THUMBNAIL_D', 'THUMBNAIL_SCORR'],
                                  thumbnail_size=get_par(set_zogy.size_thumbnails,tel), 
                                  header_toadd=header_newzogy, exptime=exptime_new, 
                                  header_ref=header_ref,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
                                  ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
-                                 tel=tel)
+                                 tel=tel,
+                                 orient_thumbnails=get_par(
+                                     set_zogy.orient_thumbnails,tel))
 
 
             # apply Zafiirah's MeerCRAB module to the thumbnails in
@@ -1110,8 +1114,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                 header_newzogy[key], header_newzogy.comments[key])
 
         else:
-            # if thumbnails are not saved, then MeerCRAB cannot be applied either,
-            # so format_cat without thumbnails and without ML_calc_prob
+            # if thumbnails are not saved, then MeerCRAB cannot be
+            # applied either, so call format_cat without thumbnails
+            # and without ML_calc_prob
             result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
                                  header_toadd=header_newzogy, exptime=exptime_new, 
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
@@ -1255,15 +1260,17 @@ def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
 
 ################################################################################
 
-def orient_data (data, header, header_out=None, thumbs_up=False, log=None):
+def orient_data (data, header, header_out=None, MLBG_rot90_flip=False, log=None,
+                 tel=None):
 
     """Function to remap [data] from the CD matrix defined in [header] to
     the CD matrix taken from [header_out].  If the latter is not
     provided the output orientation will be North up, East left.
 
-    If [thumbs_up] is switched on and the data is from MeerLICHT or
+    If [MLBG_rot90_flip] is switched on and the data is from MeerLICHT or
     BlackGEM, the data will be oriented within a few degrees from
-    North up, East left while preserving the pixel values.
+    North up, East left while preserving the pixel values in the new,
+    *remapped* reference, D and Scorr images.
 
     """
     
@@ -1296,6 +1303,7 @@ def orient_data (data, header, header_out=None, thumbs_up=False, log=None):
     # up, East left
     if header_out is not None:
         CD_out = read_CD_matrix (header_out, log=log)    
+
     else:
         # define de CD matrix with North up and East left, using the
         # pixel scale from the input [header]
@@ -1303,34 +1311,50 @@ def orient_data (data, header, header_out=None, thumbs_up=False, log=None):
         cdelt = pixscale/3600
         CD_out = np.array([[-cdelt, 0], [0, cdelt]])
 
-        if log is not None:
-            log.info('remapping data to North up, East left orientation')
-        
 
     # check if values of CD_data and CD_out are similar
     CD_close = [math.isclose(CD_data[i,j], CD_out[i,j], rel_tol=1e-3)
                 for i in range(2) for j in range(2)]
 
+    #if log is not None:
+    #    log.info ('CD_close: {}'.format(CD_close))
+
+    
     if np.all(CD_close):
+        
+        #if log is not None:
+        #    log.info ('data CD matrix already similar to CD_out matrix; '
+        #              'no need to remap data')
 
         # if CD matrix values are all very similar, do not bother to
         # do the remapping
         data2return = data
 
-    elif False and thumbs_up and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+    elif MLBG_rot90_flip and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
         
-        # rotate data by exactly 90 degrees and for ML1 also flip in
-        # the East-West direction; for ML/BG this will result in an
-        # image within a few degrees of the North up, East left
-        # orientation while preserving the original pixel values
+        #if log is not None:
+        #    log.info ('for ML/BG: rotating data by exactly 90 degrees and for '
+        #              'ML also flip left/right')
 
-        data2return = np.rot90(data)
+        # rotate data by exactly 90 degrees counterclockwise (when
+        # viewing data with y-axis increasing to the top!) and for ML1
+        # also flip in the East-West direction; for ML/BG this will
+        # result in an image within a few degrees of the North up,
+        # East left orientation while preserving the original pixel
+        # values of the new, *remapped* reference, D and Scorr images.
 
+        data2return = np.rot90(data, k=-1)
         if tel=='ML1':
             data2return = np.fliplr(data2return)
-    
+
+        # equivalent operation: data2return = np.flipud(np.rot90(data))
+            
     else:
-        
+
+        #if log is not None:
+        #    log.info ('remapping data from input CD matrix: {} to output CD '
+        #              'matrix: {}'.format(CD_data, CD_out))
+
         # transformation matrix, which is the dot product of the
         # output CD matrix and the inverse of the data CD matrix
         CD_data_inv = np.linalg.inv(CD_data)
@@ -1668,14 +1692,14 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
                 thumbnail_keys=None, thumbnail_size=64, header_toadd=None, 
                 header_ref=None, exptime=0, apphot_radii=None,
-                ML_calc_prob=False, tel=None):
+                ML_calc_prob=False, tel=None, orient_thumbnails=False):
 
     """Function that formats binary fits table [cat_in] according to
-        MeerLICHT/BlackGEM specifications for [cat_type] 'new', 'ref'
-        or 'trans', and saves the resulting binary fits table
-        [cat_out]. If [cat_in] is None, the output fits table will
-        contain the same column definitions but without any data
-        entries.
+       MeerLICHT/BlackGEM specifications for [cat_type] 'new', 'ref'
+       or 'trans', and saves the resulting binary fits table
+       [cat_out]. If [cat_in] is None, the output fits table will
+       contain the same column definitions but without any data
+       entries.
 
     """
 
@@ -1947,30 +1971,29 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
 
                         data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]
 
-                        # if [orient_thumbnails] in Settings file is
-                        # switched on, orient the thumbnails in
-                        # North-up, East left orientation
-                        if get_par(set_zogy.orient_thumbnails,tel):
+                        # if [orient_thumbnails] is switched on,
+                        # orient the thumbnails in North-up, East left
+                        # orientation
+                        if orient_thumbnails:
 
-                            # for the reference thumbnail, make sure
-                            # to use the reference image header, as it
-                            # might have a different orientation from
-                            # the others, i.e. NEW, D and SCORR, which
-                            # all have the same orientation
-                            if 'REF' in key:
-                                header_tmp = header_ref
-                            else:
-                                header_tmp = header_toadd
+                            # input reference data is the remapped
+                            # reference image and its orientation is
+                            # the same as that of the new, D and Scorr
+                            # images, and so the same header
+                            # (header_toadd=header_newzogy) should be
+                            # used rather than the reference image
+                            # header header_ref
 
                             data_col[i_pos] = orient_data (data_col[i_pos],
-                                                           header_tmp,
-                                                           thumbs_up=True)
+                                                           header_toadd,
+                                                           MLBG_rot90_flip=True,
+                                                           tel=tel, log=log)
 
-                    except ValueError as ve:
+                    except Exception as e:
                         if log is not None:
                             log.info('skipping object at x,y: {:.0f},{:.0f} due to '
-                                     'ValueError: {}'.
-                                     format(xcoords[i_pos], ycoords[i_pos], ve))
+                                     'exception: {}'.
+                                     format(xcoords[i_pos], ycoords[i_pos], e))
 
                 # add column to table
                 col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1],
@@ -2509,7 +2532,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     
     # need to convert psf fluxes to magnitudes by applying the zeropoint
     keywords = ['exptime', 'filter', 'obsdate']
-    exptime, filt, obsdate = read_header(header_new, keywords, log)
+    exptime, filt, obsdate = read_header(header_new, keywords, log=log)
 
     # get zeropoint from [header_new]
     if 'PC-ZP' in header_new:
@@ -3823,7 +3846,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     
     # get gain, pixscale and saturation level from header
     keywords = ['gain', 'pixscale', 'satlevel']
-    gain, pixscale, satlevel = read_header(header, keywords, log)
+    gain, pixscale, satlevel = read_header(header, keywords, log=log)
     ysize, xsize = np.shape(data_wcs)
     
 
@@ -4130,7 +4153,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         # read a few extra header keywords needed in [get_zp] and [apply_zp]
         keywords = ['exptime', 'filter', 'obsdate']
-        exptime, filt, obsdate = read_header(header, keywords, log)
+        exptime, filt, obsdate = read_header(header, keywords, log=log)
         if get_par(set_zogy.verbose,tel):
             log.info('exptime: {}, filter: {}, obsdate: {}'
                      .format(exptime, filt, obsdate))
@@ -4650,7 +4673,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 y_psf = data_sex['Y_PSF']
             # read a few extra header keywords needed below
             keywords = ['exptime', 'filter', 'obsdate']
-            exptime, filt, obsdate = read_header(header, keywords, log)
+            exptime, filt, obsdate = read_header(header, keywords, log=log)
         else:
             if get_par(set_zogy.verbose,tel):
                 log.info('data_sex array is already defined; no need to read it in')
@@ -6876,7 +6899,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
             # frame using the function [orient_data]
             psf_ima_config = orient_data (psf_ima_config, header,
                                           header_out=header_new,
-                                          log=log)
+                                          tel=tel, log=log)
 
 
         # resample PSF image at image pixel scale
@@ -8631,7 +8654,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         # read input image and header
         data, header = read_hdulist (image, get_header=True)
         # get input image size from header
-        ysize, xsize = read_header(header, ['naxis2', 'naxis1'], log)
+        ysize, xsize = read_header(header, ['naxis2', 'naxis1'], log=log)
         
         # determine cutout from [fraction]
         center_x = np.int(xsize/2+0.5)
