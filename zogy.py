@@ -1104,9 +1104,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     header_newzogy['MC-MODEL'] = (ML_model.split('/')[-1],
                                                   'MeerCRAB training model used')
 
-                # update 'ML_PROB_REAL' field in the transient catalog
+                # update 'CLASS_REAL' field in the transient catalog
                 with fits.open(cat_trans_out, mode='update') as hdulist:
-                    hdulist[-1].data['ML_PROB_REAL'] = ML_prob_real
+                    hdulist[-1].data['CLASS_REAL'] = ML_prob_real
                     # update header with above MeerCRAB keywords
                     for key in header_newzogy:
                         if 'MC-' in key:
@@ -1725,22 +1725,21 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
 
         # a dummy catalog created from the header only
         dumcat = True
-        
-        
-        
-    # this [formats] dictionary lists the output format, the output
+
+
+    # this [formats] dictionary contains the output format, the output
     # column unit (and the desired format - commented out)
     thumbnail_fmt = '{}E'.format(thumbnail_size**2)
     formats = {
         'NUMBER':         ['J', ''     ], #, 'uint16'],
-        'XWIN_IMAGE':     ['E', 'pix'  ], #, 'flt32' ],
-        'YWIN_IMAGE':     ['E', 'pix'  ], #, 'flt32' ],
-        'ERRX2WIN_IMAGE': ['E', 'pix^2'], #, 'flt16' ],
-        'ERRY2WIN_IMAGE': ['E', 'pix^2'], #, 'flt16' ],
-        'ERRXYWIN_IMAGE': ['E', 'pix^2'], #, 'flt16' ],
-        'X2WIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
-        'Y2WIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
-        'XYWIN_IMAGE':    ['E', 'pix^2'], #, 'flt16' ],
+        'X_POS':          ['E', 'pix'  ], #, 'flt32' ],
+        'Y_POS':          ['E', 'pix'  ], #, 'flt32' ],
+        'XVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
+        'YVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
+        'XYCOV_POS':      ['E', 'pix^2'], #, 'flt16' ],
+        'X2AVE_POS':      ['E', 'pix^2'], #, 'flt16' ],
+        'Y2AVE_POS':      ['E', 'pix^2'], #, 'flt16' ],
+        'XYAVE_POS':      ['E', 'pix^2'], #, 'flt16' ],
         # A,B,THETA and errors added for ADC runs
         #'AWIN_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
         #'BWIN_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
@@ -1752,19 +1751,19 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         'RA':             ['D', 'deg'  ], #, 'flt64' ],
         'DEC':            ['D', 'deg'  ], #, 'flt64' ],
         'FLAGS':          ['I', ''     ], #, 'uint8' ],
-        'IMAFLAGS_ISO':   ['I', ''     ], #, 'uint8' ],
-        'FWHM_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
+        'FLAGS_MASK':     ['I', ''     ], #, 'uint8' ],
+        'FWHM':           ['E', 'pix'  ], #, 'flt16' ],
         'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
         'FLUX_APER':      ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_APER':   ['E', 'e-/s' ], #, 'flt16' ],
         'BACKGROUND':     ['E', 'e-/s' ], #, 'flt16' ],
-        'FLUX_MAX':       ['E', 'e-/s' ], #, 'flt16' ],
+        #'FLUX_MAX':       ['E', 'e-/s' ], #, 'flt16' ],
         'FLUX_AUTO':      ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_AUTO':   ['E', 'e-/s' ], #, 'flt16' ],
         'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
         'FLUX_ISO':       ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_ISO':    ['E', 'e-/s' ], #, 'flt16' ],
-        'ISOAREA_IMAGE':  ['E', 'pix^2'], #, 'flt16' ],
+        'ISOAREA':        ['E', 'pix^2'], #, 'flt16' ],
         'MU_MAX':         ['E', 'mag'  ], #, 'flt16' ],
         'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
         'FLUX_PETRO':     ['E', 'e-/s' ], #, 'flt32' ],
@@ -1808,7 +1807,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         'FWHM_MOFFAT':    ['E', 'arcsec'], #, 'flt32' ],
         'ELONG_MOFFAT':   ['E', ''     ], #, 'flt32' ],
         'CHI2_MOFFAT':    ['E', ''     ], #, 'flt32' ],
-        'ML_PROB_REAL':   ['E', ''     ], #, 'flt32' ],
+        'CLASS_REAL':     ['E', ''     ], #, 'flt32' ],
         'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
@@ -1823,27 +1822,28 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
             keys_to_record = data.dtype.names
 
     elif cat_type == 'ref':
-        keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
-                          'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
-                          'X2WIN_IMAGE', 'Y2WIN_IMAGE', 'XYWIN_IMAGE',   
+        keys_to_record = ['NUMBER', 'X_POS', 'Y_POS',
+                          'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
+                          'X2AVE_POS', 'Y2AVE_POS', 'XYAVE_POS',   
                           # change back after ADC runs!!!
                           #'AWIN_IMAGE', 'BWIN_IMAGE', 'THETAWIN_IMAGE',
                           #'ERRAWIN_IMAGE', 'ERRBWIN_IMAGE', 'ERRTHETAWIN_IMAGE',
                           'ELONGATION', 'RA', 'DEC',
-                          'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
-                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
-                          'FLUX_AUTO', 'FLUXERR_AUTO', 'KRON_RADIUS',   
-                          'FLUX_ISO', 'FLUXERR_ISO', 'ISOAREA_IMAGE', 'MU_MAX', 'FLUX_RADIUS',
+                          'FLAGS', 'FLAGS_MASK', 'FWHM', 'CLASS_STAR',    
+                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND',      
+                          'FLUX_AUTO', 'FLUXERR_AUTO', 'KRON_RADIUS',
+                          'FLUX_ISO', 'FLUXERR_ISO', 'ISOAREA',
+                          'MU_MAX', 'FLUX_RADIUS',
                           'FLUX_PETRO', 'FLUXERR_PETRO', 'PETRO_RADIUS',
                           'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
 
     elif cat_type == 'new':
-        keys_to_record = ['NUMBER', 'XWIN_IMAGE', 'YWIN_IMAGE',
-                          'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
-                          #'X2WIN_IMAGE', 'Y2WIN_IMAGE', 'XYWIN_IMAGE',
+        keys_to_record = ['NUMBER', 'X_POS', 'Y_POS',
+                          'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
+                          #'X2AVE_POS', 'Y2AVE_POS', 'XYAVE_POS',
                           'ELONGATION', 'RA', 'DEC',
-                          'FLAGS', 'IMAFLAGS_ISO', 'FWHM_IMAGE', 'CLASS_STAR',    
-                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND', 'FLUX_MAX',      
+                          'FLAGS', 'FLAGS_MASK', 'FWHM', 'CLASS_STAR',    
+                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND',      
                           'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
 
     elif cat_type == 'trans':
@@ -1862,15 +1862,15 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
 
         if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
             
-            keys_to_record.append('ML_PROB_REAL')
+            keys_to_record.append('CLASS_REAL')
 
             if cat_in is not None:
-                # field ML_PROB_REAL is not yet included in data, so
+                # field CLASS_REAL is not yet included in data, so
                 # append it initialised to -1; the actual
                 # probabilities will be added after this function is
                 # done when MeerCRAB is processed
                 ml_prob_real = -np.ones(len(data))
-                data = append_fields(data, 'ML_PROB_REAL', ml_prob_real,
+                data = append_fields(data, 'CLASS_REAL', ml_prob_real,
                                      usemask=False, asrecarray=True)
 
 
@@ -2372,7 +2372,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
 
     # match transients with sources in full-source and reference
-    # catalogs and to be able to filter on e.g. FWHM_IMAGE and
+    # catalogs and to be able to filter on e.g. FWHM and
     # ELONGATION
 
     # read new and ref catalogs
@@ -2413,7 +2413,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
             # determine which transients to discard
             if fwhm_mean != 0:
-                fwhm_source = table['FWHM_IMAGE'][index]
+                fwhm_source = table['FWHM'][index]
                 if fwhm_source / fwhm_mean < ratio_limit:
                     discard = True
 
@@ -2581,8 +2581,8 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     ra_moffat, dec_moffat = wcs_new.all_pix2world(x_moffat, y_moffat, 1)
 
     # create output Table; leaving these columns out for now:
-    #'XWIN_IMAGE', 'YWIN_IMAGE', 
-    #'ERRX2WIN_IMAGE', 'ERRY2WIN_IMAGE', 'ERRXYWIN_IMAGE', 
+    #'X_POS', 'Y_POS', 
+    #'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
     #'ELONGATION',
     names = ('NUMBER', 'NPIX_MASK',
              'X_PEAK', 'Y_PEAK', 'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK', 
@@ -4081,11 +4081,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         log.info('deriving optimal fluxes ...')
     
         # read in positions and their errors
-        xwin = data_sex['XWIN_IMAGE']
-        ywin = data_sex['YWIN_IMAGE']
-        errx2win = data_sex['ERRX2WIN_IMAGE']
-        erry2win = data_sex['ERRY2WIN_IMAGE']
-        errxywin = data_sex['ERRXYWIN_IMAGE']
+        xwin = data_sex['X_POS']
+        ywin = data_sex['Y_POS']
+        errx2win = data_sex['XVAR_POS']
+        erry2win = data_sex['YVAR_POS']
+        errxywin = data_sex['XYCOV_POS']
 
         
         psfex_bintable = '{}_psf.fits'.format(base)
@@ -4175,8 +4175,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         ra_sex = data_sex['RA']
         dec_sex = data_sex['DEC']
         flags_sex = data_sex['FLAGS']
-        xcoords_sex = data_sex['XWIN_IMAGE']
-        ycoords_sex = data_sex['YWIN_IMAGE']
+        xcoords_sex = data_sex['X_POS']
+        ycoords_sex = data_sex['Y_POS']
         
         lat = get_par(set_zogy.obs_lat,tel)
         lon = get_par(set_zogy.obs_lon,tel)
@@ -4689,9 +4689,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         if os.path.isfile(get_par(set_zogy.cal_cat,tel)) and 'mag_opt' in locals():
             mag_opt = data_sex['MAG_OPT'][index]
             magerr_opt = data_sex['MAGERR_OPT'][index]
-        x_win = data_sex['XWIN_IMAGE'][index]
-        y_win = data_sex['YWIN_IMAGE'][index]
-        fwhm_image = data_sex['FWHM_IMAGE'][index]
+        x_win = data_sex['X_POS'][index]
+        y_win = data_sex['Y_POS'][index]
+        fwhm_image = data_sex['FWHM'][index]
         if mypsffit:
             flux_mypsf = flux_psf[index]
             fluxerr_mypsf = fluxerr_psf[index]
@@ -4760,7 +4760,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                           fwhm_image, xlabel='S/N (AUTO)',
                           ylabel='distance XY_WIN vs. XY_MYPSF', 
                           filename='{}_xyposition_win_vs_mypsf_fwhm.pdf'.format(base),
-                          title='rainbow color coding follows FWHM_IMAGE')
+                          title='rainbow color coding follows FWHM')
 
             
         # compare flux_opt with flux_aper
@@ -7769,8 +7769,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # images, i.e. use all objects that are not masked according to the
     # input mask (any pixel within the isophotal area of an object):
 
-    if 'IMAFLAGS_ISO' in data_sexcat.dtype.names:
-        mask_use = (data_sexcat['IMAFLAGS_ISO']==0)
+    if 'FLAGS_MASK' in data_sexcat.dtype.names:
+        mask_use = (data_sexcat['FLAGS_MASK']==0)
     else:
         mask_use = (data_sexcat['FLAGS']<=3)
         
@@ -7793,8 +7793,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # create ds9 regions text file to show the brightest stars
     if get_par(set_zogy.make_plots,tel):
         result = prep_ds9regions('{}_cat_bright_ds9regions.txt'.format(base),
-                                 data_sexcat['XWIN_IMAGE'][mask_use][index_sort][-nbright:],
-                                 data_sexcat['YWIN_IMAGE'][mask_use][index_sort][-nbright:],
+                                 data_sexcat['X_POS'][mask_use][index_sort][-nbright:],
+                                 data_sexcat['Y_POS'][mask_use][index_sort][-nbright:],
                                  radius=5., width=2, color='green',
                                  value=np.arange(1,nbright+1))
  
@@ -7805,7 +7805,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         dir_out = '/'.join(base.split('/')[:-1])
 
     cmd = ['solve-field', '--no-plots', #'--no-fits2fits', cloud version of astrometry does not have this arg
-           '--x-column', 'XWIN_IMAGE', '--y-column', 'YWIN_IMAGE',
+           '--x-column', 'X_POS', '--y-column', 'Y_POS',
            '--sort-column', column_sort,
            '--no-remove-lines', '--uniformize', '0',
            # only work on brightest sources
@@ -7930,8 +7930,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # update input header with [header_wcs]
     header += header_wcs
 
-    # use astropy.WCS to find RA, DEC corresponding to XWIN_IMAGE,
-    # YWIN_IMAGE, based on WCS info saved by Astrometry.net in .wcs
+    # use astropy.WCS to find RA, DEC corresponding to X_POS,
+    # Y_POS, based on WCS info saved by Astrometry.net in .wcs
     # file (wcsfile). The 3rd parameter to wcs.all_pix2world indicates
     # the pixel coordinate of the frame origin. Using astropy.WCS
     # avoids having to save the new RAs and DECs to file and read them
@@ -7942,8 +7942,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # axis mismatch, as .wcs files have NAXIS=0, while proper image
     # header files have NAXIS=2
     wcs = WCS(header)
-    newra, newdec = wcs.all_pix2world(data_sexcat['XWIN_IMAGE'],
-                                      data_sexcat['YWIN_IMAGE'],
+    newra, newdec = wcs.all_pix2world(data_sexcat['X_POS'],
+                                      data_sexcat['Y_POS'],
                                       1)
 
     # update catalog with new RA and DEC columns
@@ -8263,7 +8263,7 @@ def ldac2fits (cat_ldac, cat_fits, log):
                 format_new = cols.formats[icol]
                 # shouldn't it be 'D' and 'E' instead of '1D' and '1E'
                 # below?
-                if '1D' in cols.formats[icol] and 'J2000' not in key:
+                if '1D' in cols.formats[icol] and key!='RA' and key!='DEC':
                     format_new = '1E'
                     #data[key] = data[key].astype('float32')
                 col = fits.Column(name=key, format=format_new, unit=cols.units[icol],
@@ -8280,8 +8280,9 @@ def ldac2fits (cat_ldac, cat_fits, log):
         hdulist[2].data = drop_fields(hdulist[2].data, 'VIGNET')
 
         # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
-        hdulist[2].data.columns['ALPHAWIN_J2000'].name = 'RA'
-        hdulist[2].data.columns['DELTAWIN_J2000'].name = 'DEC'    
+        # - now done right after catalog is created in run_sextractor
+        #hdulist[2].data.columns['ALPHAWIN_J2000'].name = 'RA'
+        #hdulist[2].data.columns['DELTAWIN_J2000'].name = 'DEC'    
 
         # and write regular fits file
         hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
@@ -8451,7 +8452,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     index = ((data['FLAGS']==0) & (data['FLUX_AUTO']>0.) &
              (data['FLUXERR_AUTO']>0.) &
              (data['FLUX_AUTO']/data['FLUXERR_AUTO']>20.))
-    fwhm = data['FWHM_IMAGE'][index]
+    fwhm = data['FWHM'][index]
     class_star = data['CLASS_STAR'][index]
     flux_auto = data['FLUX_AUTO'][index]
     mag_auto = -2.5*np.log10(flux_auto)
@@ -8501,7 +8502,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
         # to get initial values before discarding flagged objects
         index = (data['FLUX_AUTO']>0.)
-        fwhm = data['FWHM_IMAGE'][index]
+        fwhm = data['FWHM'][index]
         flux_auto = data['FLUX_AUTO'][index]
         mag_auto = -2.5*np.log10(flux_auto)
 
@@ -8547,13 +8548,13 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
             
     # show catalog entries with very low FWHM
     if get_par(set_zogy.make_plots,tel):
-        mask_lowfwhm = (data['FWHM_IMAGE'] < fwhm_median-3*fwhm_std)
+        mask_lowfwhm = (data['FWHM'] < fwhm_median-3*fwhm_std)
         result = prep_ds9regions('{}_lowfwhm_ds9regions.txt'
                                  .format(cat_ldac.replace('.fits','')),
-                                 data['XWIN_IMAGE'][mask_lowfwhm],
-                                 data['YWIN_IMAGE'][mask_lowfwhm],
+                                 data['X_POS'][mask_lowfwhm],
+                                 data['Y_POS'][mask_lowfwhm],
                                  radius=5., width=2, color='purple',
-                                 value=data['FWHM_IMAGE'][mask_lowfwhm])
+                                 value=data['FWHM'][mask_lowfwhm])
 
         
     if get_par(set_zogy.timing,tel):
@@ -8698,7 +8699,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         if update_vignet:
             size_vignet = get_vignet_size (imtype, log)
             # write vignet_size to header
-            header['S-VIGNET'] = (size_vignet, '[pix] size square VIGNET used in SExtractor')
+            header['S-VIGNET'] = (size_vignet, '[pix] size square VIGNET used '
+                                  'in SExtractor')
             # append the VIGNET size to the temporary SExtractor
             # parameter file created above
             size_vignet_str = str((size_vignet, size_vignet))
@@ -8901,7 +8903,10 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
 
 
-    data_ldac_read = False
+    # now that catalog has been created, rename some of the columns
+    # using the function rename_catcols
+    rename_catcols(cat_out, log=log)
+
 
     if return_fwhm_elong:
         # get estimate of seeing and elongation from output catalog
@@ -8921,20 +8926,16 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
             with fits.open(cat_out, mode='update') as hdulist:
                 data_ldac = hdulist[2].data
                 if 'BACKGROUND' in data_ldac.dtype.names:
-                    x_indices = (data_ldac['XWIN_IMAGE']-0.5).astype(int)
-                    y_indices = (data_ldac['YWIN_IMAGE']-0.5).astype(int)
+                    x_indices = (data_ldac['X_POS']-0.5).astype(int)
+                    y_indices = (data_ldac['Y_POS']-0.5).astype(int)
                     background = data_bkg[y_indices, x_indices]
                     hdulist[2].data['BACKGROUND'] = background
 
-            data_ldac_read = True
-                    
 
+    # add number of objects detected (=number of catalog rows) to header
+    with fits.open(cat_out) as hdulist:
+        nobjects = hdulist[-1].header['NAXIS2']
 
-    # add number of objects to header
-    if not data_ldac_read:
-        data_ldac = read_hdulist (cat_out)
-        
-    nobjects = data_ldac.size
     header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
     log.info('number of objects detected by SExtractor: {}'.format(nobjects))
 
@@ -8954,6 +8955,55 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         log_timing_memory (t0=t, label='run_sextractor', log=log)
 
     return fwhm, fwhm_std, elong, elong_std
+
+
+################################################################################
+
+def rename_catcols (cat_in, log=None):
+
+    """Function to rename particular columns in the LDAC binary fits table
+    created by SExtractor.
+
+    """
+
+    # dictionary col_old2new is used to rename a number of
+    # columns in the output new/ref/trans catalogs; this is
+    # done here when converting the LDAC to normal fits
+    # catalog, so the LDAC catalog - used by PSFEx - still
+    # contains the original SExtractor column names. This way
+    # the $ZOGYHOME/Config SExtractor and PSFEx configuration
+    # files can also still contain the original names, but the
+    # drawback is that old and new column names are mixed in
+    # this zogy.py module.
+    col_old2new = {'ALPHAWIN_J2000': 'RA',
+                   'DELTAWIN_J2000': 'DEC',
+                   'XWIN_IMAGE':     'X_POS',
+                   'YWIN_IMAGE':     'Y_POS',
+                   'ERRX2WIN_IMAGE': 'XVAR_POS',
+                   'ERRY2WIN_IMAGE': 'YVAR_POS',
+                   'ERRXYWIN_IMAGE': 'XYCOV_POS',
+                   'FWHM_IMAGE':     'FWHM',
+                   'X2WIN_IMAGE':    'X2AVE_POS',
+                   'Y2WIN_IMAGE':    'Y2AVE_POS',
+                   'XYWIN_IMAGE':    'XYAVE_POS',
+                   'ISOAREA_IMAGE':  'ISOAREA',
+                   'IMAFLAGS_ISO':   'FLAGS_MASK'}
+
+    # open input catalog to update
+    with fits.open(cat_in, mode='update') as hdulist:
+        data = hdulist[-1].data
+
+        # loop keys of col_old2new dictionary
+        for col in col_old2new.keys():
+            # check if this key/col is present in the LDAC catalog
+            if col in data.dtype.names:
+                # if so, rename it
+                data.columns[col].name = col_old2new[col]
+                if log is not None:
+                    log.info ('renamed column {} to {}'
+                              .format(col, col_old2new[col]))
+
+    return
 
 
 ################################################################################
@@ -8997,8 +9047,8 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
 
         if get_par(set_zogy.make_plots,tel):
             result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
-                                     data_ldac['XWIN_IMAGE'][mask_ok],
-                                     data_ldac['YWIN_IMAGE'][mask_ok],
+                                     data_ldac['X_POS'][mask_ok],
+                                     data_ldac['Y_POS'][mask_ok],
                                      radius=5., width=2, color='red')
                 
         if get_par(set_zogy.timing,tel):
