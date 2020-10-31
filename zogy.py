@@ -429,7 +429,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         remap = True
         # initialize header to be recorded for keywords related to the
         # comparison of new and ref
-        header_zogy = fits.Header()
+        header_trans = fits.Header()
     else:
         remap = False
         
@@ -482,12 +482,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # prep_optimal_subtraction function above, or by
             # try-except the swarp part inside it and let it pass
             # along the remap_processed variable to here
-            header_zogy['SWARP-P'] = (True, 'reference image successfully SWarped?')
+            header_trans['SWARP-P'] = (True, 'reference image successfully SWarped?')
             # SWarp version
             cmd = ['swarp', '-v']
             result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
             version = str(result.stdout.read()).split()[2]
-            header_zogy['SWARP-V'] = (version, 'SWarp version used')
+            header_trans['SWARP-V'] = (version, 'SWarp version used')
                 
 
     if get_par(set_zogy.verbose,tel) and new:
@@ -506,7 +506,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             get_fratio_dxdy('{}_psfex.cat'.format(base_new),
                             '{}_psfex.cat'.format(base_ref),
                             header_new, header_ref, 
-                            nsubs, cuts_ima, log, header_zogy, pixscale_new))
+                            nsubs, cuts_ima, log, header_trans, pixscale_new))
         
         # fratio is in counts, convert to electrons, in case gains of new
         # and ref images are not identical
@@ -610,15 +610,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             zogy_processed = True
         finally:
             # add header keyword(s):
-            header_zogy['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
-            header_zogy['Z-REF'] = (base_ref.split('/')[-1], 'name reference image')
-            header_zogy['Z-SIZE'] = (get_par(set_zogy.subimage_size,tel), '[pix] size of (square) ZOGY subimages')
-            header_zogy['Z-BSIZE'] = (get_par(set_zogy.subimage_border,tel), '[pix] size of ZOGY subimage borders')
+            header_trans['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
+            header_trans['Z-REF'] = (base_ref.split('/')[-1], 'name reference image')
+            header_trans['Z-SIZE'] = (get_par(set_zogy.subimage_size,tel), '[pix] size of (square) ZOGY subimages')
+            header_trans['Z-BSIZE'] = (get_par(set_zogy.subimage_border,tel), '[pix] size of ZOGY subimage borders')
             # if exception occurred in [zogy_subloop], leave
             if not zogy_processed:
-                header_newzogy = header_new + header_zogy
-                return header_newzogy
-        
+                # return new and zogy header separately
+                return header_new, header_trans
+
         
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_zogypool, label='ZOGY pool', log=log)
@@ -825,10 +825,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         
         
         # add header keyword(s):
-        header_zogy['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
-        header_zogy['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
-        header_zogy['Z-FPEMED'] = (median_Fpsferr/exptime, '[e-/s] median Fpsferr full image')
-        header_zogy['Z-FPESTD'] = (std_Fpsferr/exptime, '[e-/s] sigma (STD) Fpsferr full image')
+        header_trans['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
+        header_trans['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
+        header_trans['Z-FPEMED'] = (median_Fpsferr/exptime, '[e-/s] median Fpsferr full image')
+        header_trans['Z-FPESTD'] = (std_Fpsferr/exptime, '[e-/s] sigma (STD) Fpsferr full image')
 
 
         # find transients using function [get_trans], which
@@ -839,7 +839,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                             data_Fpsf_full, data_Fpsferr_full,
                             data_new_mask_full, data_ref_mask_full,
                             data_new_bkg_std_full, data_ref_bkg_std_full,
-                            header_new, header_ref, header_zogy,
+                            header_new, header_ref, header_trans,
                             '{}_psf.fits'.format(base_new),
                             '{}_psf.fits'.format(base_ref),
                             '{}_cat.fits'.format(base_new),
@@ -847,20 +847,20 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                             log)
 
         # add header keyword(s):
-        header_zogy['T-NSIGMA'] = (get_par(set_zogy.transient_nsigma,tel),
+        header_trans['T-NSIGMA'] = (get_par(set_zogy.transient_nsigma,tel),
                                    '[sigma] input transient detection threshold')
         lflux = float(get_par(set_zogy.transient_nsigma,tel)) * median_Fpsferr
-        header_zogy['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient '
+        header_trans['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient '
                                   '{}-sigma limit. flux'.format(
                                       get_par(set_zogy.transient_nsigma,tel)))
-        header_zogy['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients '
+        header_trans['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients '
                                    '(pre-vetting)'.format(
                                        get_par(set_zogy.transient_nsigma,tel)))
 
         # add ratio of ntrans over total number of significant objects detected
         if 'NOBJECTS' in header_new:
             nobjects = header_new['NOBJECTS']
-            header_zogy['T-FTRANS'] = (ntrans/nobjects, 'ntrans/nobject ratio: '
+            header_trans['T-FTRANS'] = (ntrans/nobjects, 'ntrans/nobject ratio: '
                                        'T-NTRANS / NOBJECTS in new image')
 
         
@@ -872,7 +872,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             zeropoint = header_new['PC-ZP']
             airmass = header_new['AIRMASSC']
             [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log)
-            header_zogy['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
+            header_trans['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
                                      'limiting mag'.format(
                                          get_par(set_zogy.transient_nsigma,tel)))
 
@@ -880,9 +880,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.nfakestars,tel)==0:
             
             # still write these header keywords
-            header_zogy['T-NFAKE'] = (get_par(set_zogy.nfakestars,tel), 
+            header_trans['T-NFAKE'] = (get_par(set_zogy.nfakestars,tel), 
                                       'number of fake stars added to full frame')
-            header_zogy['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
+            header_trans['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
                                        'fake stars input S/N')
             
         else:
@@ -899,9 +899,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             # add header keyword(s):
             nfake = len(fakestar_flux_input)
-            header_zogy['T-NFAKE'] = (nfake,
+            header_trans['T-NFAKE'] = (nfake,
                                       'number of fake stars added to full frame')
-            header_zogy['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
+            header_trans['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
                                        'fake stars input S/N')
 
             # write to ascii file
@@ -966,46 +966,42 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.timing,tel):
             t_fits = time.time() 
 
-        header_newzogy = header_new + header_zogy
-        # header_newzogy.add_comment('many keywords, incl. WCS
+        header_tmp = header_new+header_trans
+        # header_tmp.add_comment('many keywords, incl. WCS
         # solution, are from corresponding image')
-        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits_D = '{}_D.fits'.format(base_newref)
-        fits.writeto(fits_D, data_D_full, header_newzogy, overwrite=True)
+        fits.writeto(fits_D, data_D_full, header_tmp, overwrite=True)
 
         fits_Scorr = '{}_Scorr.fits'.format(base_newref)
-        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits.writeto(fits_Scorr, data_Scorr_full, header_newzogy, overwrite=True)
+        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        fits.writeto(fits_Scorr, data_Scorr_full, header_tmp, overwrite=True)
 
         fits_Fpsf = '{}_Fpsf.fits'.format(base_newref)
-        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits.writeto(fits_Fpsf, data_Fpsf_full, header_newzogy, overwrite=True)
+        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        fits.writeto(fits_Fpsf, data_Fpsf_full, header_tmp, overwrite=True)
 
         fits_Fpsferr = '{}_Fpsferr.fits'.format(base_newref)
-        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits.writeto(fits_Fpsferr, data_Fpsferr_full, header_newzogy, overwrite=True)
+        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        fits.writeto(fits_Fpsferr, data_Fpsferr_full, header_tmp, overwrite=True)
 
 
         # try to write scaled uint8 or int16 limiting magnitude image
         limmag_range = abs(np.amax(data_limmag)-np.amin(data_limmag))
+
         # if range less than 7.5 (roughly corrsponding to steps of
         # about 0.03 mag in the output image) then save as 'uint8'
         # leading to an fpacked image size of about 15MB; otherwise
         # use float32 which can be compressed to ~45MB using q=1
-        header_newzogy['COMMENT'] = ('transient limiting magnitude image threshold: '
-                                     '{}-sigma'
-                                     .format(get_par(set_zogy.transient_nsigma,tel)))
-
-        header_newzogy['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-
         fits_limmag = '{}_trans_limmag.fits'.format(base_newref)
+        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         if limmag_range <= 7.5:
             data_type = 'uint8'
-            hdu = fits.PrimaryHDU(data_limmag, header_newzogy)
+            hdu = fits.PrimaryHDU(data_limmag, header_tmp)
             hdu.scale(data_type, 'minmax')
             hdu.writeto(fits_limmag, overwrite=True)
         else:
-            fits.writeto(fits_limmag, data_limmag, header_newzogy, overwrite=True)
+            fits.writeto(fits_limmag, data_limmag, header_tmp, overwrite=True)
 
 
         if get_par(set_zogy.timing,tel):
@@ -1033,23 +1029,23 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         exptime_new = read_header(header_new, ['exptime'], log=log)
         cat_new = '{}_cat.fits'.format(base_new)
         cat_new_out = cat_new
-        header_cat = read_hdulist(cat_new, get_data=False, get_header=True)
-        if 'FORMAT-P' not in header_cat:
-            result = format_cat (cat_new, cat_new_out, cat_type='new', log=log,
+        header_new_cat = read_hdulist(cat_new, get_data=False, get_header=True)
+        if 'FORMAT-P' not in header_new_cat:
+            result = format_cat (cat_new, cat_new_out, cat_type='new',
                                  header_toadd=header_new, exptime=exptime_new,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                                 tel=tel)
+                                 tel=tel, log=log)
     # ref catalogue
     if ref:
         exptime_ref = read_header(header_ref, ['exptime'], log=log)
         cat_ref = '{}_cat.fits'.format(base_ref)
         cat_ref_out = cat_ref
-        header_cat = read_hdulist(cat_ref, get_data=False, get_header=True)
-        if 'FORMAT-P' not in header_cat:
-            result = format_cat (cat_ref, cat_ref_out, cat_type='ref', log=log,
+        header_ref_cat = read_hdulist(cat_ref, get_data=False, get_header=True)
+        if 'FORMAT-P' not in header_ref_cat:
+            result = format_cat (cat_ref, cat_ref_out, cat_type='ref',
                                  header_toadd=header_ref, exptime=exptime_ref,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                                 tel=tel)
+                                 tel=tel, log=log)
     # trans catalogue
     if new and ref:
         cat_trans = '{}.transcat'.format(base_newref)
@@ -1063,17 +1059,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # need to take care of objects closer than 32/2 pixels to
             # the full image edge in creation of thumbnails - results
             # in an error if transients are close to the edge
-            result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
+            result = format_cat (cat_trans, cat_trans_out, cat_type='trans',
                                  thumbnail_data=[data_new_full, data_ref_full,
                                                  data_D_full, data_Scorr_full],
                                  thumbnail_keys=['THUMBNAIL_RED', 'THUMBNAIL_REF',
                                                  'THUMBNAIL_D', 'THUMBNAIL_SCORR'],
                                  thumbnail_size=get_par(set_zogy.size_thumbnails,tel), 
-                                 header_toadd=header_newzogy, exptime=exptime_new, 
-                                 header_ref=header_ref,
+                                 header_toadd=(header_new+header_trans),
+                                 exptime=exptime_new, header_ref=header_ref,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
                                  ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
-                                 tel=tel,
+                                 tel=tel, log=log,
                                  orient_thumbnails=get_par(
                                      set_zogy.orient_thumbnails,tel))
 
@@ -1094,33 +1090,34 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                               '{}'.format(e))
                 else:
                     ML_processed = True
-
+                    
                 finally:
-                    header_newzogy['MC-P'] = (ML_processed, 'successfully '
-                                              'processed by MeerCRAB?')
+                    header_trans['MC-P'] = (ML_processed, 'successfully '
+                                           'processed by MeerCRAB?')
                     # set version by hand
                     ML_version = '3.0.0'
-                    header_newzogy['MC-V'] = (ML_version, 'MeerCRAB version used')
-                    header_newzogy['MC-MODEL'] = (ML_model.split('/')[-1],
-                                                  'MeerCRAB training model used')
+                    header_trans['MC-V'] = (ML_version, 'MeerCRAB version used')
+                    header_trans['MC-MODEL'] = (ML_model.split('/')[-1],
+                                               'MeerCRAB training model used')
 
                 # update 'CLASS_REAL' field in the transient catalog
                 with fits.open(cat_trans_out, mode='update') as hdulist:
                     hdulist[-1].data['CLASS_REAL'] = ML_prob_real
-                    # update header with above MeerCRAB keywords
-                    for key in header_newzogy:
+                    # update header_trans with above MeerCRAB keywords
+                    for key in header_trans:
                         if 'MC-' in key:
                             hdulist[-1].header[key] = (
-                                header_newzogy[key], header_newzogy.comments[key])
+                                header_trans[key], header_trans.comments[key])
 
         else:
             # if thumbnails are not saved, then MeerCRAB cannot be
             # applied either, so call format_cat without thumbnails
             # and without ML_calc_prob
-            result = format_cat (cat_trans, cat_trans_out, cat_type='trans', log=log,
-                                 header_toadd=header_newzogy, exptime=exptime_new, 
+            result = format_cat (cat_trans, cat_trans_out, cat_type='trans',
+                                 header_toadd=(header_new+header_trans),
+                                 exptime=exptime_new, 
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                                 tel=tel)
+                                 tel=tel, log=log)
 
             
     end_time = os.times()
@@ -1171,7 +1168,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         
     if new and ref:
-        return header_newzogy
+        # return new and zogy header separately
+        return header_new, header_trans
     elif new:
         return header_new
     elif ref:
@@ -1689,10 +1687,11 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 
 ################################################################################
 
-def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
-                thumbnail_keys=None, thumbnail_size=64, header_toadd=None, 
+def format_cat (cat_in, cat_out, cat_type=None, thumbnail_data=None,
+                thumbnail_keys=None, thumbnail_size=64, header_toadd=None,
                 header_ref=None, exptime=0, apphot_radii=None,
-                ML_calc_prob=False, tel=None, orient_thumbnails=False):
+                ML_calc_prob=False, tel=None, log=None, orient_thumbnails=False):
+
 
     """Function that formats binary fits table [cat_in] according to
        MeerLICHT/BlackGEM specifications for [cat_type] 'new', 'ref'
@@ -1714,17 +1713,11 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
         if header_toadd is not None:
             header += header_toadd
 
-        # not a dummy catalog created from the header only
-        dumcat = False
-
     else:
 
         # if no [cat_in] is provided, just define the header using
         # [header_toadd]
         header = header_toadd
-
-        # a dummy catalog created from the header only
-        dumcat = True
 
 
     # this [formats] dictionary contains the output format, the output
@@ -2008,12 +2001,7 @@ def format_cat (cat_in, cat_out, cat_type=None, log=None, thumbnail_data=None,
             
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
-    
-    # header keyword indicating catalog is a dummy without sources or not
-    if cat_type == 'trans':
-        header['TDUMCAT'] = (dumcat, 'dummy transient catalog without sources?')
-    else:
-        header['DUMCAT'] = (dumcat, 'dummy catalog without sources?')
+
 
     #if get_par(set_zogy.timing,tel) and log is not None:
     #    log_timing_memory (t0=t, label='format_cat', log=log)
@@ -2076,7 +2064,7 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 
 def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                data_new_mask, data_ref_mask, data_new_bkg_std, data_ref_bkg_std,
-               header_new, header_ref, header_zogy,
+               header_new, header_ref, header_trans,
                psfex_bintable_new, psfex_bintable_ref,
                fits_cat_new, fits_cat_ref, log):
 
@@ -2175,11 +2163,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # get dimensions of ref
     ysize, xsize = np.shape(data_ref)
 
-    # read fratio (Fn/Fr) from header_zogy in order
+    # read fratio (Fn/Fr) from header_trans in order
     # to scale the reference image and its variance
     sn, sr, fratio = 1, 1, 1
-    if 'Z-FNR' in header_zogy:
-        fratio = header_zogy['Z-FNR']
+    if 'Z-FNR' in header_trans:
+        fratio = header_trans['Z-FNR']
     #if 'S-BKGSTD' in header_new:
     #    sn = header_new['S-BKGSTD']
     #if 'S-BKGSTD' in header_ref:
@@ -2786,7 +2774,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
                              get_limflux=False, limflux_nsigma=5.,
                              psfex_bintable_ref=None,
                              xcoords_ref=None, ycoords_ref=None, 
-                             header_new=None, header_ref=None, header_zogy=None,
+                             header_new=None, header_ref=None, header_trans=None,
                              log=None):
 
     """Function that returns the optimal flux and its error (using the
@@ -2959,8 +2947,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
                     sn = header_new['S-BKGSTD']
                 if 'S-BKGSTD' in header_ref:
                     sr = header_new['S-BKGSTD']
-            if header_zogy is not None:
-                if 'Z-FNR' in header_zogy:
+            if header_trans is not None:
+                if 'Z-FNR' in header_trans:
                     fn = header_new['Z-FNR'] * fr
                 
             # now combine [psf_ima_config] and [psf_ima_config_ref]
