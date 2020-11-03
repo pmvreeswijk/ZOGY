@@ -553,10 +553,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             xcenter = int(xsize_new/2)
             ycenter = int(ysize_new/2)
             dist = np.sqrt((x_fratio-xcenter)**2 + (y_fratio-ycenter)**2)
-            plot (dist, dx, (0,np.amax(dist),0,1), 'distance from image center (pixels)',
-                  'dx (pixels)', '{}_dxdist.pdf'.format(base_newref))
-            plot (dist, dy, (0,np.amax(dist),0,1), 'distance from image center (pixels)',
-                  'dy (pixels)', '{}_dydist.pdf'.format(base_newref))
+            plot (dist, dx, (0,np.amax(dist),0,1), 'distance from image center '
+                  '(pixels)', 'dx (pixels)', '{}_dxdist.pdf'.format(base_newref))
+            plot (dist, dy, (0,np.amax(dist),0,1), 'distance from image center '
+                  '(pixels)', 'dy (pixels)', '{}_dydist.pdf'.format(base_newref))
 
         # initialize fakestar flux arrays if fake star(s) are being added
         # - this is to make a comparison plot of the input and output flux
@@ -571,8 +571,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             # add the fake stars to the new subimages
             for nsub in range(nsubs):
-                index_fake = tuple([slice(nsub*get_par(set_zogy.nfakestars,tel),
-                                          (nsub+1)*get_par(set_zogy.nfakestars,tel))])
+
+                index_fake = tuple([slice(
+                    nsub*get_par(set_zogy.nfakestars,tel),
+                    (nsub+1)*get_par(set_zogy.nfakestars,tel))])
+
                 fakestar_xcoord[index_fake], fakestar_ycoord[index_fake], \
                     fakestar_flux_input[index_fake] = add_fakestars (
                         psf_orig_new[nsub], data_new[nsub],
@@ -612,8 +615,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # add header keyword(s):
             header_trans['Z-P'] = (zogy_processed, 'successfully processed by ZOGY?')
             header_trans['Z-REF'] = (base_ref.split('/')[-1], 'name reference image')
-            header_trans['Z-SIZE'] = (get_par(set_zogy.subimage_size,tel), '[pix] size of (square) ZOGY subimages')
-            header_trans['Z-BSIZE'] = (get_par(set_zogy.subimage_border,tel), '[pix] size of ZOGY subimage borders')
+            header_trans['Z-SIZE'] = (get_par(set_zogy.subimage_size,tel),
+                                      '[pix] size of (square) ZOGY subimages')
+            header_trans['Z-BSIZE'] = (get_par(set_zogy.subimage_border,tel),
+                                       '[pix] size of ZOGY subimage borders')
             # if exception occurred in [zogy_subloop], leave
             if not zogy_processed:
                 # return new and zogy header separately
@@ -834,17 +839,19 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # find transients using function [get_trans], which
         # applies threshold cuts directly on Scorr for the transient
         # detection, rather than running SExtractor (see below)
-        ntrans = get_trans (data_new_full, data_ref_full, 
-                            data_D_full, data_Scorr_full,
-                            data_Fpsf_full, data_Fpsferr_full,
-                            data_new_mask_full, data_ref_mask_full,
-                            data_new_bkg_std_full, data_ref_bkg_std_full,
-                            header_new, header_ref, header_trans,
-                            '{}_psf.fits'.format(base_new),
-                            '{}_psf.fits'.format(base_ref),
-                            '{}_cat.fits'.format(base_new),
-                            '{}_cat.fits'.format(base_ref),
-                            log)
+        ntrans, data_thumbnails = get_trans (data_new_full, data_ref_full,
+                                             data_D_full, data_Scorr_full,
+                                             data_Fpsf_full, data_Fpsferr_full,
+                                             data_new_mask_full,
+                                             data_ref_mask_full,
+                                             data_new_bkg_std_full,
+                                             data_ref_bkg_std_full,
+                                             header_new, header_ref, header_trans,
+                                             '{}_psf.fits'.format(base_new),
+                                             '{}_psf.fits'.format(base_ref),
+                                             '{}_cat.fits'.format(base_new),
+                                             '{}_cat.fits'.format(base_ref), log)
+
 
         # add header keyword(s):
         header_trans['T-NSIGMA'] = (get_par(set_zogy.transient_nsigma,tel),
@@ -962,6 +969,36 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 plt.close()
 
 
+
+        # apply Zafiirah's MeerCRAB module to the thumbnails in
+        # the transient catalog just created, using the function
+        # get_ML_prob_real
+        ML_prob_real = None
+        if (get_par(set_zogy.ML_calc_prob,tel) and
+            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+
+            try:
+                ML_processed = False
+                ML_model = get_par(set_zogy.ML_model,tel)
+                ML_prob_real = get_ML_prob_real (data_thumbnails, ML_model)
+            except Exception as e:
+                log.info(traceback.format_exc())
+                log.error('exception was raised during [get_ML_prob_real]: '
+                          '{}'.format(e))
+            else:
+                ML_processed = True
+                
+            finally:
+                header_trans['MC-P'] = (ML_processed, 'successfully '
+                                        'processed by MeerCRAB?')
+                # set version by hand
+                ML_version = '3.0.0'
+                header_trans['MC-V'] = (ML_version, 'MeerCRAB version used')
+                header_trans['MC-MODEL'] = (ML_model.split('/')[-1],
+                                            'MeerCRAB training model used')
+
+
+                                
         # write full ZOGY output images to fits
         if get_par(set_zogy.timing,tel):
             t_fits = time.time() 
@@ -1050,76 +1087,41 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new and ref:
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
-        if get_par(set_zogy.save_thumbnails,tel):
-            #thumbnail_data = [data_new_full, data_ref_full, data_D_full, 
-            #                  data_Scorr_full]
-            #thumbnail_keys = ['THUMBNAIL_RED', 'THUMBNAIL_REF', 'THUMBNAIL_D', 
-            #                  'THUMBNAIL_SCORR']
 
-            # need to take care of objects closer than 32/2 pixels to
-            # the full image edge in creation of thumbnails - results
-            # in an error if transients are close to the edge
-            result = format_cat (cat_trans, cat_trans_out, cat_type='trans',
-                                 thumbnail_data=[data_new_full, data_ref_full,
-                                                 data_D_full, data_Scorr_full],
-                                 thumbnail_keys=['THUMBNAIL_RED', 'THUMBNAIL_REF',
-                                                 'THUMBNAIL_D', 'THUMBNAIL_SCORR'],
-                                 thumbnail_size=get_par(set_zogy.size_thumbnails,tel), 
-                                 header_toadd=(header_new+header_trans),
-                                 exptime=exptime_new, header_ref=header_ref,
-                                 apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                                 ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
-                                 tel=tel, log=log,
-                                 orient_thumbnails=get_par(
-                                     set_zogy.orient_thumbnails,tel))
-
-
-            # apply Zafiirah's MeerCRAB module to the thumbnails in
-            # the transient catalog just created, using the function
-            # get_ML_prob_real
-            if (get_par(set_zogy.ML_calc_prob,tel) and
-                tel in ['ML1', 'BG2', 'BG3', 'BG4']):
-                
-                try:
-                    ML_processed = False
-                    ML_model = get_par(set_zogy.ML_model,tel)
-                    ML_prob_real = get_ML_prob_real (cat_trans_out, ML_model)
-                except Exception as e:
-                    log.info(traceback.format_exc())
-                    log.error('exception was raised during [get_ML_prob_real]: '
-                              '{}'.format(e))
-                else:
-                    ML_processed = True
-                    
-                finally:
-                    header_trans['MC-P'] = (ML_processed, 'successfully '
-                                           'processed by MeerCRAB?')
-                    # set version by hand
-                    ML_version = '3.0.0'
-                    header_trans['MC-V'] = (ML_version, 'MeerCRAB version used')
-                    header_trans['MC-MODEL'] = (ML_model.split('/')[-1],
-                                               'MeerCRAB training model used')
-
-                # update 'CLASS_REAL' field in the transient catalog
-                with fits.open(cat_trans_out, mode='update') as hdulist:
-                    hdulist[-1].data['CLASS_REAL'] = ML_prob_real
-                    # update header_trans with above MeerCRAB keywords
-                    for key in header_trans:
-                        if 'MC-' in key:
-                            hdulist[-1].header[key] = (
-                                header_trans[key], header_trans.comments[key])
-
-        else:
-            # if thumbnails are not saved, then MeerCRAB cannot be
-            # applied either, so call format_cat without thumbnails
-            # and without ML_calc_prob
-            result = format_cat (cat_trans, cat_trans_out, cat_type='trans',
-                                 header_toadd=(header_new+header_trans),
-                                 exptime=exptime_new, 
-                                 apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                                 tel=tel, log=log)
-
+        if get_par(set_zogy.save_thumbnails,tel):   
+            keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
+                               'THUMBNAIL_D', 'THUMBNAIL_SCORR']
+            size_thumbnails = get_par(set_zogy.size_thumbnails,tel)
             
+        else:
+            # setting keys_thumbnails to None is needed to avoid
+            # adding thumbnails; if keys_thumbnails is defined and
+            # data_thumbnails is None, then an empty catalog would be
+            # created!
+            keys_thumbnails = None
+            size_thumbnails = None
+            data_thumbnails = None
+            
+
+        # need to take care of objects closer than 32/2 pixels to
+        # the full image edge in creation of thumbnails - results
+        # in an error if transients are close to the edge
+        result = format_cat (cat_trans, cat_trans_out, cat_type='trans',
+                             header_toadd=(header_new+header_trans),
+                             exptime=exptime_new, header_ref=header_ref,
+                             apphot_radii=get_par(set_zogy.apphot_radii,tel),
+                             data_thumbnails=data_thumbnails,
+                             keys_thumbnails=keys_thumbnails,
+                             size_thumbnails=size_thumbnails,
+                             ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
+                             ML_prob_real=ML_prob_real, tel=tel, log=log)
+
+        # test: calculate old ML_prob_real on the fits catalog
+        #ML_model = get_par(set_zogy.ML_model,tel)
+        #ML_prob_real_old = get_ML_prob_real_old (cat_trans_out, ML_model)
+
+
+
     end_time = os.times()
     if new and ref:
         dt_usr  = end_time[2] - start_time2[2]
@@ -1198,7 +1200,74 @@ def show_sub (nsub):
 
 ################################################################################
 
-def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
+def get_ML_prob_real (data_thumbnails, model, use_30x30=True,
+                      factor_norm=255.):
+    
+    """function based on Zafiirah's Jupyter notebook (see
+    https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
+    function [realbogus_prediction] to calculate the probability that
+    a transient candidate is real, using the image thumbnails in
+    [data_thumbnails] in combination with the trained model
+    [model]. Most models require the central 30x30 pixels to be used
+    rather than the full (100x100) thumbnails. The normalisation
+    factor 255 is the one applied by Zafiirah to the thumbnails during
+    the ML training.
+
+    data_thumbnails is a numpy array with shape: (4, nrows or ncoords, 100, 100) 
+    where 100 is determined by set_zogy.size_thumbnails
+
+    """
+
+
+    # read fits table
+    #table = Table.read(fits_table)
+
+    # split set_zogy.ML_model parameter into model path and name
+    model_path, model_name = os.path.split(model)
+    # model_path input into [realbogus_prediction] requires trailing /
+    model_path += '/'
+    
+
+    # thumbnail images are 100x100 pixels, need to extract the central
+    # 30x30 pixels for most of Zafiirah's models
+    if use_30x30:
+        index = (slice(None,None), slice(None, None), slice(35,65), slice(35,65))
+    else:
+        index = (slice(None,None), slice(None,None), slice(None,None),
+                 slice(None,None))
+
+
+    # reshape input data into an array with shape (nrows in table, 30
+    # or 100, 30 or 100, 3 or 4)
+    if 'NRDS' in model_name:
+        # all 4 thumbnails are used
+        data_stack = np.copy(np.moveaxis(data_thumbnails[index], 0,-1))
+    else:
+        # 3 thumbnails are used:
+        data_stack = np.copy(np.moveaxis(data_thumbnails[index][0:3], 0,-1))
+
+
+    # normalise
+    data_stack /= factor_norm
+
+
+    # generate some transient ID (not important but required)
+    #id_trans = np.arange(len(table))
+    id_trans = np.arange(data_thumbnails.shape[1])
+
+
+    # threshold (not important but required)
+    prob_thresh = 0.5
+    ML_real_prob, __ = realbogus_prediction(model_name, data_stack, id_trans,
+                                            prob_thresh, model_path=model_path)
+    
+    
+    return ML_real_prob
+
+
+################################################################################
+
+def get_ML_prob_real_old (fits_table, model, use_30x30=True, factor_norm=255.):
     
     """function based on Zafiirah's Jupyter notebook (see
     https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
@@ -1219,7 +1288,7 @@ def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
     model_path, model_name = os.path.split(model)
     # model_path input into [realbogus_prediction] requires trailing /
     model_path += '/'
-    
+
     # above image cubes are 100x100 pixels, need to extract the
     # central 30x30 pixels for most models
     if use_30x30:
@@ -1227,7 +1296,7 @@ def get_ML_prob_real (fits_table, model, use_30x30=True, factor_norm=255.):
     else:
         index = (slice(None,None), slice(None,None), slice(None,None))
 
-        
+
     # stack the 30x30 data arrays into an array with
     # shape (nrows in table, 30, 30, 3 or 4)
     if 'NRDS' in model_name:
@@ -1518,7 +1587,8 @@ def add_fakestars (psf, data, bkg_std, fwhm, log):
 ################################################################################
 
 def read_hdulist (fits_file, get_data=True, get_header=False, 
-                  ext_name_indices=None, dtype=None, columns=None):
+                  ext_name_indices=None, dtype=None, columns=None,
+                  memmap=False):
     
     """Function to read the data (if [get_data] is True) and/or header (if
     [get_header] is True) of the input [fits_file].  The fits file can
@@ -1549,7 +1619,7 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
 
 
     # open fits file into hdulist
-    with fits.open(fits_file_read) as hdulist:
+    with fits.open(fits_file_read, memmap=memmap) as hdulist:
 
         n_exts = len(hdulist)
         
@@ -1687,10 +1757,10 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 
 ################################################################################
 
-def format_cat (cat_in, cat_out, cat_type=None, thumbnail_data=None,
-                thumbnail_keys=None, thumbnail_size=64, header_toadd=None,
+def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 header_ref=None, exptime=0, apphot_radii=None,
-                ML_calc_prob=False, tel=None, log=None, orient_thumbnails=False):
+                data_thumbnails=None, keys_thumbnails=None, size_thumbnails=100,
+                ML_calc_prob=False, ML_prob_real=None, tel=None, log=None):
 
 
     """Function that formats binary fits table [cat_in] according to
@@ -1722,7 +1792,7 @@ def format_cat (cat_in, cat_out, cat_type=None, thumbnail_data=None,
 
     # this [formats] dictionary contains the output format, the output
     # column unit (and the desired format - commented out)
-    thumbnail_fmt = '{}E'.format(thumbnail_size**2)
+    thumbnail_fmt = '{}E'.format(size_thumbnails**2)
     formats = {
         'NUMBER':         ['J', ''     ], #, 'uint16'],
         'X_POS':          ['E', 'pix'  ], #, 'flt32' ],
@@ -1856,14 +1926,15 @@ def format_cat (cat_in, cat_out, cat_type=None, thumbnail_data=None,
         if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
             
             keys_to_record.append('CLASS_REAL')
-
-            if cat_in is not None:
+            
+            # MeerCRAB probabilities ML_prob_real are now calculated
+            # before format_cat
+            if cat_in is not None and ML_prob_real is not None:
                 # field CLASS_REAL is not yet included in data, so
-                # append it initialised to -1; the actual
-                # probabilities will be added after this function is
-                # done when MeerCRAB is processed
-                ml_prob_real = -np.ones(len(data))
-                data = append_fields(data, 'CLASS_REAL', ml_prob_real,
+                # append it using the probabilities initialised to -1;
+                # the actual probabilities will be added after this
+                # function is done when MeerCRAB is processed
+                data = append_fields(data, 'CLASS_REAL', ML_prob_real,
                                      usemask=False, asrecarray=True)
 
 
@@ -1933,72 +2004,27 @@ def format_cat (cat_in, cat_out, cat_type=None, thumbnail_data=None,
                 
 
     # add [thumbnails]
-    if thumbnail_keys is not None:
+    if keys_thumbnails is not None:
+
+        dim_str = '({},{})'.format(size_thumbnails, size_thumbnails)
         
-        if thumbnail_data is not None:
-            # coordinates to loop
-            xcoords = data['X_PEAK']
-            ycoords = data['Y_PEAK']
-            ncoords = len(xcoords)
+        for i_tn, key in enumerate(keys_thumbnails):
 
-        # loop thumbnails
-        for i_tn, key in enumerate(thumbnail_keys):
-            
-            dim_str = '({},{})'.format(thumbnail_size, thumbnail_size)
-                        
-            if thumbnail_data is not None:
-
-                # initialise output column
-                data_col = np.zeros((ncoords,thumbnail_size,thumbnail_size))
-                
-                # loop x,y coordinates
-                ysize, xsize = thumbnail_data[i_tn].shape
-                for i_pos in range(ncoords):
-
-                    # get index around x,y position using function [get_index_around_xy]
-                    index_full, index_small = (get_index_around_xy(
-                        ysize, xsize, ycoords[i_pos], xcoords[i_pos], thumbnail_size))
-                    
-                    # record in data_col
-                    try:
-
-                        data_col[i_pos][index_small] = thumbnail_data[i_tn][index_full]
-
-                        # if [orient_thumbnails] is switched on,
-                        # orient the thumbnails in North-up, East left
-                        # orientation
-                        if orient_thumbnails:
-
-                            # input reference data is the remapped
-                            # reference image and its orientation is
-                            # the same as that of the new, D and Scorr
-                            # images, and so the same header
-                            # (header_toadd=header_newzogy) should be
-                            # used rather than the reference image
-                            # header header_ref
-
-                            data_col[i_pos] = orient_data (data_col[i_pos],
-                                                           header_toadd,
-                                                           MLBG_rot90_flip=True,
-                                                           tel=tel, log=log)
-
-                    except Exception as e:
-                        if log is not None:
-                            log.info('skipping object at x,y: {:.0f},{:.0f} due to '
-                                     'exception: {}'.
-                                     format(xcoords[i_pos], ycoords[i_pos], e))
-
-                # add column to table
-                col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1],
-                                  array=data_col, dim=dim_str)
+            if data_thumbnails is not None:
+                # add column to table including the data
+                col = fits.Column(name=key, format=formats[key][0],
+                                  unit=formats[key][1],
+                                  array=data_thumbnails[i_tn], dim=dim_str)
             else:
-                col = fits.Column(name=key, format=formats[key][0], unit=formats[key][1],
-                                  dim=dim_str)
+                # add column but without the data (i.e. a dummy cat
+                # where fits table fields still need to be defined)
+                col = fits.Column(name=key, format=formats[key][0],
+                                  unit=formats[key][1], dim=dim_str)
             
             # append column
             columns.append(col)
-            
-            
+
+
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
 
@@ -2603,11 +2629,85 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # create output fits catalog
     table.write('{}.transcat'.format(base_newref), format='fits', overwrite=True)
 
+
+
+    # extract the thumbnail images corresponding to the transients in
+    # case either thumbnail data is being saved or MeerCRAB
+    # probabilities need to be calculated for ML/BG
+    if (get_par(set_zogy.save_thumbnails,tel) or
+        (get_par(set_zogy.ML_calc_prob,tel) and
+         tel in ['ML1', 'BG2', 'BG3', 'BG4'])):
+
+        data_full_list = [data_new, data_ref, data_D, data_Scorr]
+        keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
+                           'THUMBNAIL_D', 'THUMBNAIL_SCORR']
+        n_thumbnails = len(keys_thumbnails)
     
+        # coordinates to loop
+        xcoords = table['X_PEAK']
+        ycoords = table['Y_PEAK']
+        ncoords = len(xcoords)
+    
+        # thumbnail size
+        size_thumbnails = get_par(set_zogy.size_thumbnails,tel)
+    
+        # initialise output thumbnail columns
+        data_thumbnails = np.zeros((n_thumbnails, ncoords,
+                                    size_thumbnails, size_thumbnails))
+    
+        # size of full input images; assuming they have identical shapes
+        ysize, xsize = data_full_list[0].shape
+    
+        # loop x,y coordinates
+        for i_pos in range(ncoords):
+        
+            # get index around x,y position using function [get_index_around_xy]
+            index_full, index_tn = (get_index_around_xy(
+                ysize, xsize, ycoords[i_pos], xcoords[i_pos], size_thumbnails))
+
+            # loop thumbnails and record pixels from full image to
+            # data_thumbnails
+            for i_tn, key in enumerate(keys_thumbnails):
+                
+                try:
+                    
+                    data_thumbnails[i_tn][i_pos][index_tn] = (
+                        data_full_list[i_tn][index_full])
+                    
+                    # if [orient_thumbnails] is switched on,
+                    # orient the thumbnails in North-up, East left
+                    # orientation
+                    if get_par(set_zogy.orient_thumbnails,tel):
+                        
+                        # input reference data is the remapped
+                        # reference image and its orientation is
+                        # the same as that of the new, D and Scorr
+                        # images, and so the same header
+                        # (header_toadd=header_newzogy) should be
+                        # used rather than the reference image
+                        # header header_ref
+                        #data_thumbnails[i_tn, i_pos] = orient_data (
+                        #    data_thumbnails[i_tn, i_pos], header_new,
+                        #    MLBG_rot90_flip=True, tel=tel, log=log)
+                        data_thumbnails[i_tn][i_pos] = orient_data (
+                            data_thumbnails[i_tn][i_pos], header_new,
+                            MLBG_rot90_flip=True, tel=tel, log=log)
+
+                        
+                except Exception as e:
+                    if log is not None:
+                        log.info('skipping remapping of thumbnail at x,y: '
+                                 '{:.0f},{:.0f} due to exception: {}'.
+                                 format(xcoords[i_pos], ycoords[i_pos], e))
+
+    else:
+        data_thumbnails = None
+                        
+                        
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_trans', log=log)
         
-    return ntrans
+    return ntrans, data_thumbnails
 
 
 ################################################################################
@@ -7424,12 +7524,15 @@ def calc_psf_config (data, poldeg, x, y):
 def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
                     nsubs, cuts_ima, log, header, pixscale):
     
-    """Function that takes in output catalogs of stars used in the PSFex
-    runs on the new and the ref image, and returns the arrays with
-    pixel coordinates (!) x, y (in the new frame) and fratios for the
+    """Function that takes in output catalogs of stars from the PSFex runs
+    on the new and the ref image, and returns arrays with x,y pixel
+    coordinates (!) (in the new frame) and flux ratios for the
     matching stars. In addition, it provides the difference in x- and
     y-coordinates between the catalogs after converting the reference
-    image pixels to pixels in the new image."""
+    image pixels to pixels in the new image through the WCS solutions
+    of both images.
+
+    """
     
     t = time.time()
     log.info('executing get_fratio_dxdy ...')
@@ -7563,15 +7666,18 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
                           'sigma (STD) flux ratio (Fnew/Fref) full image')
 
     
-    def local_or_full(value_local, value_full, std_full, log, nsigma=3):
+    def local_or_full (value_local, value_full, std_full, log, nsigma=3):
         # function to return full-frame value if local value is more
         # than [nsigma] (full frame) away from the full-frame value
-        if np.abs(value_local-value_full)/std_full > nsigma or not np.isfinite(value_local):
+        if (np.abs(value_local-value_full)/std_full > nsigma or
+            not np.isfinite(value_local)):
+
             if get_par(set_zogy.verbose,tel):
                 log.info('np.abs(value_local-value_full)/std_full: {}'
                          .format(np.abs(value_local-value_full)/std_full))
                 log.info('adopted value: {}'.format(value_full))
             return value_full
+
         else:
             return value_local
 
@@ -7585,7 +7691,9 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
         subcut = cuts_ima[nsub]
 
         # start with full-frame values
-        fratio_mean, fratio_std, fratio_median = fratio_mean_full, fratio_std_full, fratio_median_full
+        fratio_mean, fratio_std, fratio_median = (fratio_mean_full,
+                                                  fratio_std_full,
+                                                  fratio_median_full)
         dx = dx_full
         dy = dy_full
         
@@ -7618,7 +7726,7 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
                 dy = np.sqrt(dy_mean**2 + dy_std**2)
 
                 # adopt full-frame values if local values are more
-                # than nsigma the full-frame values
+                # than nsigma away from the full-frame values
                 dx = local_or_full (dx, 0., dx_full, log)
                 dy = local_or_full (dy, 0., dy_full, log)
                 
@@ -7785,8 +7893,6 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                                  data_sexcat['Y_POS'][mask_use][index_sort][-nbright:],
                                  radius=5., width=2, color='green',
                                  value=np.arange(1,nbright+1))
- 
-    #scampcat = image_in.replace('.fits','.scamp')
 
     dir_out = '.'
     if '/' in base:
@@ -9293,14 +9399,13 @@ def zogy_subloop (nsub, data_ref, data_new, psf_ref, psf_new,
     Vn = N + data_new_bkg_std[nsub]**2
     Vr = R + data_ref_bkg_std[nsub]**2
         
-    if False:
-        if get_par(set_zogy.verbose,tel) and log is not None:
-            log.info(' ')
-            log.info('nsub: {}'.format(nsub+1))
-            log.info('----------')
-            log.info('fn: {}, fr: {}'.format(fn, fr))
-            log.info('dx: {}, dy: {}'.format(dx, dy))
-            log.info('sn: {}, sr: {}'.format(sn, sr))
+    if get_par(set_zogy.verbose,tel) and log is not None:
+        log.info(' ')
+        log.info('nsub: {}'.format(nsub+1))
+        log.info('----------')
+        log.info('fn: {}, fr: {}'.format(fn, fr))
+        log.info('dx: {}, dy: {}'.format(dx, dy))
+        log.info('sn: {}, sr: {}'.format(sn, sr))
 
             
     return run_ZOGY(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy, nsub=nsub, log=log)
