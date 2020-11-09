@@ -14,6 +14,8 @@ import warnings
 warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 from functools import partial
 import math
+import collections
+import itertools
 
 from multiprocessing.dummy import Pool as ThreadPool
 import numpy as np
@@ -25,7 +27,7 @@ from numpy.lib.recfunctions import rename_fields, stack_arrays
 import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
-from astropy.table import Table
+from astropy.table import Table, vstack
 from astropy.stats import sigma_clipped_stats
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
@@ -79,8 +81,9 @@ __version__ = '1.0.0'
 # @profile
 def optimal_subtraction(new_fits=None,      ref_fits=None,
                         new_fits_mask=None, ref_fits_mask=None,
-                        set_file='set_zogy', log=None,
+                        set_file='set_zogy', log=None, redo=None,
                         verbose=None, nthread=1, telescope='ML1'):
+
 
     """Function that accepts a new and a reference fits image, finds their
     WCS solution using Astrometry.net, runs SExtractor (inside
@@ -123,11 +126,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     set_zogy = importlib.import_module(set_file)
 
     # if verbosity is provided through input parameter [verbose], it
-    # will overwrite the corresponding setting the settings file
+    # will overwrite the corresponding setting in the settings file
     # (set_zogy.verbose)
     if verbose is not None:
-        set_zogy.verbose = verbose
+        set_zogy.verbose = str2bool(verbose)
+    # same for redo
+    if redo is not None:
+        set_zogy.redo = str2bool(redo)
 
+        
     start_time1 = os.times()
 
     # initialise log if not provided as input
@@ -8707,7 +8714,8 @@ def get_vignet_size (imtype, log):
 def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
                    header, fit_psf=False, return_fwhm_elong=True, fraction=1.0,
                    fwhm=5.0, update_vignet=True, imtype=None, fits_mask=None, 
-                   npasses=2, tel=None, set_zogy=None, nthreads=0):
+                   npasses=2, tel=None, set_zogy=None, nthreads=0, Scorr=False):
+
 
     """Function that runs SExtractor on [image], and saves the output
        catalog in [cat_out], using the configuration file
@@ -8818,36 +8826,56 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
 
     log.info('background already subtracted?: {}'.format(bkg_sub))
 
+    # do not apply weighting
     apply_weight = False
-    
+
+    # initialize cmd_dict dictionary that is filled in below for the
+    # different options, which will be converted to a cmd list to be
+    # executed from the unix command line; make sure it is an
+    # insertion-ordered dictionary (default for dictionaries starting
+    # from python3.6)
+    cmd_dict = collections.OrderedDict()
+    cmd_dict['source-extractor'] = image
+    cmd_dict['-c'] = file_config
+    cmd_dict['-BACK_VALUE'] = '0.0'
+    cmd_dict['-BACK_SIZE'] = str(get_par(set_zogy.bkg_boxsize,tel))
+    cmd_dict['-BACK_FILTERSIZE'] = str(get_par(set_zogy.bkg_filtersize,tel))
+    cmd_dict['-BACKPHOTO_TYPE'] = 'GLOBAL'
+    cmd_dict['-VERBOSE_TYPE'] = 'NORMAL'
+    cmd_dict['-CATALOG_NAME'] = cat_out
+    cmd_dict['-PARAMETERS_NAME'] = file_params
+    cmd_dict['-PIXEL_SCALE'] = str(pixscale)
+    cmd_dict['-SEEING_FWHM'] = str(seeing)
+    cmd_dict['-PHOT_APERTURES'] = apphot_diams_str
+    cmd_dict['-NTHREADS'] = str(nthreads)
+    cmd_dict['-FILTER_NAME'] = get_par(set_zogy.sex_det_filt,tel)
+    starnnw_name = '{}default.nnw'.format(get_par(set_zogy.cfg_dir,tel))
+    cmd_dict['-STARNNW_NAME'] = starnnw_name
+
+
     for npass in range(npasses):
             
         if npass==0:        
 
-            if bkg_sub:
+            if bkg_sub or Scorr:
                 back_type = 'MANUAL'
             else:
                 back_type = 'AUTO'
-                
-            # run sextractor from the unix command line
-            cmd = ['source-extractor', image,
-                   '-c', file_config,
-                   '-BACK_TYPE', back_type,
-                   '-BACK_VALUE', str(0.0), # neglected if back_type = 'AUTO'
-                   '-BACK_SIZE', str(get_par(set_zogy.bkg_boxsize,tel)),
-                   '-BACK_FILTERSIZE', str(get_par(set_zogy.bkg_filtersize,tel)),
-                   '-BACKPHOTO_TYPE', 'GLOBAL',
-                   '-VERBOSE_TYPE', 'NORMAL']
+
+            # add back_type to command dictionary
+            cmd_dict['-BACK_TYPE'] = back_type
 
             if apply_weight:
-                cmd += ['-WEIGHT_TYPE', 'BACKGROUND']
+                cmd_dict['-WEIGHT_TYPE'] = 'BACKGROUND'
                 
         else:
             
             # for FWHM estimate, or if background method is set to 1
             # (SExtractor method) or background had already been
-            # subtracted no need to do multiple passes
-            if return_fwhm_elong or get_par(set_zogy.bkg_method,tel)==1 or bkg_sub:
+            # subtracted, or Scorr is True no need to do multiple
+            # passes
+            if (return_fwhm_elong or get_par(set_zogy.bkg_method,tel)==1 or
+                bkg_sub or Scorr):
                 break
 
             log.info ('running 2nd pass of SExtractor')
@@ -8855,63 +8883,70 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
             # save catalog of 1st/initial run to different filename
             os.rename (cat_out, cat_out.replace('ldac', 'ldac_init'))
 
-            cmd = ['source-extractor', image,
-                   '-c', file_config,
-                   '-BACK_TYPE', 'MANUAL',
-                   '-BACK_VALUE', str(0.0),
-                   #'-BACK_VALUE', str(bkg_median),
-                   '-BACKPHOTO_TYPE', 'GLOBAL',
-                   '-VERBOSE_TYPE', 'NORMAL']
+            # set back_type in command dictionary to 'MANUAL', because
+            # background has been subtracted in the first pass
+            cmd_dict['-BACK_TYPE'] = 'MANUAL'
 
             if apply_weight:
-                cmd += ['-WEIGHT_TYPE', 'MAP_RMS',
-                        '-WEIGHT_IMAGE', fits_bkg_std]
-
-
-        # add commands relevant for any pass
-        cmd += ['-CATALOG_NAME', cat_out,
-                '-PARAMETERS_NAME', file_params,
-                '-PIXEL_SCALE', str(pixscale),
-                '-SEEING_FWHM', str(seeing),
-                '-PHOT_APERTURES',apphot_diams_str,
-                '-NTHREADS', str(nthreads),
-                '-FILTER_NAME', get_par(set_zogy.sex_det_filt,tel),
-                '-STARNNW_NAME', '{}default.nnw'.format(
-                    get_par(set_zogy.cfg_dir,tel))]
+                cmd_dict['-WEIGHT_TYPE'] = 'MAP_RMS'
+                cmd_dict['-WEIGHT_IMAGE'] = fits_bkg_std
 
 
         # add commands to produce BACKGROUND, BACKGROUND_RMS and
-        # background-subtracted image with all pixels where objects were
-        # detected set to zero (-OBJECTS). These are used to build an
-        # improved background map. 
-        if not return_fwhm_elong and npass==0 and not bkg_sub:
+        # background-subtracted image with all pixels where objects
+        # were detected set to zero (-OBJECTS). These are used to
+        # build an improved background map.
+        if not return_fwhm_elong and npass==0 and not bkg_sub and not Scorr:
             fits_bkg = '{}_bkg.fits'.format(base)
             fits_bkg_std = '{}_bkg_std.fits'.format(base)
             fits_objmask = '{}_objmask.fits'.format(base)
-            cmd += ['-CHECKIMAGE_TYPE', 'BACKGROUND,BACKGROUND_RMS,-OBJECTS',
-                    '-CHECKIMAGE_NAME', '{},{},{}'
-                    .format(fits_bkg, fits_bkg_std, fits_objmask)]
-    
-        # in case of fwhm/elongation estimate: only care about higher
+            cmd_dict['-CHECKIMAGE_TYPE'] = 'BACKGROUND,BACKGROUND_RMS,-OBJECTS'
+            image_names = '{},{},{}'.format(fits_bkg, fits_bkg_std, fits_objmask)
+            cmd_dict['-CHECKIMAGE_NAME'] = image_names
+
+
+        # in case of fwhm/elongation estimate: only consider higher
         # S/N detections
         if return_fwhm_elong:
-            cmd += ['-DETECT_THRESH',
-                    str(get_par(set_zogy.fwhm_detect_thresh,tel))]
-    
-        # provide PSF file from PSFex
-        if fit_psf: cmd += ['-PSF_NAME', '{}_psf.fits'.format(base)]
+            cmd_dict['-DETECT_THRESH'] = str(get_par(
+                set_zogy.fwhm_detect_thresh,tel))
+        elif Scorr:
+            # initial detection threshold for transient detection;
+            # this will be narrowed down to the extact threshold later
+            # on using FLUX_MAX
+            cmd_dict['-DETECT_THRESH'] = '4.0'
+            cmd_dict['-DETECT_MINAREA'] = '3'
+            cmd_dict['-DETECT_MAXAREA'] = '500'
+            cmd_dict['-CATALOG_TYPE'] = 'FITS_1.0'
+            cmd_dict['-FILTER'] = 'Y'
+            cmd_dict['-FILTER_THRESH'] = '2.0'
+            cmd_dict['-FILTER_NAME'] = '/Users/pmv/ZOGY/Config/gauss_3.0_5x5.conv'
+            cmd_dict['-DEBLEND_NTHRESH'] = '32'
+            cmd_dict['-DEBLENDMINCONT'] = '1.0'
 
-        # provide mask image if not None
+
+        # provide PSF file from PSFex
+        if fit_psf:
+            cmd_dict['-PSF_NAME'] = '{}_psf.fits'.format(base)
+
+
+        # provide mask image and type if not None
         if fits_mask is not None:
             log.info('mask: {}'.format(fits_mask))
-            cmd += ['-FLAG_IMAGE', fits_mask, '-FLAG_TYPE', 'OR']
+            cmd_dict['-FLAG_IMAGE'] = fits_mask
+            cmd_dict['-FLAG_TYPE'] = 'OR'
 
+            
+        # convert cmd_dict to list
+        cmd_list = list(itertools.chain.from_iterable(list(cmd_dict.items())))
+                    
         # log cmd executed
-        cmd_str = ' '.join(cmd)
+        cmd_str = ' '.join(cmd_list)
         log.info('SExtractor command executed:\n{}'.format(cmd_str))
         
         # run command
-        process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        process = subprocess.Popen(cmd_list,stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
         (stdoutstr,stderrstr) = process.communicate()
         status = process.returncode
         log.info(stdoutstr)
@@ -8926,7 +8961,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
         # determined by SExtractor) and background had not already
         # been subtracted
         if (not return_fwhm_elong and npass==0 and
-            get_par(set_zogy.bkg_method,tel)==2 and not bkg_sub):
+            get_par(set_zogy.bkg_method,tel)==2 and not bkg_sub and not Scorr):
 
             # read in input image; do not read header as that would
             # overwrite the header updates already done in this
@@ -9127,16 +9162,31 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
             data_ldac = hdulist[2].data
             # SExtractor flags 0 or 1 and S/N larger than value
             # defined in settings file
+            s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
             mask_ok = ((data_ldac['FLAGS']<=1) & 
-                       (data_ldac['SNR_WIN']>=
-                        get_par(set_zogy.psf_stars_s2n_min,tel)))
-            # sort by FLUX_AUTO
-            #index_sort = np.argsort(data_ldac['FLUX_AUTO'][mask_ok])
-            # select the faintest 20,000 above the s2n cut-off
-            #data_ldac = data_ldac[:][mask_ok] #[index_sort][0:20000]
-            # could try random selection of sources to limit the
-            # input if still >~ 10-20,000 sources
-            hdulist[2].data = data_ldac[mask_ok]
+                       (data_ldac['SNR_WIN']>=s2n) &
+                       # mask flags (IMAFLAGS_ISO) required to be zero
+                       (data_ldac['FLAGS_MASK']==0))
+
+            mask_sum = np.sum(mask_ok)
+            if log is not None:
+                log.info ('number of PSF stars available with FLAGS<=1, SNR>{} '
+                          'and FLAGS_MASK==0: {}'.format(s2n, mask_sum))
+
+            # to limit the number of PSF stars to a reasonable number
+            # in crowded fields, pick a random set of [nlimit] stars
+            # if there are at least that number available
+            nlimit = 20000
+            if mask_sum > nlimit:
+                index_keep = (np.random.rand(nlimit) * mask_sum).astype(int)
+                if log is not None:
+                    log.info ('using random subset of {} of these'
+                              .format(len(index_keep)))
+            else:
+                index_keep = np.arange(mask_sum)
+
+            hdulist[2].data = data_ldac[mask_ok][index_keep]
+            
             
 
         if get_par(set_zogy.make_plots,tel):
@@ -9210,7 +9260,8 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
     
     # for the reference image, limit the size of the ldac catalog fits
     # file to be saved with only those catalog entries used by PSFEx
-    if imtype=='ref':
+    # --> why not for new image as well?
+    if imtype=='ref' or imtype=='new':
         psfexcat = '{}_psfex.cat'.format(base)
         table = ascii.read(psfexcat, format='sextractor')
         # In PSFEx version 3.18.2 all objects from the input
@@ -9226,8 +9277,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
 
         # overwrite the input catalog with these selected stars
         with fits.open(cat_in, mode='update') as hdulist:
-            data_ldac = hdulist[2].data[mask_psfstars]
-            hdulist[2].data = data_ldac
+            hdulist[2].data = hdulist[2].data[mask_psfstars]
 
 
     # record the PSFEx output check images defined above, into
@@ -9784,29 +9834,58 @@ def image_shift_fft(Image, DX, DY):
 # end
 # ShiftedImage = abs(ShiftedImage);
 
+
+################################################################################
+
+# from https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 ################################################################################
 
 def main():
     """Wrapper allowing optimal_subtraction to be run from the command line"""
     
     parser = argparse.ArgumentParser(description='Run optimal_subtraction on images')
-    parser.add_argument('--new_fits', default=None, help='filename of new image')
-    parser.add_argument('--ref_fits', default=None, help='filename of ref image')
-    parser.add_argument('--new_fits_mask', default=None, help='filename of new image mask')
-    parser.add_argument('--ref_fits_mask', default=None, help='filename of ref image mask')
-    parser.add_argument('--set_file', default='set_zogy', help='name of settings file')
-    parser.add_argument('--log', default=None, help='help')
-    parser.add_argument('--verbose', default=None, help='verbose')
-    parser.add_argument('--nthreads', default=1, type=int, help='number of threads to use')
-    parser.add_argument('--telescope', default='ML1', help='telescope')
-    
+    parser.add_argument('--new_fits', type=str, default=None,
+                        help='filename of new image')
+    parser.add_argument('--ref_fits', type=str, default=None,
+                        help='filename of ref image')
+    parser.add_argument('--new_fits_mask', type=str, default=None,
+                        help='filename of new image mask')
+    parser.add_argument('--ref_fits_mask', type=str, default=None,
+                        help='filename of ref image mask')
+    parser.add_argument('--set_file', type=str, default='set_zogy',
+                        help='name of settings file')
+    parser.add_argument('--log', type=str, default=None,
+                        help='if name is provided, an output logfile is created')
+    params.add_argument('--redo', default=None,
+                        help='force re-doing some steps (source-extractor, '
+                        'astrometry, PSFEx, even when products already present)')
+    parser.add_argument('--verbose', default=None,
+                        help='increase verbosity level')
+    parser.add_argument('--nthreads', type=int, default=1,
+                        help='number of threads to use')
+    parser.add_argument('--telescope', type=str, default='ML1', help='telescope')
+
+
     # replaced [global_pars] function with importing [set_file] as C;
     # all former global parameters are now referred to as set_zogy.[parameter
     # name]. This importing is done inside [optimal_subtraction] in
     # case it is not called from the command line.
     args = parser.parse_args()
-    optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask, args.ref_fits_mask,
-                        args.set_file, args.log, args.verbose, args.nthreads, args.telescope)
+    optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask,
+                        args.ref_fits_mask, args.set_file, args.log,
+                        args.redo, args.verbose, args.nthreads, args.telescope)
+
 
 if __name__ == "__main__":
     main()
