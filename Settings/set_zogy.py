@@ -14,10 +14,13 @@ subimage_border = 40     # border around subimage to avoid edge effects
 #subimage_border = 32     # border around subimage to avoid edge effects
 
 # ZOGY parameters
-fratio_local = False     # determine fratio (Fn/Fr) from subimage (T) or full frame (F)
+fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or full
+                         # frame (F)
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
-chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter transients
+chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter
+                         # transients
+                         
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
 transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
@@ -48,7 +51,7 @@ ML_model = ('{}/meerCRAB_model/NET3_threshold_9_NRD'
 #===============================================================================
 # background estimation: these are the optional methods to estimate the
 # backbround and its standard deviation (STD):
-# (1) background and STD/RMS map determined by SExtractor (fastest)
+# (1) background and STD/RMS map determined by SExtractor (fast)
 # (2) improved background and STD map using masking of all sources (recommended)
 bkg_method = 2           # background method to use
 bkg_nsigma = 3           # data outside mean +- nsigma * stddev are
@@ -132,7 +135,7 @@ size_vignet_ref = 71     # size of the square VIGNETs saved in the SExtractor
 psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
                          # (don't set this too high as otherwise the PSF
                          #  will be mainly based on bright stars)
-                         
+
 
 #===============================================================================
 # Astrometry
@@ -227,6 +230,9 @@ swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 # the type of masked pixel with this dictionary:
 mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
               'saturated-connected': 8, 'satellite trail': 16, 'edge': 32}
+
+# switch to lower RAM memory consumption by increasing the disk I/O
+low_RAM = True
 
 # switch on/off different functions
 redo = False             # execute functions even if output file exist
