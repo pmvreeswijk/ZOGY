@@ -124,7 +124,8 @@ def display_top(snapshot, key_type='lineno', limit=10):
 # @profile
 def optimal_subtraction(new_fits=None,      ref_fits=None,
                         new_fits_mask=None, ref_fits_mask=None,
-                        set_file='set_zogy', log=None, redo=None,
+                        set_file='set_zogy', log=None,
+                        redo_new=None, redo_ref=None,
                         verbose=None, nthread=1, telescope='ML1'):
 
 
@@ -173,9 +174,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # (set_zogy.verbose)
     if verbose is not None:
         set_zogy.verbose = str2bool(verbose)
-    # same for redo
-    if redo is not None:
-        set_zogy.redo = str2bool(redo)
+    # same for redo_new and redo_ref
+    if redo_new is not None:
+        set_zogy.redo_new = str2bool(redo_new)
+    if redo_ref is not None:
+        set_zogy.redo_ref = str2bool(redo_ref)
 
         
     start_time1 = os.times()
@@ -360,10 +363,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet, imtype,
                  fits_mask, ra, dec, xsize, ysize, header, log):
 
+        # switch to rerun some parts (source extractor,
+        # astrometry.net, psfex) even if those were executed done
+        redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
+                (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
+        
         # run SExtractor on full image
         if (not (os.path.isfile(sexcat) or
-                 os.path.isfile('{}_cat.fits'.format(base)))
-            or get_par(set_zogy.redo,tel)):
+                 os.path.isfile('{}_cat.fits'.format(base))) or redo):
             try:
                 SE_processed = False
                 result = run_sextractor(
@@ -399,8 +406,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # determine WCS solution
         data_cal = None
-        if (('CTYPE1' not in header and 'CTYPE2' not in header) or
-            get_par(set_zogy.redo,tel)):
+        if ('CTYPE1' not in header and 'CTYPE2' not in header) or redo:
             try:
                 if not get_par(set_zogy.skip_wcs,tel):
                     # delete some keywords that astrometry.net does
@@ -2555,7 +2561,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
         
     # use sum of variances of new and ref images (where ref image
     # needs to be scaled with flux ratio fn/fr) as variance image to
-    # use in psf fitting to D image (in get_psfoptflux_xycoords)
+    # use in psf fitting to D image (in get_psfoptflux)
     # initially used sn and sr as scalar estimate of the new and
     # ref image background standard deviation:
     #data_D_var = data_new + sn**2 + fratio * (data_ref + sr**2)
@@ -2828,8 +2834,8 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     
     def help_psffit_D (mk, psffit, moffat):
 
-        # use [get_psfoptflux_xycoords] to perform a PSF fit to D
-        results = get_psfoptflux_xycoords (
+        # use [get_psfoptflux] to perform a PSF fit to D
+        results = get_psfoptflux (
             psfex_bintable_new, data_D, data_D_var, data_newref_mask,
             x_peak[mk], y_peak[mk], psffit=psffit, moffat=moffat,
             psfex_bintable_ref=psfex_bintable_ref, 
@@ -3221,15 +3227,13 @@ def get_shape_parameters (x2, y2, xy, errx2, erry2, errxy):
 
 ################################################################################
 
-def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
-                             xcoords, ycoords,
-                             satlevel=50000, replace_satdata=False,
-                             psf_oddsized=True, psffit=False, moffat=False,
-                             get_limflux=False, limflux_nsigma=5.,
-                             psfex_bintable_ref=None,
-                             xcoords_ref=None, ycoords_ref=None, 
-                             header_new=None, header_ref=None, header_trans=None,
-                             log=None):
+def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
+                    satlevel=50000, replace_satdata=False, psf_oddsized=True,
+                    psffit=False, moffat=False, get_limflux=False,
+                    limflux_nsigma=5., psfex_bintable_ref=None,
+                    xcoords_ref=None, ycoords_ref=None,
+                    header_new=None, header_ref=None, header_trans=None,
+                    log=None):
 
     """Function that returns the optimal flux and its error (using the
        function [flux_optimal] of a source at pixel positions [xcoords],
@@ -3255,7 +3259,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
 
     """
         
-    log.info('executing get_psfoptflux_xycoords ...')
+    log.info('executing get_psfoptflux ...')
     if get_par(set_zogy.timing,tel): t = time.time()
 
     # make sure x and y have same length
@@ -3342,8 +3346,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
         
     # [psf_size] is the PSF size in image pixels,
     # i.e. [psf_size_config] multiplied by the PSF sampling (roughly
-    # 4-5 pixels per FWHM) which is set by the [set_zogy.psf_sampling] parameter.
-    # If set to zero, it is automatically determined by PSFex.
+    # 4-5 pixels per FWHM) which is set by the [set_zogy.psf_sampling]
+    # parameter.
     psf_size = np.int(np.ceil(psf_size_config * psf_samp))
     # depending on [psf_oddsized], make the psf size odd or even
     if psf_oddsized:
@@ -3461,14 +3465,11 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
                                           order=order)
             # using Eran's function:
             #psf_ima_shift = image_shift_fft(psf_ima_config, xshift, yshift)
+
             # resample PSF image at image pixel scale
             psf_ima_shift_resized = ndimage.zoom(psf_ima_shift, psf_samp_update,
                                                  order=order, mode='nearest')
-            # also resample non-shifted PSF image at image pixel scale
-            # only required if psf-fitting is performed
-            if psffit:
-                psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update,
-                                               order=order, mode='nearest')
+
         else:
             # resample PSF image at image pixel scale
             psf_ima_resized = ndimage.zoom(psf_ima_config, psf_samp_update,
@@ -3483,16 +3484,8 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
         # clean and normalize PSF
         psf_shift = clean_norm_psf(psf_ima_shift_resized,
                                    get_par(set_zogy.psf_clean_factor,tel))
-        # also return normalized PSF without any shift
-        # only required if psf-fitting is performed
-        if psffit:
-            psf_noshift = clean_norm_psf(psf_ima_resized,
-                                         get_par(set_zogy.psf_clean_factor,tel))
-        
+        # extract index_P
         P_shift = psf_shift[index_P]
-        # only required if psf-fitting is performed
-        if psffit:
-            P_noshift = psf_noshift[index_P]
         
         # extract subsection from D, D_mask
         D_sub = D[index]
@@ -3522,7 +3515,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
         else:
             log.error('input parameter {} with value {} in function {} '
                       'not understood'
-                      .format('bkg_var', bkg_var, 'get_psfoptflux_xycoords'))
+                      .format('bkg_var', bkg_var, 'get_psfoptflux'))
             
 
         # determine optimal or psf or limiting flux
@@ -3569,10 +3562,9 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
                     t_test = time.time()
                     flux_psf[i], fluxerr_psf[i], xshift_psf[i], yshift_psf[i], \
                         chi2_psf[i], xerr_psf[i], yerr_psf[i] = (
-                            flux_psffit (P_noshift, D_sub, bkg_var_sub,
-                                         flux_opt[i], xshift, yshift,
+                            flux_psffit (P_shift, D_sub, bkg_var_sub, flux_opt[i],
                                          mask_use=mask_use, log=log))
-                    
+
                 except Exception as e:
                     log.info('Warning: problem running [flux_psffit] on object '
                              'at pixel coordinates: {}, {}; returning zero flux, '
@@ -3580,16 +3572,6 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
                              .format(xcoords[i], ycoords[i]))
                     log.info(traceback.format_exc())
                     return
-                
-                # xshift_psf and yshift_psf are the shifts with respect to
-                # the integer xpos and ypos positions defined at the top
-                # of this loop over the sources. This is because the fit
-                # is using the PSF image that is not shifted
-                # (P_noshift) to the exact source position.  Redefine
-                # them here with respect to the fractional coordinates
-                # xcoords and ycoords
-                xshift_psf[i] += xshift
-                yshift_psf[i] += yshift
                 
 
             # if moffat=True, perform Moffat fit
@@ -3626,7 +3608,7 @@ def get_psfoptflux_xycoords (psfex_bintable, D, bkg_var, D_mask,
 
     
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_psfoptflux_xycoords', log=log)
+        log_timing_memory (t0=t, label='get_psfoptflux', log=log)
 
 
     list2return = [[flux_opt, fluxerr_opt]]
@@ -3697,6 +3679,7 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
                 y2 -= 1
             else:
                 y1 += 1
+
     index = tuple([slice(y1,y2),slice(x1,x2)])
 
     # construct PSF at x,y
@@ -3713,7 +3696,7 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
 
     # index are the indices of the PSF footprint of the full image,
     # while index_P are the indices of the PSF image with size
-    # psf_hsize x psf_hsize, which is needed in case the PSF footprint
+    # psf_size x psf_size, which is needed in case the PSF footprint
     # is partially off the full image
     
     return psf_ima_config, index, index_P
@@ -3721,8 +3704,7 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
 
 ################################################################################
 
-def flux_psffit(P, D, bkg_var, flux_opt, xshift, yshift,
-                mask_use=None, max_nfev=100, log=None):
+def flux_psffit (P, D, bkg_var, flux_opt, mask_use=None, max_nfev=100, log=None):
 
 
     # define objective function: returns the array to be minimized
@@ -3733,7 +3715,7 @@ def flux_psffit(P, D, bkg_var, flux_opt, xshift, yshift,
         flux_psf = params['flux_psf'].value
         sky = params['sky'].value
 
-        # shift the PSF image to the exact pixel position
+        # shift the PSF image
         P_shift = ndimage.shift(P, (yshift, xshift))
         # alternatively, use Eran's shift function 
         #P_shift = image_shift_fft(P, xshift, yshift)
@@ -3771,8 +3753,8 @@ def flux_psffit(P, D, bkg_var, flux_opt, xshift, yshift,
         
     # create a set of Parameters
     params = Parameters()
-    params.add('xshift', value=xshift, min=-3, max=3, vary=True)
-    params.add('yshift', value=yshift, min=-3, max=3, vary=True)
+    params.add('xshift', value=0, min=-3, max=3, vary=True)
+    params.add('yshift', value=0, min=-3, max=3, vary=True)
     params.add('sky', value=0, vary=True)
 
     # if the boundaries below are not set, fitting does not work properly 
@@ -3882,29 +3864,6 @@ def get_optflux (P, D, V):
             optfluxerr = 0.
 
     
-
-
-################################################################################
-
-def get_optflux_Eran (P, P_noshift, D, V):
-
-    """Function that calculates optimal flux and corresponding error based
-    on the PSF [P], the PSF shifted by the fractional pixel shift
-    [P_shift], sky-subtracted data [D] and variance [V].  All are
-    assumed to be in electrons rather than counts. These can be 1- or
-    2-dimensional arrays with the same shape, while the sky can also
-    be a scalar. See Eqs. 36 and 37 of Zackay & Ofek 2017, ApJ, 836,
-    187.
-
-    """
-
-    # and optimal flux and its error
-    denominator = np.sum((P_noshift*P)/V)
-    optflux = np.sum((P_noshift*D/V)) / denominator
-    optfluxerr = 1./np.sqrt(denominator)
-    return optflux, optfluxerr
-
-
 ################################################################################
 
 def get_optflux_Naylor (P, D, V):
@@ -3945,9 +3904,9 @@ def get_s2n_ZO (P, D, V):
 
 ################################################################################
 
-def flux_optimal (P, D, bkg_var, nsigma_inner=10, P_noshift=None,
-                  nsigma_outer=5, max_iters=10, epsilon=0.1, mask_use=None,
-                  add_V_ast=False, dx2=0, dy2=0, dxy=0, log=None):
+def flux_optimal (P, D, bkg_var, nsigma_inner=10, nsigma_outer=5, max_iters=10,
+                  epsilon=0.1, mask_use=None, add_V_ast=False,
+                  dx2=0, dy2=0, dxy=0, log=None):
     
     """Function that calculates optimal flux and corresponding error based
     on the PSF [P], sky-subtracted data [D] and background variance
@@ -4003,7 +3962,6 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=10, P_noshift=None,
             V += V_ast
                         
         # optimal flux
-        #flux_opt, fluxerr_opt = get_optflux_Eran(P[mask], P_noshift[mask], D[mask], V[mask])
         flux_opt, fluxerr_opt = get_optflux (P[mask_use], D[mask_use], V[mask_use])
                     
         #print ('i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt,
@@ -4053,7 +4011,7 @@ def flux_optimal_s2n (P, bkg_var, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
     particular signal-to-noise ratio [s2n], given the PSF image [P]
     and the background variance [bkg_var] (=sky background + RN**2).
     This function is used to estimate the limiting magnitude of an
-    image at a set of coordinates (in get_psfoptflux_xycoords), and
+    image at a set of coordinates (in get_psfoptflux), and
     also to estimate the flux of the fake stars that are being added
     to the image with a required S/N [set_zogy.fakestar_s2n].
 
@@ -4516,8 +4474,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # first read SExtractor fits table
     sexcat = '{}_cat.fits'.format(base)
     data_sex = read_hdulist (sexcat)
+
     
-    if 'FLUX_OPT' not in data_sex.dtype.names or get_par(set_zogy.redo,tel):
+    # switch to rerun some parts (source extractor, astrometry.net,
+    # psfex) even if those were executed done
+    redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
+            (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
+    
+
+    if 'FLUX_OPT' not in data_sex.dtype.names or redo:
         
         if get_par(set_zogy.timing,tel): t1 = time.time()
         log.info('deriving optimal fluxes ...')
@@ -4531,7 +4496,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         
         psfex_bintable = '{}_psf.fits'.format(base)
-        results = get_psfoptflux_xycoords (
+        results = get_psfoptflux (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
             satlevel=satlevel, replace_satdata=False, psffit=mypsffit,
             moffat=False, log=log)
@@ -4562,7 +4527,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
 
         # determine 5-sigma limiting flux using
-        # [get_psfoptflux_xycoords] with [get_limflux]=True for random
+        # [get_psfoptflux] with [get_limflux]=True for random
         # coordinates across the field
         nlimits = 501
         edge = 100
@@ -4571,8 +4536,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         
         def calc_limflux (nsigma):
 
-            # '__' is to disregard the 2nd output array from [get_psfoptflux_xycoords]
-            limflux_array, __ = get_psfoptflux_xycoords (
+            # '__' is to disregard the 2nd output array from [get_psfoptflux]
+            limflux_array, __ = get_psfoptflux (
                 psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim, ylim,
                 satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma, log=log)
             limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
@@ -7182,28 +7147,37 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     ny = int(ysize / subsize)
 
 
+    # switch to rerun some parts (source extractor, astrometry.net,
+    # psfex) even if those were executed done
+    redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
+            (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
+
+
     # run psfex on SExtractor output catalog
     #
-    # If the PSFEx output file is already present with the same
-    # [psf_size_config] as currently required, then skip [run_psfex].
-    skip_psfex = False
+    # If the PSFEx output file is already present with at least the
+    # [psf_size_config] as currently required, and redo is not True,
+    # then skip [run_psfex].
     psfex_bintable = '{}_psf.fits'.format(base)
-    if os.path.isfile(psfex_bintable) and not get_par(set_zogy.redo,tel):
+    if os.path.isfile(psfex_bintable) and not redo:
         data, header_psf = read_hdulist (psfex_bintable, get_header=True)
         data = data[0][0][:]
         # use function [get_samp_PSF_config_size] to determine [psf_samp]
         # and [psf_size_config]
-        psf_samp, psf_size_config = get_samp_PSF_config_size()
+        psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
         log.info('psf_samp: {}, psf_size_config: {}'
                  .format(psf_samp, psf_size_config))
-        # check that the above [psf_size_config] is the same as
-        # the size of the images in the data array, or equivalently,
-        # the value of the header parameters 'PSFAXIS1' or 'PSFAXIS2'
-        if psf_size_config == header_psf['PSFAXIS1']:
+
+        # if the required [psf_size_config] is smaller than or
+        # equal to the psf_size_config already run through PSFEx,
+        # then not needed to run PSFEx again
+        if psf_size_config <= header_psf['PSFAXIS1']:
             skip_psfex = True
             if get_par(set_zogy.verbose,tel):
                 log.info('Skipping run_psfex for image: {}'.format(image))
-                        
+    else:
+        skip_psfex = False
+
 
     if not skip_psfex:
         psfexcat = '{}_psfex.cat'.format(base)
@@ -7245,8 +7219,9 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     # [set_zogy.sex_par_psffit] include several new columns related to the PSF
     # fitting.
     sexcat_ldac_psffit = '{}_ldac_psffit.fits'.format(base)
-    if ((not os.path.isfile(sexcat_ldac_psffit) or get_par(set_zogy.redo,tel))
-        and get_par(set_zogy.psffit_sex,tel)):
+    if (get_par(set_zogy.psffit_sex,tel) and
+        (not os.path.isfile(sexcat_ldac_psffit) or redo)):
+        
         result = run_sextractor(image, sexcat_ldac_psffit,
                                 get_par(set_zogy.sex_cfg_psffit,tel),
                                 get_par(set_zogy.sex_par_psffit,tel),
@@ -7290,14 +7265,14 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
             log.info('polscal1:                     {}'.format(polscal1))
             log.info('polzero2:                     {}'.format(polzero2))
             log.info('polscal2:                     {}'.format(polscal2))
-            
+
         log.info('order polynomial:             {}'.format(poldeg))
-        log.info('PSFex FWHM:                   {}'.format(psf_fwhm))
+        log.info('PSFex FWHM (pixels):          {}'.format(psf_fwhm))
         log.info('PSF sampling size (pixels):   {}'.format(psf_samp))
-        log.info('PSF size defined in config:   {}'.format(psf_size_config))
+        log.info('PSF config size:              {}'.format(psf_size_config))
         log.info('number of accepted PSF stars: {}'.format(psf_nstars))
         log.info('final reduced chi2 PSFEx fit: {}'.format(psf_chi2))
-        
+
 
     # call centers_cutouts to determine centers
     # and cutout regions of the full image
@@ -7353,7 +7328,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     if psf_size % 2 == 0:
         psf_size += 1
     if get_par(set_zogy.verbose,tel):
-        log.info('FWHM:                         {}'.format(fwhm))
+        log.info('FWHM (pixels):                {}'.format(fwhm))
         log.info('final image PSF size:         {}'.format(psf_size))
 
     # now change psf_samp slightly:
@@ -8947,11 +8922,9 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
 
         data_remap[index_resample] = data_resample
 
-        # write to fits [image_out] with correct header; since name of
+        # write to fits [image_out] with correct header; N.B.:
         # remapped reference bkg/std/mask image will currently be the
-        # same for different new images, this if condition needs to
-        # go: 
-        #if not os.path.isfile(image_out) or get_par(set_zogy.redo,tel):
+        # same for different new images
         header_out['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits.writeto(image_out, data_remap, header_out, overwrite=True)
 
@@ -9120,11 +9093,12 @@ def get_vignet_size (imtype, log):
         # where the latter is scaled with the pixelscale ratio in case
         # new and ref images have different scales
         if get_par(set_zogy.psf_sampling,tel) == 0.:
-            try: 
+
+            if fwhm_ref in globals():
                 # fwhm_ref not present if no reference image is provided
                 fwhm_vignet = np.amax([fwhm_new,
                                        fwhm_ref*(pixscale_ref/pixscale_new)])
-            except:
+            else:
                 fwhm_vignet = fwhm_new
 
             size_vignet = np.int(np.ceil(2.*get_par(set_zogy.psf_radius,tel)
@@ -9639,7 +9613,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
         
     # use function [get_samp_PSF_config_size] to determine [psf_samp]
     # and [psf_size_config] required to run PSFEx
-    psf_samp, psf_size_config = get_samp_PSF_config_size()
+    psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
     psf_size_config_str = '{},{}'.format(psf_size_config, psf_size_config)
     
     if get_par(set_zogy.verbose,tel):
@@ -9762,8 +9736,13 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
         
 ################################################################################
 
-def get_samp_PSF_config_size():
-
+def get_samp_PSF_config_size(imtype):
+    
+    if imtype=='new':
+        fwhm = fwhm_new
+    elif imtype=='ref':
+        fwhm = fwhm_ref
+    
     # [psf_size] is the PSF size in image pixels:
     #   [psf_size] = [psf_size_config] * [psf_samp]
     # where [psf_size_config] is the size of the square
@@ -9776,11 +9755,16 @@ def get_samp_PSF_config_size():
     # where [set_zogy.psf_samp_fwhmfrac] is a global parameter which should be set
     # to about 0.25 so for an oversampled image with FWHM~8: [psf_samp]~2,
     # while an undersampled image with FWHM~2: [psf_samp]~1/4
-    fwhm_samp = np.amax([fwhm_new, fwhm_ref])
     if get_par(set_zogy.psf_sampling,tel) == 0:
-        psf_samp = get_par(set_zogy.psf_samp_fwhmfrac,tel) * fwhm_samp
+        psf_samp = get_par(set_zogy.psf_samp_fwhmfrac,tel) * fwhm
     else:
         psf_samp = get_par(set_zogy.psf_sampling,tel)
+
+    #fwhm_samp = np.amax([fwhm_new, fwhm_ref])
+    #if get_par(set_zogy.psf_sampling,tel) == 0:
+    #    psf_samp = get_par(set_zogy.psf_samp_fwhmfrac,tel) * fwhm_samp
+    #else:
+    #    psf_samp = get_par(set_zogy.psf_sampling,tel)
 
     # throughout this function, the maximum of [fwhm_new] and
     # [fwhm_ref] is used for the FWHM, so that for both the new and
@@ -9797,12 +9781,24 @@ def get_samp_PSF_config_size():
     #   [psf_size_config] = 2 * [set_zogy.psf_radius] / [set_zogy.psf_samp_fwhmfrac]
     # this is independent of the image FWHM since the FWHM is sampled
     # by a fixed number of steps defined by [set_zogy.psf_samp_fwhmfrac]
-    psf_size_config = 2. * get_par(set_zogy.psf_radius,tel) * fwhm_samp / psf_samp
+    
+    if imtype=='ref':
+        # for the reference image, make [psf_size_config] as large as
+        # allowed by [set_zogy.size_vignet_ref] and [psf_samp]
+        # determined above
+        psf_size_config = get_par(set_zogy.size_vignet_ref,tel) / psf_samp
+    else:
+        # for the new image
+        fwhm_max = np.amax([fwhm_new,
+                            fwhm_ref*(pixscale_ref/pixscale_new)])
+        psf_size_config = ((2. * get_par(set_zogy.psf_radius,tel) * fwhm_max)
+                           / psf_samp)
 
     # convert to integer
     psf_size_config = np.int(psf_size_config+0.5)
     # make sure it's odd
-    if psf_size_config % 2 == 0: psf_size_config += 1
+    if psf_size_config % 2 == 0:
+        psf_size_config += 1
 
     return psf_samp, psf_size_config
 
@@ -10340,8 +10336,11 @@ def main():
                         help='name of settings file')
     parser.add_argument('--log', type=str, default=None,
                         help='if name is provided, an output logfile is created')
-    params.add_argument('--redo', default=None,
-                        help='force re-doing some steps (source-extractor, '
+    params.add_argument('--redo_new', default=None,
+                        help='force re-doing new-image steps (source-extractor, '
+                        'astrometry, PSFEx, even when products already present)')
+    params.add_argument('--redo_ref', default=None,
+                        help='force re-doing ref-image steps (source-extractor, '
                         'astrometry, PSFEx, even when products already present)')
     parser.add_argument('--verbose', default=None,
                         help='increase verbosity level')
@@ -10357,8 +10356,9 @@ def main():
     args = parser.parse_args()
     optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask,
                         args.ref_fits_mask, args.set_file, args.log,
-                        args.redo, args.verbose, args.nthreads, args.telescope)
-
+                        args.redo_new, args_redo_ref,
+                        args.verbose, args.nthreads, args.telescope)
+    
 
 if __name__ == "__main__":
     main()
