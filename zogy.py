@@ -588,35 +588,37 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     if new and ref:
         # get x, y and fratios from matching PSFex stars across entire
-        # frame the "_sub" output arrays are the values to be used for
+        # frame the "_subs" output arrays are the values to be used for
         # the subimages below in the function [run_ZOGY]
-        x_fratio, y_fratio, fratio, dx, dy, fratio_sub, dx_sub, dy_sub = (
-            get_fratio_dxdy('{}_psfex.cat'.format(base_new),
-                            '{}_psfex.cat'.format(base_ref),
-                            header_new, header_ref, 
-                            nsubs, cuts_ima, log, header_trans, pixscale_new))
-        
-        log.info('global fratio from PSF stars: {}'.format(fratio))
+        x_fratio, y_fratio, fratio, dx, dy, fratio_subs, dx_subs, dy_subs = (
+            get_fratio_dxdy ('{}_cat.fits'.format(base_new),
+                             '{}_cat.fits'.format(base_ref),
+                             '{}_psfex.cat'.format(base_new),
+                             '{}_psfex.cat'.format(base_ref),
+                             header_new, header_ref, 
+                             nsubs, cuts_ima, log, header_trans, pixscale_new))
 
-        # compare this with the flux ratio inferred from the zeropoint
-        # difference between new and ref:
-        keys_temp = ['PC-ZP', 'AIRMASSC', 'PC-EXTCO']
-        if (np.all([k in header_new for k in keys_temp]) and 
-            np.all([k in header_ref for k in keys_temp])):
-            zp_new, airmass_new, extco_new = [header_new[k] for k in keys_temp]
-            zp_ref, airmass_ref, extco_ref = [header_ref[k] for k in keys_temp]
-            dmag = zp_ref - zp_new - extco_new * (airmass_ref - airmass_new)
-            fratio_zps = 10**(dmag/-2.5)
-            # force fratio to be this values from run with PSF radius of 5*FWHM
-            #fratio_zps = 1.116
-            fratio_sub[:] = fratio_zps
-            log.info('using global fratio from delta ZPs: {}'.format(fratio_zps))
+
+        if False:
+            # compare this with the flux ratio inferred from the zeropoint
+            # difference between new and ref:
+            keys_temp = ['PC-ZP', 'AIRMASSC', 'PC-EXTCO']
+            if (np.all([k in header_new for k in keys_temp]) and 
+                np.all([k in header_ref for k in keys_temp])):
+                zp_new, airmass_new, extco_new = [header_new[k] for k in keys_temp]
+                zp_ref, airmass_ref, extco_ref = [header_ref[k] for k in keys_temp]
+                dmag = zp_ref - zp_new - extco_new * (airmass_ref - airmass_new)
+                fratio_zps = 10**(dmag/-2.5)
+                # force fratio to be this values from run with PSF radius of 5*FWHM
+                #fratio_zps = 1.116
+                #fratio_subs[:] = fratio_zps
+                #log.info('using global fratio from delta ZPs: {}'.format(fratio_zps))
            
             
         # fratio is in counts, convert to electrons, in case gains of new
         # and ref images are not identical
         fratio *= gain_new / gain_ref
-        fratio_sub *= gain_new / gain_ref
+        fratio_subs *= gain_new / gain_ref
 
 
         if get_par(set_zogy.make_plots,tel):
@@ -725,8 +727,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            psf_ref[nsub], psf_new[nsub],
                                            data_ref_bkg_std[nsub],
                                            data_new_bkg_std[nsub],
-                                           fratio_sub[nsub],
-                                           dx_sub[nsub], dy_sub[nsub],
+                                           fratio_subs[nsub],
+                                           dx_subs[nsub], dy_subs[nsub],
                                            use_FFTW=use_FFTW, log=log)
 
                 results_pool_zogy.append(result_sub)
@@ -1413,7 +1415,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # in an error if transients are close to the edge
         result = format_cat (cat_trans, cat_trans_out, cat_type='trans',
                              header_toadd=(header_new+header_trans),
-                             exptime=exptime_new, header_ref=header_ref,
+                             exptime=exptime_new,
                              apphot_radii=get_par(set_zogy.apphot_radii,tel),
                              data_thumbnails=data_thumbnails,
                              keys_thumbnails=keys_thumbnails,
@@ -2237,9 +2239,9 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 ################################################################################
 
 def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
-                header_ref=None, exptime=0, apphot_radii=None,
-                data_thumbnails=None, keys_thumbnails=None, size_thumbnails=100,
-                ML_calc_prob=False, ML_prob_real=None, tel=None, log=None):
+                exptime=0, apphot_radii=None, data_thumbnails=None,
+                keys_thumbnails=None, size_thumbnails=100, ML_calc_prob=False,
+                ML_prob_real=None, tel=None, log=None):
 
 
     """Function that formats binary fits table [cat_in] according to
@@ -2356,7 +2358,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'THUMBNAIL_SCORR':[thumbnail_fmt, 'sigma'], #, 'flt16' ]
     }
 
-
+    
     if cat_type is None:
         # if no [cat_type] is provided, define the keys to record from
         # the data columns
@@ -8214,16 +8216,18 @@ def calc_psf_config (data, poldeg, x, y):
 
 ################################################################################
 
-def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
-                    nsubs, cuts_ima, log, header, pixscale):
+def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
+                     header_ref, nsubs, cuts_ima, log, header, pixscale,
+                     use_optflux=True):
     
     """Function that takes in output catalogs of stars from the PSFex runs
     on the new and the ref image, and returns arrays with x,y pixel
     coordinates (!) (in the new frame) and flux ratios for the
-    matching stars. In addition, it provides the difference in x- and
-    y-coordinates between the catalogs after converting the reference
-    image pixels to pixels in the new image through the WCS solutions
-    of both images.
+    matching stars. The latter can the normalisation fluxes as saved
+    in the .._psf.cat file, or the optimal fluxes. In addition, it
+    provides the difference in x- and y-coordinates between the
+    catalogs after converting the reference image pixels to pixels in
+    the new image through the WCS solutions of both images.
 
     """
     
@@ -8290,49 +8294,95 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
         dy_match = dy[mask_match]
         fratio_match = fratio[mask_match]
     
-        
+
     x_new_match = []
     y_new_match = []
+    x_ref_match = []
+    y_ref_match = []
     dx_match = []
     dy_match = []
     fratio_match = []
     nmatch = 0
-    dist_max = 3./pixscale #pixels
+    dist2_max = (3./pixscale)**2 #pixels
     for i_new in range(len(x_new)):
         # calculate distance to ref objects
         dx_temp = x_new[i_new] - x_ref2new
         dy_temp = y_new[i_new] - y_ref2new
-        dist = np.sqrt(dx_temp**2 + dy_temp**2)
+        dist2 = dx_temp**2 + dy_temp**2
         # minimum distance and its index
-        dist_min, i_ref = np.amin(dist), np.argmin(dist)
-        if dist_min <= dist_max:
+        dist2_min, i_ref = np.amin(dist2), np.argmin(dist2)
+        if dist2_min <= dist2_max:
             nmatch += 1
             x_new_match.append(x_new[i_new])
             y_new_match.append(y_new[i_new])
+            x_ref_match.append(x_ref[i_ref])
+            y_ref_match.append(y_ref[i_ref])
             dx_match.append(dx_temp[i_ref])
             dy_match.append(dy_temp[i_ref])
             # append ratio of normalized counts to fratios
             fratio_match.append(norm_new[i_new] / norm_ref[i_ref])
-                        
+            
     if get_par(set_zogy.verbose,tel):
         log.info('fraction of PSF stars that match: {}'
                  .format(float(nmatch)/len(x_new)))
 
     x_new_match = np.asarray(x_new_match)
     y_new_match = np.asarray(y_new_match)
+    x_ref_match = np.asarray(x_ref_match)
+    y_ref_match = np.asarray(y_ref_match)
     dx_match = np.asarray(dx_match)
     dy_match = np.asarray(dy_match)
     fratio_match = np.asarray(fratio_match)
+
+    log.info ('fratio_match: {}'.format(fratio_match))
+
+    if use_optflux:
     
-    # now also determine arrays for fratio, dx and dy to be used in
-    # function [run_ZOGY]:
-    fratio_sub = np.zeros(nsubs)
-    dx_sub = np.zeros(nsubs)
-    dy_sub = np.zeros(nsubs)
+        # now match these x,y coordinates to the new and ref catalogs to
+        # extract the optimal fluxes
+        data_new = read_hdulist(cat_new, get_header=False)
+        data_ref = read_hdulist(cat_ref, get_header=False)
+
+        index_new = []
+        for i in range(len(x_new_match)):
+            dist2 = ((data_new['X_POS']-x_new_match[i])**2 + 
+                     (data_new['Y_POS']-y_new_match[i])**2)
+            index_new.append(np.argmin(dist2))
+
+        index_ref = []
+        for i in range(len(x_ref_match)):
+            dist2 = ((data_ref['X_POS']-x_ref_match[i])**2 + 
+                     (data_ref['Y_POS']-y_ref_match[i])**2)
+            index_ref.append(np.argmin(dist2))
+
+        exptime_new = header_new['EXPTIME']
+        exptime_ref = header_ref['EXPTIME']
+        # CHECK!!! UPDATE!!!  force for now (at the moment, ref
+        # catalog fluxes have been saved in e-/s, while EXPTIME has
+        # not been set to that; need to be made consistent
+        exptime_ref = 1.
+        fratio_match = ((exptime_ref/exptime_new) * 
+                        (data_new['FLUX_OPT'][np.asarray(index_new)] /
+                         data_ref['FLUX_OPT'][np.asarray(index_ref)]))
+
+        log.info('fratio_match: {}'.format(fratio_match))
+
+
+
+    # now also determine fratio, dx and dy for each subimage which can
+    # be used in function [run_ZOGY]:
+    fratio_subs = np.zeros(nsubs)
+    dx_subs = np.zeros(nsubs)
+    dy_subs = np.zeros(nsubs)
 
     # calculate full-frame average standard deviation and median
     fratio_mean_full, fratio_median_full, fratio_std_full = sigma_clipped_stats(
         fratio_match.astype('float64'), mask_value=0)
+    if get_par(set_zogy.verbose,tel):
+        log.info('fratio_mean_full: {:.3f}'.format(fratio_mean_full))
+        log.info('fratio_median_full: {:.3f}'.format(fratio_median_full))
+        log.info('fratio_std_full: {:.3f}'.format(fratio_std_full))
+
     dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match.astype('float64'),
                                                      mask_value=0)
     dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match.astype('float64'),
@@ -8423,16 +8473,16 @@ def get_fratio_dxdy(psfcat_new, psfcat_ref, header_new, header_ref,
                 dx = local_or_full (dx, 0., dx_full, log)
                 dy = local_or_full (dy, 0., dy_full, log)
                 
-        fratio_sub[nsub] = fratio_mean
-        dx_sub[nsub] = dx
-        dy_sub[nsub] = dy
+        fratio_subs[nsub] = fratio_mean
+        dx_subs[nsub] = dx
+        dy_subs[nsub] = dy
 
-        
+
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_fratio_dxdy', log=log)
 
     return x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
-        fratio_sub, dx_sub, dy_sub
+        fratio_subs, dx_subs, dy_subs
 
 
 ################################################################################
