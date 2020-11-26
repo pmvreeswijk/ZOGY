@@ -596,7 +596,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              '{}_psfex.cat'.format(base_new),
                              '{}_psfex.cat'.format(base_ref),
                              header_new, header_ref, 
-                             nsubs, cuts_ima, log, header_trans, pixscale_new))
+                             nsubs, cuts_ima, log, header_trans, pixscale_new,
+                             use_optflux=get_par(set_zogy.fratio_optflux,tel)))
 
 
         if False:
@@ -833,10 +834,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
                 if get_par(set_zogy.nfakestars,tel)>0:
                     names_disp_list[0] = '{}_new.fits'.format(base_newref)
-                    dtype_list.append('uint8')
                     
                 if new_fits_mask is not None:
                     names_disp_list.append(new_fits_mask)
+                    dtype_list.append('uint8')
 
                 if ref_fits_mask is not None:
                     fits_tmp = ref_fits_mask.replace('.fits', '_remap.fits')
@@ -849,7 +850,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  dtype_list[i_name], index_extract)
 
                 # display
-                names_full = [names_disp_list[0:2], names_zogy_list,
+                names_full = [names_disp_list[0:2], names_zogy,
                               names_disp_list[2:]]
                 names_full = list(itertools.chain.from_iterable(names_full))
                 display_subs(base_new, base_ref, nsubs, names_full)
@@ -2654,7 +2655,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     data_new_mask = read_hdulist (fits_new_mask)
     data_ref_mask = read_hdulist (fits_ref_mask)
     data_newref_mask = (data_new_mask | data_ref_mask)
-    fits_newref_mask = '{}_newref_mask.fits'.format(base)
+    fits_newref_mask = '{}_mask_newref.fits'.format(base)
     fits.writeto (fits_newref_mask, data_newref_mask, overwrite=True)
     del data_new_mask, data_ref_mask
 
@@ -2840,13 +2841,6 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans = table_trans[mask_fwhm]
     log.info ('ntrans after FWHM cut: {}'.format(len(table_trans)))
 
-    if get_par(set_zogy.make_plots,tel):
-        ds9_rad += 2
-        result = prep_ds9regions(
-            '{}_ds9regions_trans_filt_fwhm.txt'.format(base),
-            table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='red')
-
     
     # read fratio (Fn/Fr) from header_trans in order
     # to scale the reference image and its variance
@@ -2901,6 +2895,15 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
 
 
+    if get_par(set_zogy.make_plots,tel):
+        ds9_rad += 2
+        result = prep_ds9regions(
+            '{}_ds9regions_trans_filt_fwhm.txt'.format(base),
+            table_trans['X_POS'], table_trans['Y_POS'],
+            radius=ds9_rad, width=2, color='red',
+            value=table_trans['CHI2_PSF_D'])
+
+
     # add mask_finite, checking if table_trans contains finite values
     mask_finite = np.ones(len(table_trans), dtype=bool)
     for col in colnames:
@@ -2912,13 +2915,6 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans = table_trans[mask_keep]
     log.info('ntrans after PSF fit chi2 filter: {}'.format(len(table_trans)))
 
-    if get_par(set_zogy.make_plots,tel):
-        ds9_rad += 2
-        result = prep_ds9regions(
-            '{}_ds9regions_trans_filt_PSF_D.txt'.format(base),
-            table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='magenta')
-
 
     # Moffat fit to D, directly added as columns to table_trans
     colnames = ['FLUX_OPT_D_alt', 'FLUXERR_OPT_D_alt', 'X_MOFFAT', 'XERR_MOFFAT',
@@ -2927,6 +2923,15 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans.add_columns(help_psffit_D (False, True), names=colnames)
 
     log.info ('[get_trans] time after Moffat fit to D: {}'.format(time.time()-t))
+
+
+    if get_par(set_zogy.make_plots,tel):
+        ds9_rad += 2
+        result = prep_ds9regions(
+            '{}_ds9regions_trans_filt_PSF_D.txt'.format(base),
+            table_trans['X_POS'], table_trans['Y_POS'],
+            radius=ds9_rad, width=2, color='magenta',
+            value=table_trans['CHI2_MOFFAT'])
 
 
     # add mask_finite, checking if table_trans contains finite values
@@ -2940,6 +2945,14 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
     table_trans = table_trans[mask_keep]
     log.info('ntrans after Moffat fit chi2 filter: {}'.format(len(table_trans)))
+
+
+    if get_par(set_zogy.make_plots,tel):
+        ds9_rad += 2
+        result = prep_ds9regions(
+            '{}_ds9regions_trans_filt_PSF_MOFFAT.txt'.format(base),
+            table_trans['X_POS'], table_trans['Y_POS'],
+            radius=ds9_rad, width=2, color='green')
 
 
     # determine RAs and DECs
@@ -3453,9 +3466,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     # estimate of FWHM in pix for new and ref image
     psf_fwhm_new, psf_fwhm_ref = 0, 0
     if 'PSF-FWHM' in header_new:
-        psf_fwhm_new = header_new['PSF-FWHM'] / pixscale_new
+        psf_fwhm_new = header_new['PSF-FWHM']
     if 'PSF-FWHM' in header_ref:
-        psf_fwhm_ref = header_ref['PSF-FWHM'] / pixscale_ref
+        psf_fwhm_ref = header_ref['PSF-FWHM']
 
     # estimate of elongation for new and ref image
     elong_new, elong_ref = 0, 0
@@ -4016,7 +4029,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # [psf_size] is the PSF size in image pixels, which determines the
     # size of [psf_ima] and [psf_ima_ref] below. For the photometry
     # measurements, [psf_size] should be defined by
-    # 2*psf_radius*fwhm_new or fwhm_ref; for the PSF fit to the
+    # 2*psf_rad_phot*fwhm_new or fwhm_ref; for the PSF fit to the
     # difference image, in which case the input imtype will be None,
     # the psf_size should be defined using the maximum of fwhm_new and
     # fwhm_ref.
@@ -4027,7 +4040,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     elif imtype is None:
         fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
 
-    psf_size = int(2 * get_par(set_zogy.psf_radius,tel) * fwhm_use)
+    psf_size = int(2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use)
 
     # depending on [psf_oddsized], force the psf size to be odd or
     # even
@@ -4038,35 +4051,25 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         if psf_size % 2 != 0:
             psf_size += 1
 
-    log.info ('psf_size used in [get_psfoptflux]: {}'.format(psf_size))    
-
-    use_PSF_subimage = False
+    log.info ('psf_size used in [get_psfoptflux]: {} pix for imtype: {}'
+              .format(psf_size, imtype))
     
-    # now update [psf_samp] slightly so that [psf_config_size] *
-    # [psf_samp] corresponds to exactly [psf_size]. For the new image
-    # only because the ref image [psf_size_config] is much larger than
-    # [psf_size]/[psf_samp], since it was built as large as allowed by
-    # [set_zogy.size_vignet_ref].
-    if imtype != 'ref':
-        psf_samp_fcorr = (float(psf_size) / float(psf_size_config)) / psf_samp
-        psf_samp *= psf_samp_fcorr
-        # also correct psf_samp_ref for the PSF to D
-        #if imtype is None:
-        #    psf_samp_ref *= psf_samp_fcorr
-
-        if use_PSF_subimage:
-            # also try to speed up flux determination by reading in
-            # psf_ima numpy file created in [get_psf] which contains
-            # the PSF images at the centers of the subimages; should
-            # not be done for the ref image flux determination as the
-            # psf_ima cube is constrained to the same size in pixels
-            # as the new image for the moment
-            psf_ima_cube = np.load('{}_psf_ima.npy'.format(base_new),
-                                   mmap_mode='c')
-            # using [coords2sub] create array indicating subimage
-            # index corresponding to the pixel coordinates
-            index_subs = coords2sub (xcoords, ycoords, D.shape)
-            
+    
+    use_PSF_subimage = False
+    if imtype != 'ref' and use_PSF_subimage:
+        
+        # try to speed up flux determination by reading in psf_ima
+        # numpy file created in [get_psf] which contains the PSF
+        # images at the centers of the subimages; should not be done
+        # for the ref image flux determination as the psf_ima cube is
+        # constrained to the same size in pixels as the new image for
+        # the moment
+        psf_ima_cube = np.load('{}_psf_ima.npy'.format(base_new),
+                               mmap_mode='c')
+        # using [coords2sub] create array indicating subimage
+        # index corresponding to the pixel coordinates
+        index_subs = coords2sub (xcoords, ycoords, D.shape)
+        
     
     # previously this was a loop; now turned to a function to
     # try pool.map multithreading below
@@ -4100,8 +4103,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
             # image is at the original pixel scale
             psf_ima, __ = get_psf_ima (
-                data_psf, xcoords[i], ycoords[i], psf_size, psf_samp,
-                polzero1, polscal1, polzero2, polscal2, poldeg,
+                data_psf, xcoords[i], ycoords[i], psf_size,
+                psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
                 xshift=xshift, yshift=yshift, imtype=imtype, log=log)
             
 
@@ -4132,9 +4135,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             
             # same for reference image
             psf_ima_ref, __ = get_psf_ima (
-                data_psf_ref, xcoords[i], ycoords[i], psf_size, psf_samp_ref,
-                polzero1_ref, polscal1_ref, polzero2_ref, polscal2_ref, poldeg_ref,
-                xshift=xshift, yshift=yshift, imtype='ref', log=log)
+                data_psf_ref, xcoords[i], ycoords[i], psf_size,
+                psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
+                polscal2_ref, poldeg_ref, xshift=xshift, yshift=yshift,
+                imtype='ref', log=log)
 
             index_ref, index_P_ref = get_P_indices (
                 xcoords[i], ycoords[i], xsize, ysize, psf_size, psf_oddsized)
@@ -4317,15 +4321,16 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                              .format(xcoords[i], ycoords[i]))
                     log.info(traceback.format_exc())
                     return
-                
-        if i % 10000 == 0:
-            t_loop = time.time()-t_temp
-            log.info ('t_loop = {:.3f}s'.format(t_loop))
-            log.info ('t_new = {:.3f}s; fraction: {:.3f}'
-                      .format(t_new, t_new/t_loop))
-            if psfex_bintable_ref is not None:
-                log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
-                          .format(t_ref, t_ref/t_loop))
+
+        if False:
+            if i % 10000 == 0:
+                t_loop = time.time()-t_temp
+                log.info ('t_loop = {:.3f}s'.format(t_loop))
+                log.info ('t_new = {:.3f}s; fraction: {:.3f}'
+                          .format(t_new, t_new/t_loop))
+                if psfex_bintable_ref is not None:
+                    log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
+                              .format(t_ref, t_ref/t_loop))
                 
                 
     if get_par(set_zogy.timing,tel): t1 = time.time()
@@ -4494,7 +4499,8 @@ def coords2chan (xcoords, ycoords):
 
 def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
                  polscal1, polzero2, polscal2, poldeg, xshift=0, yshift=0,
-                 imtype=None, log=None):
+                 imtype=None, remap=False, header=None, header_new=None,
+                 log=None):
 
     """function to infer the PSF image with shape (psfsize, psfsize) at
     the original pixel scale at the input pixel coordinates (xcoord,
@@ -4511,6 +4517,18 @@ def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
 
     # half the psf image size
     psf_hsize = int(psf_size/2.)
+
+
+    # if remapping is done and the new and ref image have
+    # different orientations, the PSF of the ref image needs
+    # to be transformed to that of the new image
+    if imtype=='ref' and remap:
+        # remap [psf_ima_sub] from the ref frame to the new frame
+        # using the function [orient_data]
+        psf_ima_config = orient_data (psf_ima_config, header,
+                                      header_out=header_new,
+                                      tel=tel, log=log)
+
     
     # shift the PSF image (if needed) and resize/resample at the
     # original pixel scale
@@ -4553,40 +4571,13 @@ def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
         psf_ima_resized = psf_ima_shift_resized
 
 
-    if imtype=='ref':
-
-        # for the reference image, a subsection of [psf_ima_resized] needs
-        # to be extracted, with the shape (psf_size, psf_size)
-        ysize_resized, xsize_resized = psf_ima_resized.shape
-
-        # these are the x,y indices of the central pixel; this is
-        # independent of size being odd/even
-        xpos_center = int(xsize_resized/2.)
-        ypos_center = int(ysize_resized/2.)
-        # index does depend on size being odd/even
-        if ysize_resized % 2 == 0 and xsize_resized % 2 == 0:
-            odd = 0
-        else:
-            odd = 1
-
-        index_ref = (slice(ypos_center-psf_hsize, ypos_center+psf_hsize+odd),
-                     slice(xpos_center-psf_hsize, xpos_center+psf_hsize+odd))
-
-        # extract relevant subsection
-        psf_ima_resized = psf_ima_resized[index_ref]
-
-        #log.info ('xcoord, ycoord = {}, {}'.format(xcoord, ycoord))
-        #log.info ('psf_ima_resized.shape: {}'.format(psf_ima_resized.shape))
-        #log.info ('odd: {}'.format(odd))
-        #log.info ('index_ref: {}'.format(index_ref))
+    # clean, cut and normalize PSF
+    psf_ima_resized = clean_cut_norm_psf (
+        psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel),
+        cut_size=psf_size)
 
 
-    # clean and normalize PSF
-    psf_ima_resized_norm = clean_norm_psf (
-        psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel))
-
-
-    return psf_ima_resized_norm, psf_ima_config
+    return psf_ima_resized, psf_ima_config
 
 
 ################################################################################
@@ -8202,18 +8193,18 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
         # use function [get_samp_PSF_config_size] to determine [psf_samp]
         # and [psf_size_config]
         psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
-        log.info('psf_samp: {}, psf_size_config: {}'
-                 .format(psf_samp, psf_size_config))
+        log.info('psf_samp: {:.3f}, psf_size_config: {} in [get_psf] for {}'
+                 .format(psf_samp, psf_size_config, imtype))
 
-        # if the required [psf_size_config] is the same as listed in
-        # the new image header, or it is smaller or equal to the
-        # psf_size_config of the ref image header, then no need to run
-        # PSFEx again
-        if ((imtype=='new' and psf_size_config == header_psf['PSFAXIS1']) or
-            (imtype=='ref' and psf_size_config <= header_psf['PSFAXIS1'])):
+        # if the required [psf_size_config] is smaller than or equal
+        # to the psf_size_config of the PSF image header, both for new
+        # and ref, then no need to run PSFEx again, because the size
+        # will be adjusted to the size required ([psf_size]) in
+        # function [get_psf_ima]
+        if psf_size_config <= header_psf['PSFAXIS1']:
             skip_psfex = True
             if get_par(set_zogy.verbose,tel):
-                log.info('Skipping run_psfex for image: {}'.format(image))
+                log.info ('Skipping run_psfex for image: {}'.format(image))
 
 
     if not skip_psfex:
@@ -8307,11 +8298,11 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
         # corresponds to the reference header
         wcs = WCS(header)
         centers[:,1], centers[:,0] = wcs.all_world2pix(ra_temp, dec_temp, 1)
-        
+
 
     # [psf_size] is the PSF size in image pixels, which determines the
     # size of [psf_ima_sub] below. For both the new and ref image, it
-    # should be defined as 2*psf_radius*fwhm, where fwhm is the
+    # should be defined as 2*psf_rad_zogy*fwhm, where fwhm is the
     # maximum of fwhm_new and fwhm_ref. At least, if these are both
     # available; it is possible that [get_psf] is run on the new or
     # ref image only - use the input [fwhm] in that case.
@@ -8320,11 +8311,12 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     else:
         fwhm_use = fwhm
 
-    psf_size = int(2 * get_par(set_zogy.psf_radius,tel) * fwhm_use)
+    psf_size = int(2 * get_par(set_zogy.psf_rad_zogy,tel) * fwhm_use)
     # if this is even, make it odd
     if psf_size % 2 == 0:
         psf_size += 1
 
+        
     if 'fwhm_new' in globals():
         log.info ('fwhm_new (pix): {:.2f}'.format(fwhm_new))
 
@@ -8332,17 +8324,10 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
         log.info ('fwhm_ref (pix): {:.2f}'.format(fwhm_ref))
         
     log.info ('fwhm_use (pix): {:.2f}'.format(fwhm_use))
-    log.info ('psf_size used in [get_psf]: {}'.format(psf_size))
-
-    # now update [psf_samp] slightly so that [psf_config_size] *
-    # [psf_samp] corresponds to exactly [psf_new]. For the new image
-    # only because the ref image [psf_size_config] is much larger than
-    # [psf_size]/[psf_samp], since it was built as large as allowed by
-    # [set_zogy.size_vignet_ref].
-    if imtype=='new':
-        psf_samp = float(psf_size) / float(psf_size_config)
-
-    log.info ('psf_samp used in [get_psf]: {}'.format(psf_samp))
+    log.info ('psf_size used in [get_psf]: {} pix for imtype: {}'
+              .format(psf_size, imtype))
+    log.info ('psf_samp used in [get_psf]: {:.2f} for imtype: {}'
+              .format(psf_samp, imtype))
 
     # [psf_ima] is the corresponding cube of PSF subimages
     psf_ima = np.zeros((nsubs,psf_size,psf_size)).astype('float32')
@@ -8362,25 +8347,29 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     # number of header keywords
     if not skip_psfex and PSFEx_processed:
         header['PSF-P'] = (PSFEx_processed, 'successfully processed by PSFEx?')   
-        header['PSF-RAD'] = (get_par(set_zogy.psf_radius,tel),
-                             '[FWHM] radius in units of FWHM to build PSF')
-        header['PSF-SIZE'] = (psf_size, '[pix] size PSF image')
+        header['PSF-RAD'] = (get_par(set_zogy.psf_rad_zogy,tel),
+                             '[FWHM] PSF radius used for optimal subtraction')
+        header['PSF-RADP'] = (get_par(set_zogy.psf_rad_phot,tel),
+                              '[FWHM] PSF radius used for optimal photometry')
+        header['PSF-SIZE'] = (psf_size, '[pix] size PSF image for optimal subtraction')
         header['PSF-FRAC'] = (get_par(set_zogy.psf_samp_fwhmfrac,tel),
                               '[FWHM] PSF sampling step in units of FWHM')
         header['PSF-SAMP'] = (psf_samp,
                               '[pix] PSF sampling step (~ PSF-FRAC * FWHM)')
         header['PSF-CFGS'] = (psf_size_config,
-                              'size PSF config. image (= PSF-SIZE / PSF-SAMP)')
+                              '[config. pix] size PSF configuration image')
         header['PSF-NOBJ'] = (psf_nstars, 'number of accepted PSF stars')
         header['PSF-FIX'] = (poldeg==0, 'single fixed PSF used for entire image?')
         header['PSF-PLDG'] = (poldeg, 'degree polynomial used in PSFEx')
         header['PSF-CHI2'] = (psf_chi2, 'final reduced chi-squared PSFEx fit')
         # add PSF-FWHM in arcseconds using initial pixel scale
-        header['PSF-FWHM'] = (psf_fwhm*pixscale,
-                              '[arcsec] image FWHM inferred by PSFEx')
+        header['PSF-FWHM'] = (psf_fwhm,
+                              '[pix] image FWHM inferred by PSFEx')
+        header['PSF-SEE'] = (psf_fwhm*pixscale,
+                             '[arcsec] image seeing inferred by PSFEx')
         #header['PSF-ELON'] = (psf_elon, 'median elongation of PSF stars')
         #header['PSF-ESTD'] = (psf_elon_std, 'elongation sigma (STD) of PSF stars')
-        
+
         
     # loop through nsubs and construct psf at the center of each
     # subimage, using the output from PSFex that was run on the full
@@ -8390,25 +8379,18 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
         # using function [get_psf_ima], construct the PSF image with
         # shape (psf_size, psf_size) at the central coordinates of the
         # subimage; this image is at the original pixel scale
+        if 'header_new' not in locals():
+            header_new = None
+
         psf_ima_sub, psf_ima_config_sub = get_psf_ima (
             data_psf, centers[nsub,1], centers[nsub,0], psf_size,
             psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-            imtype=imtype, log=log)
-
-        # if remapping is done and the new and ref image have
-        # different orientations, the PSF of the ref image needs
-        # to be transformed to that of the new image
-        if imtype=='ref' and remap:
-            # remap [psf_ima_sub] from the ref frame to the new frame
-            # using the function [orient_data]
-            psf_ima_sub = orient_data (psf_ima_sub, header,
-                                       header_out=header_new,
-                                       tel=tel, log=log)
+            imtype=imtype, remap=remap, header=header, header_new=header_new,
+            log=log)
 
         # record psf image in [psf_ima] cube to be used for the Moffat
         # and Gaussian fits to the PSFs at the end of this function
         psf_ima[nsub] = psf_ima_sub
-
 
         # now place this resized and normalized PSF image at the
         # center of an image with the same size as the fftimage:
@@ -8423,7 +8405,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
                      .format(xcenter_fft, ycenter_fft))
 
         psf_hsize = int(psf_size/2)
-        # psf_size is odd, so need to add 1:
+        # psf_size should be odd, so need to add 1:
         index = tuple([slice(ycenter_fft-psf_hsize, ycenter_fft+psf_hsize+1), 
                        slice(xcenter_fft-psf_hsize, xcenter_fft+psf_hsize+1)])
         psf_ima_center = np.zeros((ysize_fft,xsize_fft))
@@ -8984,8 +8966,8 @@ def calc_psf_config (data, poldeg, x, y):
 
 def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                      header_ref, nsubs, cuts_ima, log, header, pixscale,
-                     use_optflux=True):
-    
+                     use_optflux=False):
+
     """Function that takes in output catalogs of stars from the PSFex runs
     on the new and the ref image, and returns arrays with x,y pixel
     coordinates (!) (in the new frame) and flux ratios for the
@@ -9106,32 +9088,41 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     
         # now match these x,y coordinates to the new and ref catalogs to
         # extract the optimal fluxes
-        data_new = read_hdulist(cat_new, get_header=False)
-        data_ref = read_hdulist(cat_ref, get_header=False)
-
+        #data_new = read_hdulist(cat_new, get_header=False)
+        #data_ref = read_hdulist(cat_ref, get_header=False)
+        table_new = Table.read(cat_new)
+        table_ref = Table.read(cat_ref)
+        
         index_new = []
         for i in range(len(x_new_match)):
-            dist2 = ((data_new['X_POS']-x_new_match[i])**2 + 
-                     (data_new['Y_POS']-y_new_match[i])**2)
+            dist2 = ((table_new['X_POS']-x_new_match[i])**2 + 
+                     (table_new['Y_POS']-y_new_match[i])**2)
             index_new.append(np.argmin(dist2))
 
         index_ref = []
         for i in range(len(x_ref_match)):
-            dist2 = ((data_ref['X_POS']-x_ref_match[i])**2 + 
-                     (data_ref['Y_POS']-y_ref_match[i])**2)
+            dist2 = ((table_ref['X_POS']-x_ref_match[i])**2 + 
+                     (table_ref['Y_POS']-y_ref_match[i])**2)
             index_ref.append(np.argmin(dist2))
 
-        exptime_new = header_new['EXPTIME']
-        exptime_ref = header_ref['EXPTIME']
-        # CHECK!!! UPDATE!!!  force for now (at the moment, ref
-        # catalog fluxes have been saved in e-/s, while EXPTIME has
-        # not been set to that; need to be made consistent
-        exptime_ref = 1.
-        # also if existing new catalog is used, flux is in e-/s,
-        # while if it is being made, flux is in e-
+
+        # final catalog fluxes have been saved in e-/s, while the
+        # corresponding header EXPTIME indicates the image EXPTIME;
+        # the intermediate catalogs are still in e-; solution:
+        # check the column unit
+        if '/s' in str(table_new['FLUX_OPT'].unit):
+            exptime_new = 1.
+        else:
+            exptime_new = header_new['EXPTIME']
+            
+        if '/s' in str(table_ref['FLUX_OPT'].unit):
+            exptime_ref = 1.
+        else:
+            exptime_ref = header_ref['EXPTIME']
+            
         fratio_match = ((exptime_ref/exptime_new) * 
-                        (data_new['FLUX_OPT'][np.asarray(index_new)] /
-                         data_ref['FLUX_OPT'][np.asarray(index_ref)]))
+                        (table_new['FLUX_OPT'][np.asarray(index_new)] /
+                         table_ref['FLUX_OPT'][np.asarray(index_ref)]))
 
         log.info('fratio_match: {}'.format(fratio_match))
 
@@ -10179,12 +10170,13 @@ def get_vignet_size (imtype, log):
         size_vignet = get_par(set_zogy.size_vignet_ref,tel)
     else:
         
-        # in case [set_zogy.psf_sampling] is set to zero, scale the size of
-        # the VIGNET output in the output catalog with
-        # 2*[set_zogy.psf_radius]*[fwhm] where fwhm is taken to be the
-        # largest of global parameters [fwhm_new] and [fwhm_ref],
-        # where the latter is scaled with the pixelscale ratio in case
-        # new and ref images have different scales
+        # in case [set_zogy.psf_sampling] is set to zero, scale the
+        # size of the VIGNET output in the output catalog with 2 *
+        # max(set_zogy.psf_rad_zogy, set_zogy_psf_rad_phot) * [fwhm]
+        # where fwhm is taken to be the largest of global parameters
+        # [fwhm_new] and [fwhm_ref], where the latter is scaled with
+        # the pixelscale ratio in case new and ref images have
+        # different scales
         if get_par(set_zogy.psf_sampling,tel) == 0.:
 
             if 'fwhm_ref' in globals():
@@ -10193,13 +10185,18 @@ def get_vignet_size (imtype, log):
             else:
                 fwhm_vignet = fwhm_new
 
-            size_vignet = np.int(np.ceil(2.*get_par(set_zogy.psf_radius,tel)
-                                         *fwhm_vignet))
+            # set psf_radius to the maximum of psf_rad_phot and
+            # psf_rad_zogy defined in the settings file
+            psf_radius = max(get_par(set_zogy.psf_rad_phot,tel),
+                             get_par(set_zogy.psf_rad_zogy,tel))
+                             
+            size_vignet = np.int(np.ceil(2. * psf_radius * fwhm_vignet))
             # make sure it's odd
             if size_vignet % 2 == 0:
                 size_vignet += 1
-            # provide a warning if it's larger than the reference image
-            # size
+
+            # provide a warning if the resulting size is bigger than
+            # the reference image size
             if size_vignet > get_par(set_zogy.size_vignet_ref,tel):
                 log.info('Warning: VIGNET size of {} is larger than ref image '
                          'value of {}'.format(
@@ -10721,7 +10718,8 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
     psf_size_config_str = '{},{}'.format(psf_size_config, psf_size_config)
     
     if get_par(set_zogy.verbose,tel):
-        log.info('psf_size_config: {}'.format(psf_size_config))
+        log.info('psf_size_config: {} in [run_psfex] for imtype {}'
+                 .format(psf_size_config, imtype))
 
     # get FWHM and ELONGATION to limit the PSFex configuration
     # parameters SAMPLE_FWHMRANGE and SAMPLE_MAXELLIP
@@ -10852,20 +10850,13 @@ def get_samp_PSF_config_size (imtype):
     elif imtype=='ref':
         fwhm = fwhm_ref
 
-    # [psf_size] is the PSF size in image pixels:
-    #   [psf_size] = 2 * [set_zogy.psf_radius] * FWHM
-    # or:
-    #   [psf_size] = [psf_size_config] * [psf_samp]
-    # where [psf_size_config] is the size of the square
-    # image on which PSFEx constructs the PSF.
-    #
     # If [set_zogy.psf_sampling] is set to nonzero, then:
     #   [psf_samp] = [psf_samling]
     # where [psf_samp(ling)] is the PSF sampling step in image
     # pixels. If [set_zogy.psf_sampling] is set to zero, then:
     #   [psf_samp] = [set_zogy.psf_samp_fwhmfrac] * FWHM in pixels
     # where [set_zogy.psf_samp_fwhmfrac] is a global parameter which
-    # should be set to about 0.25 so for an oversampled image with
+    # should be set to about 0.25, so for an oversampled image with
     # FWHM~8: [psf_samp]~2, while for an undersampled image with
     # FWHM~2: [psf_samp]~1/4
     if get_par(set_zogy.psf_sampling,tel) == 0:
@@ -10873,16 +10864,12 @@ def get_samp_PSF_config_size (imtype):
     else:
         psf_samp = get_par(set_zogy.psf_sampling,tel)
 
-    # determine [psf_size_config] based on [set_zogy.psf_radius],
-    # which is:    
-    #   [psf_size_config] = [psf_size] / [psf_samp]
-    #   [psf_size_config] = 2 * [set_zogy.psf_radius] * FWHM / [psf_samp]
-    # and since:
-    #   [psf_samp] = [set_zogy.psf_samp_fwhmfrac] * FWHM 
-    # this can be written:
-    #   [psf_size_config] = 2 * [set_zogy.psf_radius] / [set_zogy.psf_samp_fwhmfrac]
-    # this is independent of the image FWHM since the FWHM is sampled
-    # by a fixed number of steps defined by [set_zogy.psf_samp_fwhmfrac]
+    # [psf_size_config] is the size of the square
+    # image on which PSFEx constructs the PSF. That image is
+    # resized to the original pixel scale in function [get_psf_ima]
+    # and cut to the [psf_size] needed for the optimal photometry
+    # measurements or the PSFs needed for the optimal subtraction.
+    # For the ref image, set 
 
     if imtype=='ref':
         # for the reference image, make [psf_size_config] as large as
@@ -10890,14 +10877,19 @@ def get_samp_PSF_config_size (imtype):
         # determined above
         psf_size_config = get_par(set_zogy.size_vignet_ref,tel) / psf_samp
     else:
-        # for the new image
+        # for the new image; if the ref image is also provided, set
+        # the FWHM to the maximum of new and ref
         if 'fwhm_ref' in globals():
             fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
         else:
             fwhm_use = fwhm_new
 
-        psf_size_config = ((2. * get_par(set_zogy.psf_radius,tel) * fwhm_use)
-                           / psf_samp)
+        # set psf_radius to the maximum of psf_rad_phot and
+        # psf_rad_zogy defined in the settings file
+        psf_radius = max(get_par(set_zogy.psf_rad_phot,tel),
+                         get_par(set_zogy.psf_rad_zogy,tel))
+
+        psf_size_config = ((2. * psf_radius * fwhm_use) / psf_samp)
 
     # convert to integer
     psf_size_config = int(psf_size_config)
@@ -10911,35 +10903,81 @@ def get_samp_PSF_config_size (imtype):
 
 ################################################################################
 
-def clean_norm_psf(psf_array, clean_factor):
+def clean_cut_norm_psf (psf_array, clean_factor, cut=True, cut_size=None):
 
     # psf_array is assumed to be square
     ysize, xsize = psf_array.shape
     assert xsize == ysize
-    
-    # set values in the corners of the PSF image to zero
-    hsize = int(xsize/2)
-    # even
-    if xsize % 2 == 0:
-        x = np.arange(-hsize, hsize)
-    # odd
-    else:
-        x = np.arange(-hsize, hsize+1)
 
-    xx, yy = np.meshgrid(x, x, sparse=True)
-    psf_array[(xx**2+yy**2)>hsize**2] = 0
 
-    # CHECK! set any negative values to zero
-    #psf_array[psf_array<0] = 0
-    
+    # if clean_factor is nonzero, clean array from low values in
+    # outskirts
     if clean_factor != 0:
         mask_clean = (psf_array < (np.amax(psf_array) * clean_factor))
         psf_array[mask_clean] = 0
 
-    # normalize
-    psf_array_norm = psf_array / np.sum(psf_array)
 
-    return psf_array_norm
+    # decrease size of input array to [cut_size] if that is smaller
+    # than the input size
+    if cut and cut_size is not None and cut_size < ysize:
+        
+        # these are the x,y indices of the central pixel; this is
+        # independent of size being odd/even
+        xpos_center = int(xsize/2.)
+        ypos_center = int(ysize/2.)
+        # index does depend on size being odd/even
+        if ysize % 2 == 0:
+            odd = 0
+        else:
+            odd = 1
+
+        cut_hsize = int(cut_size/2.)
+        index = (slice(ypos_center-cut_hsize, ypos_center+cut_hsize+odd),
+                 slice(xpos_center-cut_hsize, xpos_center+cut_hsize+odd))
+
+        # extract relevant subsection
+        psf_array = psf_array[index]
+
+        # update size of psf_array
+        ysize, xsize = psf_array.shape
+
+
+    # set values in the corners of the remaining PSF image to zero;
+    # the exact half of the array is used to compare to the distance
+    # grid
+    dist = dist_from_center (psf_array)
+    psf_array[dist>(ysize/2.)] = 0
+
+
+    # return normalized array
+    return psf_array / np.sum(psf_array)
+
+
+################################################################################
+
+def dist_from_center (data):
+
+    """function to return a grid with the same shape as [data] indicating
+       the distance in pixels from the exact center of the square 2D
+       input array to the center of the individual pixels
+
+    """
+    
+    ysize, xsize = data.shape
+    hsize = int(xsize/2.)
+
+    if xsize % 2 == 0:
+        # even case
+        xy = np.arange(-hsize+0.5, hsize-0.5)
+    else:
+        # odd case
+        xy = np.arange(-hsize, hsize+1)
+
+    # define the grid
+    xx, yy = np.meshgrid(xy, xy, sparse=True)
+
+    # return the distance
+    return np.sqrt(xx**2+yy**2)
 
 
 ################################################################################

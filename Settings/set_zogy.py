@@ -16,6 +16,7 @@ subimage_border = 40     # border around subimage to avoid edge effects
 # ZOGY parameters
 fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or full
                          # frame (F)
+fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
 chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter
@@ -115,23 +116,23 @@ psf_poldeg = 2           # polynomial degree PSF across image (0=constant PSF)
 psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
-psf_radius = 5           # PSF radius in units of FWHM used to build the PSF
-                         # this determines the PSF_SIZE in psfex.config
-                         # and size of the VIGNET in sex.params
+psf_rad_phot = 5         # PSF radius in units of FWHM used in optimal photometry
+psf_rad_zogy = 5         # PSF radius in units of FWHM used in optimal subtraction
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
-                         # new and ref image as:
+                         # new and ref image as follows:
                          #    psf_sampling = FWHM * [psf_samp_fwhmfrac]
                          # If non-zero, its value is adopted for the sampling
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet_ref = 71     # size of the square VIGNETs saved in the SExtractor
+size_vignet_ref = 89     # size of the square VIGNETs saved in the SExtractor
                          # catalog and used by PSFEx for the reference image.
-                         # For the new image this value is set to
-                         # ~ 2 * [psf_radius] * FWHM. This reference value
-                         # should be set to ~ 2 * [psf_radius] * maximum expected
-                         # FWHM in any of the new images.
+                         # For the new image this value will be set to
+                         # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * FWHM_new
+                         # The ref image value should be set to
+                         # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * maximum
+                         # expected FWHM in any of the new images.
 psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
                          # (don't set this too high as otherwise the PSF
                          #  will be mainly based on bright stars)
@@ -235,9 +236,10 @@ mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
 low_RAM = True
 
 # switch on/off different functions
-redo = False             # execute functions even if output file exist
+redo_new = False         # execute functions even if new files already exist
+redo_ref = False         # execute functions even if ref files already exist
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = False       # make diagnostic plots and save them as pdf
+make_plots = True        # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
