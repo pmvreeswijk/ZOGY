@@ -329,7 +329,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # if [new_fits] is not defined, [fwhm_new]=0 ensures that code
     # does not crash in function [get_vignet_size] which uses both
     # [fwhm_new] and [fwhm_ref]
-    fwhm_new = 0
+    #fwhm_new = 0
     if new:
         sexcat_new = '{}_ldac.fits'.format(base_new)
         # run SExtractor for seeing estimate of new_fits and ref_fits;
@@ -344,7 +344,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
                 base_new, sexcat_new, pixscale_new, 'new', header_new, log)
 
-    fwhm_ref = 0
+    #fwhm_ref = 0
     if ref:
         # do the same for the reference image
         sexcat_ref = '{}_ldac.fits'.format(base_ref)
@@ -2327,13 +2327,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'X2AVE_POS':      ['E', 'pix^2'], #, 'flt16' ],
         'Y2AVE_POS':      ['E', 'pix^2'], #, 'flt16' ],
         'XYAVE_POS':      ['E', 'pix^2'], #, 'flt16' ],
-        # A,B,THETA and errors added for ADC runs
-        #'AWIN_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
-        #'BWIN_IMAGE':     ['E', 'pix'  ], #, 'flt16' ],
-        #'THETAWIN_IMAGE': ['E', 'deg'  ], #, 'flt16' ],
-        #'ERRAWIN_IMAGE':  ['E', 'pix'  ], #, 'flt16' ],
-        #'ERRBWIN_IMAGE':  ['E', 'pix'  ], #, 'flt16' ],
-        #'ERRTHETAWIN_IMAGE': ['E', 'deg'  ], #, 'flt16' ],
+        'CXX':            ['E', 'pix^(-2)'], #, 'flt16' ],
+        'CYY':            ['E', 'pix^(-2)'], #, 'flt16' ],
+        'CXY':            ['E', 'pix^(-2)'], #, 'flt16' ],
+        'A':              ['E', 'pix'  ], #, 'flt16' ],
+        'B':              ['E', 'pix'  ], #, 'flt16' ],
+        'THETA':          ['E', 'deg'  ], #, 'flt16' ],
         'ELONGATION':     ['E', ''     ], #, 'flt16' ],
         'RA':             ['D', 'deg'  ], #, 'flt64' ],
         'DEC':            ['D', 'deg'  ], #, 'flt64' ],
@@ -2343,18 +2342,26 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
         'FLUX_APER':      ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_APER':   ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_APER':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_APER':    ['E', 'mag'  ], #, 'flt16' ],
         'BACKGROUND':     ['E', 'e-/s' ], #, 'flt16' ],
         #'FLUX_MAX':       ['E', 'e-/s' ], #, 'flt16' ],
         'FLUX_AUTO':      ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_AUTO':   ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_AUTO':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_AUTO':    ['E', 'mag'  ], #, 'flt16' ],
         'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
         'FLUX_ISO':       ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_ISO':    ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_ISO':        ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_ISO':     ['E', 'mag'  ], #, 'flt16' ],
         'ISOAREA':        ['E', 'pix^2'], #, 'flt16' ],
         'MU_MAX':         ['E', 'mag'  ], #, 'flt16' ],
         'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
         'FLUX_PETRO':     ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_PETRO':  ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_PETRO':      ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_PETRO':   ['E', 'mag'  ], #, 'flt16' ],
         'PETRO_RADIUS':   ['E', 'pix'  ], #, 'flt16' ],
         'FLUX_OPT':       ['E', 'e-/s' ], #, 'flt32' ],
         'FLUXERR_OPT':    ['E', 'e-/s' ], #, 'flt16' ],
@@ -2421,16 +2428,14 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         keys_to_record = ['NUMBER', 'X_POS', 'Y_POS',
                           'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
                           'X2AVE_POS', 'Y2AVE_POS', 'XYAVE_POS',   
-                          # change back after ADC runs!!!
-                          #'AWIN_IMAGE', 'BWIN_IMAGE', 'THETAWIN_IMAGE',
-                          #'ERRAWIN_IMAGE', 'ERRBWIN_IMAGE', 'ERRTHETAWIN_IMAGE',
+                          'CXX', 'CYY', 'CXY', 'A', 'B', 'THETA',
                           'ELONGATION', 'RA', 'DEC',
                           'FLAGS', 'FLAGS_MASK', 'FWHM', 'CLASS_STAR',    
-                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND',      
-                          'FLUX_AUTO', 'FLUXERR_AUTO', 'KRON_RADIUS',
-                          'FLUX_ISO', 'FLUXERR_ISO', 'ISOAREA',
+                          'MAG_APER', 'MAGERR_APER',  'BACKGROUND',      
+                          'MAG_AUTO', 'MAGERR_AUTO', 'KRON_RADIUS',
+                          'MAG_ISO', 'MAGERR_ISO', 'ISOAREA',
                           'MU_MAX', 'FLUX_RADIUS',
-                          'FLUX_PETRO', 'FLUXERR_PETRO', 'PETRO_RADIUS',
+                          'MAG_PETRO', 'MAGERR_PETRO', 'PETRO_RADIUS',
                           'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
 
     elif cat_type == 'new':
@@ -2439,7 +2444,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                           #'X2AVE_POS', 'Y2AVE_POS', 'XYAVE_POS',
                           'ELONGATION', 'RA', 'DEC',
                           'FLAGS', 'FLAGS_MASK', 'FWHM', 'CLASS_STAR',    
-                          'FLUX_APER', 'FLUXERR_APER',  'BACKGROUND',      
+                          'MAG_APER', 'MAGERR_APER',  'BACKGROUND',      
                           'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
 
     elif cat_type == 'trans':
@@ -2488,8 +2493,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         # function that returns column definition based on input
         # [key], [key_new], and [data_key]; for most fields [key] and
         # [key_new] are the same, except for 'FLUX_APER' and
-        # 'FLUXERR_APER', which are split into the separate apertures,
-        # and the aperture sizes enter in the new key name as well.
+        # 'FLUXERR_APER' or 'MAG_APER' and 'MAGERR_APER', which are
+        # split into the separate apertures, and the aperture sizes
+        # enter in the new key name as well.
         
         # if exposure time is non-zero, modify all 'e-/s' columns accordingly
         if exptime != 0:
@@ -2517,7 +2523,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     columns = []
     for key in keys_to_record:
 
-        if key=='FLUX_APER' or key=='FLUXERR_APER':
+        if (key=='FLUX_APER' or key=='FLUXERR_APER' or
+            key=='MAG_APER' or key=='MAGERR_APER'):
             # update column names of aperture fluxes to include radii
             # loop apertures
             for i_ap in range(len(apphot_radii)):
@@ -2846,11 +2853,11 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
             value=table_trans['FLAGS_WIN'])
 
     
-    # filter on FLAGS values (1 + 4 + 8 = 13)
-    # =======================================
+    # filter on FLAGS values (all = 2**8 - 1 = 255)
+    # =============================================
     
     mask_flags = np.zeros(len(table_trans), dtype=bool)
-    masktype_discard = 13
+    masktype_discard = 255
     # iterate over all mask values (1 .. 128)
     for val in 2**np.arange(8):
         # check if this one is to be discarded
@@ -4172,10 +4179,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # even
     if psf_oddsized:
         if psf_size % 2 == 0:
-            psf_size += 1
+            psf_size -= 1
     else:
         if psf_size % 2 != 0:
-            psf_size += 1
+            psf_size -= 1
 
     log.info ('psf_size used in [get_psfoptflux]: {} pix for imtype: {}'
               .format(psf_size, imtype))
@@ -4664,10 +4671,6 @@ def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
     # obtain the PSF image at the PSFEx configuration pixel scale
     psf_ima_config = calc_psf_config (data, poldeg, x, y)
 
-    # half the psf image size
-    psf_hsize = int(psf_size/2.)
-
-
     # if remapping is done and the new and ref image have
     # different orientations, the PSF of the ref image needs
     # to be transformed to that of the new image
@@ -4682,7 +4685,7 @@ def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
     # shift the PSF image (if needed) and resize/resample at the
     # original pixel scale
     order = 2
-    if xshift==0 and yshift==0:
+    if (xshift==0 and yshift==0):
 
         # if no shift is required, simply resample [psf_ima_config] at
         # the original pixel scale using ndimage.zoom and
@@ -4738,7 +4741,7 @@ def get_P_indices (xcoord, ycoord, xsize, ysize, psf_size, psf_oddsized):
     # the corresponding pixel indices in the PSF image itself, which
     # is relevant if the (ycoord, xcoord) is less than psf_size/2 away
     # from the edge of the image.
-    psf_hsize = int(psf_size/2.)
+    psf_hsize = int(psf_size/2)
 
     # extract data around position to use indices of pixel in which
     # [x],[y] is located in case of odd-sized psf:
@@ -5155,7 +5158,9 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=10, nsigma_outer=5, max_iters=10,
         # reject any discrepant values; use [nsigma_inner] as the
         # rejection criterium for the inner region defined by
         # [mask_inner]; outside of that use [nsigma_outer]
-        sigma2 = (D - flux_opt * P)**2 / V
+        sigma2 = (D - flux_opt * P)**2
+        mask_nonzero = (V != 0)
+        sigma2[mask_nonzero] /= V[mask_nonzero]
 
         mask_temp[mask_inner] = (sigma2[mask_inner] > nsigma_inner**2)
         mask_temp[mask_outer] = (sigma2[mask_outer] > nsigma_outer**2)
@@ -5685,8 +5690,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         
         if mypsffit:
-            flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf, \
-                xerr_psf, yerr_psf = results
+            (flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf,
+             xerr_psf, yerr_psf) = results
         else:
             flux_opt, fluxerr_opt = results
             
@@ -5697,11 +5702,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                      xwin, ywin, radius=2., width=1,
                                      color='blue', value=np.arange(1,len(xwin)+1))
             # and with flux_opt/fluxerr_opt < 5.
-            mask_nonzero = np.nonzero(fluxerr_opt)
+            index_nonzero = np.nonzero(fluxerr_opt)
             mask_s2n_lt5 = np.zeros(flux_opt.shape, dtype='bool')
-            mask_s2n_lt5[mask_nonzero] = (np.abs(flux_opt[mask_nonzero]
-                                                 /fluxerr_opt[mask_nonzero])<5)
-            mask_s2n_lt5 |= (flux_opt==0)              
+            mask_s2n_lt5[index_nonzero] = (np.abs(flux_opt[index_nonzero]
+                                                  /fluxerr_opt[index_nonzero])<5)
+            mask_s2n_lt5 |= (flux_opt==0)
             result = prep_ds9regions('{}_s2n_lt5_ds9regions.txt'.format(base),
                                      xwin[mask_s2n_lt5], ywin[mask_s2n_lt5],
                                      radius=2., width=1, color='red',
@@ -6096,15 +6101,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         else:
             header['PC-P'] = (True, 'successfully processed by phot. calibration?')            
             
-        # apply the zeropoint
-        mag_opt, magerr_opt = apply_zp(flux_opt, zp, airmass_sex, exptime, filt,
-                                       log, fluxerr=fluxerr_opt, zp_std=None)
-
         # infer limiting magnitudes from limiting flux using zeropoint
         # and median airmass
         [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt, log)
         log.info('{}-sigma limiting magnitude: {}'.format(nsigma, limmag))
-        
+
         # add header keyword(s):
         header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
                               '[mag] default filter zeropoint in settings file')
@@ -6133,21 +6134,65 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
                             .format(nsigma))
 
-        # if these optimal fluxes and magnitudes already present in catalog,
-        # delete them; this could happen in case [set_zogy.redo] is set to True
-        if 'FLUX_OPT' in data_sex.dtype.names:
-            data_sex = drop_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT','MAG_OPT',
-                                              'MAGERR_OPT'])
 
-        data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'] ,
+        # conversion of catalog fluxes to magnitudes
+        # ==========================================
+        
+        # if 'FLUX_OPT' and 'FLUXERR_OPT' columns are already present
+        # in catalog, delete them; this could happen in case
+        # [set_zogy.redo] is set to True
+        colnames = data_sex.dtype.names
+        if 'FLUX_OPT' in colnames:
+            drop_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'])
+
+        # add optimal flux columns to table
+        data_sex = append_fields(data_sex, ['FLUX_OPT','FLUXERR_OPT'],
                                  [flux_opt, fluxerr_opt], usemask=False,
                                  asrecarray=True)
-        
-        data_sex = append_fields(data_sex, ['MAG_OPT','MAGERR_OPT'] ,
-                                 [mag_opt, magerr_opt], usemask=False,
-                                 asrecarray=True)
 
-        
+        # split aperture flux with shape (nrows, napps) into separate
+        # columns
+        apphot_radii = get_par(set_zogy.apphot_radii,tel)
+        colnames = data_sex.dtype.names
+        for col in colnames:
+            if col=='FLUX_APER' or col=='FLUXERR_APER':
+                # update column names of aperture fluxes to include radii
+                # loop apertures
+                for i_ap in range(len(apphot_radii)):
+                    # rename column
+                    col_new = '{}_R{}xFWHM'.format(col, apphot_radii[i_ap])
+                    # append it to data
+                    data_sex = append_fields(data_sex, col_new,
+                                             data_sex[col][:,i_ap],
+                                             usemask=False, asrecarray=True)
+
+                # delete original column
+                data_sex = drop_fields(data_sex, col)
+
+
+        # convert fluxes to magnitudes and add to catalog
+        colnames = data_sex.dtype.names
+        for col in colnames:
+            if 'FLUX_' in col and col!='FLUX_RADIUS' and col!='FLUX_MAX':
+                col_flux = col
+                col_fluxerr = col.replace('FLUX', 'FLUXERR')
+                col_mag = col.replace('FLUX', 'MAG')
+                col_magerr = col.replace('FLUX', 'MAGERR')
+
+                mag_tmp, magerr_tmp = apply_zp(data_sex[col_flux], zp, airmass_sex,
+                                               exptime, filt, log,
+                                               fluxerr=data_sex[col_fluxerr],
+                                               zp_std=None)
+
+                if col_mag in colnames:
+                    data_sex = drop_fields(data_sex, [col_mag, col_magerr])
+                
+                # add optimal flux columns to table
+                data_sex = append_fields(data_sex, [col_mag, col_magerr],
+                                         [mag_tmp, magerr_tmp], usemask=False,
+                                         asrecarray=True)
+
+
         # discard sources with flux S/N below get_par(set_zogy.source_nsigma,tel)
         # and with negative fluxes
         def get_mask (flux, fluxerr, nsigma):
@@ -8462,7 +8507,8 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     # maximum of fwhm_new and fwhm_ref. At least, if these are both
     # available; it is possible that [get_psf] is run on the new or
     # ref image only - use the input [fwhm] in that case.
-    if 'fwhm_new' in globals() and 'fwhm_ref' in globals():
+    if ('fwhm_new' in globals() and 'fwhm_ref' in globals() and
+        'pixscale_new' in globals() and 'pixscale_ref' in globals()):
         fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
     else:
         fwhm_use = fwhm
@@ -8470,7 +8516,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     psf_size = int(2 * get_par(set_zogy.psf_rad_zogy,tel) * fwhm_use)
     # if this is even, make it odd
     if psf_size % 2 == 0:
-        psf_size += 1
+        psf_size -= 1
 
         
     if 'fwhm_new' in globals():
@@ -9580,8 +9626,10 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     # select the brightest objects
     nbright = get_par(set_zogy.ast_nbright,tel)
     sexcat_bright = '{}_cat_bright.fits'.format(base)
-    #fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:], overwrite=True)
-    fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][-nbright:], overwrite=True)
+    #fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:],
+    #             overwrite=True)
+    fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][-nbright:],
+                 overwrite=True)
 
     # create ds9 regions text file to show the brightest stars
     if get_par(set_zogy.make_plots,tel):
@@ -9639,19 +9687,24 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
-    log.info(stdoutstr)
-    log.info(stderrstr)
+    log.info('stdoutstr: {}'.format(stdoutstr))
+    log.info('stderrstr: {}'.format(stderrstr))
 
-    # read header of .match file, which describes the quad match that
-    # solved the image
-    data_match = read_hdulist ('{}.match'.format(base))
-    
+
     if os.path.exists('{}.solved'.format(base)) and status==0:
+
+        # read .match file, which describes the quad match that solved the
+        # image, before it is deleted
+        data_match = read_hdulist ('{}.match'.format(base))
+    
         for ext in ['.solved', '.match', '.rdls', '.corr', '-indx.xyls', '.axy']:
             os.remove('{}{}'.format(base, ext))
+
     else:
-        log.error('solve-field (Astrometry.net) failed with exit code {}'.format(status))
-        raise Exception('solve-field (Astrometry.net) failed with exit code {}'.format(status))
+        log.error('solve-field (Astrometry.net) failed with exit code {}'
+                  .format(status))
+        raise Exception('solve-field (Astrometry.net) failed with exit code {}'
+                        .format(status))
     
     
     if get_par(set_zogy.timing,tel): t2 = time.time()
@@ -9668,12 +9721,14 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     header_wcs.pop('HISTORY', None)
     header_wcs.pop('COMMENT', None)
     header_wcs.pop('DATE', None)
-    
+
+
     # add specific keyword indicating index file of match
     if data_match['HEALPIX'][0]!=-1:
         anet_index = 'index-{}-{:02d}.fits'.format(data_match['INDEXID'][0], data_match['HEALPIX'][0])
     else:
         anet_index = 'index-{}.fits'.format(data_match['INDEXID'][0])
+
     header_wcs['A-INDEX'] = (anet_index, 'name of index file WCS solution')
 
     # and pixelscale
@@ -10070,11 +10125,6 @@ def ldac2fits (cat_ldac, cat_fits, log):
         # delete VIGNET column
         hdulist[2].data = drop_fields(hdulist[2].data, 'VIGNET')
 
-        # change names ALPHAWIN_J2000 and DELTAWIN_J2000 to simply RA and DEC
-        # - now done right after catalog is created in run_sextractor
-        #hdulist[2].data.columns['ALPHAWIN_J2000'].name = 'RA'
-        #hdulist[2].data.columns['DELTAWIN_J2000'].name = 'DEC'    
-
         # and write regular fits file
         hdulist_new = fits.HDUList([hdulist[0], hdulist[2]])
         hdulist_new.writeto(cat_fits, overwrite=True)
@@ -10161,8 +10211,9 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
-    log.info(stdoutstr)
-    log.info(stderrstr)
+    log.info('stdoutstr: {}'.format(stdoutstr))
+    log.info('stderrstr: {}'.format(stderrstr))
+
     if status != 0:
         log.error('SWarp failed with exit code {}'.format(status))
         raise Exception('SWarp failed with exit code {}'.format(status))
@@ -10374,7 +10425,7 @@ def get_vignet_size (imtype, log):
         # different scales
         if get_par(set_zogy.psf_sampling,tel) == 0.:
 
-            if 'fwhm_ref' in globals():
+            if 'fwhm_ref' in globals() and 'pixscale_ref' in globals():
                 # fwhm_ref not present if no reference image is provided
                 fwhm_vignet = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
             else:
@@ -10611,18 +10662,18 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
                 set_zogy.fwhm_detect_thresh,tel))
         elif Scorr_mode is not None:
             # detection threshold for transient detection of
-            # at least 3 pixels above 2/3 * set_zogy.transient_nsigma
-            ana_thresh = str(2.0)
-            det_thresh = str(get_par(set_zogy.transient_nsigma,tel))
+            # at least 4 pixels above 1/3 * set_zogy.transient_nsigma
+            det_th = str(0.33*get_par(set_zogy.transient_nsigma,tel))
+            ana_th = det_th
             # increase in 'init' mode - only important for
             # background-subtracted image
             if Scorr_mode=='init':
-                det_thresh = str(10.*get_par(set_zogy.transient_nsigma,tel))
+                det_th = str(10.*get_par(set_zogy.transient_nsigma,tel))
 
-            cmd_dict['-DETECT_THRESH'] = det_thresh
-            cmd_dict['-DETECT_MINAREA'] = '1'
+            cmd_dict['-DETECT_THRESH'] = det_th
+            cmd_dict['-DETECT_MINAREA'] = '4'
             cmd_dict['-DETECT_MAXAREA'] = '2000'
-            cmd_dict['-ANALYSIS_THRESH'] = ana_thresh
+            cmd_dict['-ANALYSIS_THRESH'] = ana_th
             cmd_dict['-CATALOG_TYPE'] = 'FITS_1.0'
             cmd_dict['-FILTER'] = 'N'
             #cmd_dict['-FILTER_THRESH'] = '2.0'
@@ -10660,8 +10711,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
                                    stderr=subprocess.PIPE)
         (stdoutstr,stderrstr) = process.communicate()
         status = process.returncode
-        log.info(stdoutstr)
-        log.info(stderrstr)
+        log.info('stdoutstr: {}'.format(stdoutstr))
+        log.info('stderrstr: {}'.format(stderrstr))
 
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)
@@ -10830,7 +10881,13 @@ def rename_catcols (cat_in, log=None):
                    'ISOAREA_IMAGE':  'ISOAREA',
                    'IMAFLAGS_ISO':   'FLAGS_MASK',
                    'XPEAK_IMAGE':    'X_PEAK',
-                   'YPEAK_IMAGE':    'Y_PEAK'}
+                   'YPEAK_IMAGE':    'Y_PEAK',
+                   'CXXWIN_IMAGE':   'CXX',
+                   'CYYWIN_IMAGE':   'CYY',
+                   'CXYWIN_IMAGE':   'CXY',
+                   'AWIN_IMAGE':     'A',
+                   'BWIN_IMAGE':     'B',
+                   'THETAWIN_IMAGE': 'THETA'}
 
     # open input catalog to update
     with fits.open(cat_in, mode='update') as hdulist:
@@ -10964,8 +11021,8 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
-    log.info(stdoutstr)
-    log.info(stderrstr)
+    log.info('stdoutstr: {}'.format(stdoutstr))
+    log.info('stderrstr: {}'.format(stderrstr))
 
     # standard output of PSFEx is .psf; change this to _psf.fits
     psf_in = cat_in.replace('.fits', '.psf')
@@ -11082,7 +11139,7 @@ def get_samp_PSF_config_size (imtype):
     else:
         # for the new image; if the ref image is also provided, set
         # the FWHM to the maximum of new and ref
-        if 'fwhm_ref' in globals():
+        if 'fwhm_ref' in globals() and 'pixscale_ref' in globals():
             fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
         else:
             fwhm_use = fwhm_new
@@ -11094,8 +11151,9 @@ def get_samp_PSF_config_size (imtype):
 
         psf_size_config = ((2. * psf_radius * fwhm_use) / psf_samp)
 
+
     # convert to integer
-    psf_size_config = int(psf_size_config)
+    psf_size_config = int(np.ceil(psf_size_config))
     # make sure it's odd
     if psf_size_config % 2 == 0:
         psf_size_config += 1
@@ -11123,13 +11181,14 @@ def clean_cut_norm_psf (psf_array, clean_factor, cut=True, cut_size=None):
     # decrease size of input array to [cut_size] if that is smaller
     # than the input size
     if cut and cut_size is not None and cut_size < ysize:
-        
-        # these are the x,y indices of the central pixel; this is
-        # independent of size being odd/even
-        xpos_center = int(xsize/2.)
-        ypos_center = int(ysize/2.)
-        # index does depend on size being odd/even
-        if ysize % 2 == 0:
+
+        # these are the x,y indices of the central pixel in
+        # [psf_array]; this is independent of size being odd/even
+        xpos_center = int(xsize/2)
+        ypos_center = int(ysize/2)
+
+        # index does depend on output cut_size being odd/even
+        if cut_size % 2 == 0:
             odd = 0
         else:
             odd = 1
@@ -11167,11 +11226,11 @@ def dist_from_center (data):
     """
     
     ysize, xsize = data.shape
-    hsize = int(xsize/2.)
+    hsize = int(xsize/2)
 
     if xsize % 2 == 0:
         # even case
-        xy = np.arange(-hsize+0.5, hsize-0.5)
+        xy = np.arange(-hsize+0.5, hsize+0.5)
     else:
         # odd case
         xy = np.arange(-hsize, hsize+1)
