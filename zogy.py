@@ -2330,7 +2330,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'Y_POS':          ['E', 'pix'  ], #, 'flt32' ],
         'XVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
         'YVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
-        'XYCOV_POS':      ['E', 'pix^2'], #, 'flt16' ],
+        'XYCOV_POS':    ['E', 'pix^2'], #, 'flt16' ],
         'X_POS_D':        ['E', 'pix'  ], #, 'flt32' ],
         'Y_POS_D':        ['E', 'pix'  ], #, 'flt32' ],
         'XVAR_POS_D':     ['E', 'pix^2'], #, 'flt16' ],
@@ -2350,35 +2350,37 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'DEC_D':          ['D', 'deg'  ], #, 'flt64' ],
         'FLAGS':          ['I', ''     ], #, 'uint8' ],
         'FLAGS_MASK':     ['I', ''     ], #, 'uint8' ],
+        'FLAGS_D':        ['I', ''     ], #, 'uint8' ],
+        'FLAGS_MASK_D':   ['I', ''     ], #, 'uint8' ],
         'FWHM':           ['E', 'pix'  ], #, 'flt16' ],
         'FWHM_D':         ['E', 'pix'  ], #, 'flt16' ],
         'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
-        'FLUX_APER':      ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_APER':   ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_APER':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_APER': ['E', 'e-/s' ], #, 'flt16' ],
         'MAG_APER':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_APER':    ['E', 'mag'  ], #, 'flt16' ],
-        'BACKGROUND':     ['E', 'e-/s' ], #, 'flt16' ],
-        'BACKGROUND_D':   ['E', 'e-/s' ], #, 'flt16' ],
-        #'FLUX_MAX':       ['E', 'e-/s' ], #, 'flt16' ],
-        'FLUX_AUTO':      ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_AUTO':   ['E', 'e-/s' ], #, 'flt16' ],
+        'BACKGROUND':     ['E', 'e-'   ], #, 'flt16' ],
+        'BACKGROUND_D':   ['E', 'e-'   ], #, 'flt16' ],
+        #'E_FLUX_MAX':     ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_AUTO':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_AUTO': ['E', 'e-/s' ], #, 'flt16' ],
         'MAG_AUTO':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_AUTO':    ['E', 'mag'  ], #, 'flt16' ],
         'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
-        'FLUX_ISO':       ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_ISO':    ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_ISO':     ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_ISO':  ['E', 'e-/s' ], #, 'flt16' ],
         'MAG_ISO':        ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_ISO':     ['E', 'mag'  ], #, 'flt16' ],
         'ISOAREA':        ['I', 'pix^2'], #, 'flt16' ],
         'MU_MAX':         ['E', 'mag/pix^2'], #, 'flt16' ],
         'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
-        'FLUX_PETRO':     ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_PETRO':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PETRO':   ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_PETRO':['E', 'e-/s' ], #, 'flt16' ],
         'MAG_PETRO':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PETRO':   ['E', 'mag'  ], #, 'flt16' ],
         'PETRO_RADIUS':   ['E', 'pix'  ], #, 'flt16' ],
-        'FLUX_OPT':       ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_OPT':    ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_OPT':     ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_OPT':  ['E', 'e-/s' ], #, 'flt16' ],
         'MAG_OPT':        ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_OPT':     ['E', 'mag'  ], #, 'flt16' ],
         # transient:
@@ -2387,12 +2389,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'RA_PEAK':        ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PEAK':       ['D', 'deg'  ], #, 'flt64' ],
         'SCORR_PEAK':     ['E', ''     ], #, 'flt32' ],
-        'FLUX_PEAK':      ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_PEAK':   ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PEAK':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_PEAK': ['E', 'e-/s' ], #, 'flt16' ],
         'MAG_PEAK':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PEAK':    ['E', 'mag'  ], #, 'flt16' ],
-        'FLUX_OPT_D':     ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_OPT_D':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
         'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
         'X_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
@@ -2401,8 +2403,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'YERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
         'RA_PSF_D':       ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PSF_D':      ['D', 'deg'  ], #, 'flt64' ],        
-        'FLUX_PSF_D':     ['E', 'e-/s' ], #, 'flt32' ],
-        'FLUXERR_PSF_D':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PSF_D':   ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_PSF_D':['E', 'e-/s' ], #, 'flt16' ],
         'MAG_PSF_D':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PSF_D':   ['E', 'mag'  ], #, 'flt16' ],
         'CHI2_PSF_D':     ['E', ''     ], #, 'flt32' ],
@@ -2451,7 +2453,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                           'MAG_ISO', 'MAGERR_ISO', 'ISOAREA',
                           'MU_MAX', 'FLUX_RADIUS',
                           'MAG_PETRO', 'MAGERR_PETRO', 'PETRO_RADIUS',
-                          'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+                          'E_FLUX_OPT', 'E_FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
 
     elif cat_type == 'new':
         keys_to_record = ['NUMBER', 'X_POS', 'Y_POS', 
@@ -2460,17 +2462,19 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                           'ELONGATION', 'FWHM', 'CLASS_STAR', 
                           'FLAGS', 'FLAGS_MASK', 'BACKGROUND',
                           'MAG_APER', 'MAGERR_APER',
-                          'FLUX_OPT', 'FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
+                          'E_FLUX_OPT', 'E_FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
 
     elif cat_type == 'trans':
         keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
                           'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK',
-                          'FLUX_PEAK', 'FLUXERR_PEAK', 'MAG_PEAK', 'MAGERR_PEAK',
+                          'E_FLUX_PEAK', 'E_FLUXERR_PEAK', 'MAG_PEAK', 'MAGERR_PEAK',
                           #
                           'X_POS_D', 'Y_POS_D',
                           'XVAR_POS_D', 'YVAR_POS_D', 'XYCOV_POS_D',
                           'RA_D', 'DEC_D', 
-                          'ELONGATION_D', 'FWHM_D', 'BACKGROUND_D',
+                          'ELONGATION_D', 'FWHM_D',
+                          'FLAGS_D', 'FLAGS_MASK_D',
+                          'BACKGROUND_D',
                           'MAG_OPT_D', 'MAGERR_OPT_D',
                           #
                           'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
@@ -2509,8 +2513,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
 
         # function that returns column definition based on input
         # [key], [key_new], and [data_key]; for most fields [key] and
-        # [key_new] are the same, except for 'FLUX_APER' and
-        # 'FLUXERR_APER' or 'MAG_APER' and 'MAGERR_APER', which are
+        # [key_new] are the same, except for 'E_FLUX_APER' and
+        # 'E_FLUXERR_APER' or 'MAG_APER' and 'MAGERR_APER', which are
         # split into the separate apertures, and the aperture sizes
         # enter in the new key name as well.
         
@@ -2545,7 +2549,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     columns = []
     for key in keys_to_record:
 
-        if (key=='FLUX_APER' or key=='FLUXERR_APER' or
+        if (key=='E_FLUX_APER' or key=='E_FLUXERR_APER' or
             key=='MAG_APER' or key=='MAGERR_APER'):
             # update column names of aperture fluxes to include radii
             # loop apertures
@@ -2979,13 +2983,13 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
 
     # determine optimal flux in D, directly added as columns to table_trans 
-    colnames = ['FLUX_OPT_D', 'FLUXERR_OPT_D']
+    colnames = ['E_FLUX_OPT_D', 'E_FLUXERR_OPT_D']
     table_trans.add_columns(help_psffit_D (False, False, False), names=colnames)
     
     
     # PSF fit to D, directly added as columns to table_trans
-    colnames = ['FLUX_OPT_D_alt1', 'FLUXERR_OPT_D_alt1', 'FLUX_PSF_D',
-                'FLUXERR_PSF_D', 'X_PSF_D', 'Y_PSF_D', 'CHI2_PSF_D', 'XERR_PSF_D',
+    colnames = ['E_FLUX_OPT_D_alt1', 'E_FLUXERR_OPT_D_alt1', 'E_FLUX_PSF_D',
+                'E_FLUXERR_PSF_D', 'X_PSF_D', 'Y_PSF_D', 'CHI2_PSF_D', 'XERR_PSF_D',
                 'YERR_PSF_D']
     table_trans.add_columns(help_psffit_D (True, False, False), names=colnames)
 
@@ -2995,10 +2999,10 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # filter on S/N_OPT_D
     # ===================
 
-    # check S/N of FLUX_OPT_D
-    s2n_optD = np.copy(table_trans['FLUX_OPT_D'])
-    mask_nonzero = (table_trans['FLUXERR_OPT_D'] != 0)
-    s2n_optD[mask_nonzero] /= table_trans['FLUXERR_OPT_D'][mask_nonzero]
+    # check S/N of E_FLUX_OPT_D
+    s2n_optD = np.copy(table_trans['E_FLUX_OPT_D'])
+    mask_nonzero = (table_trans['E_FLUXERR_OPT_D'] != 0)
+    s2n_optD[mask_nonzero] /= table_trans['E_FLUXERR_OPT_D'][mask_nonzero]
 
 
     if get_par(set_zogy.make_plots,tel):
@@ -3042,7 +3046,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # ===============
     
     # Moffat fit to D, directly added as columns to table_trans
-    colnames = ['FLUX_OPT_D_alt2', 'FLUXERR_OPT_D_alt2', 'X_MOFFAT',
+    colnames = ['E_FLUX_OPT_D_alt2', 'E_FLUXERR_OPT_D_alt2', 'X_MOFFAT',
                 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT', 'FWHM_MOFFAT',
                 'ELONG_MOFFAT', 'CHI2_MOFFAT']
     table_trans.add_columns(help_psffit_D (False, True, False), names=colnames)
@@ -3078,7 +3082,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # ==============
 
     # Gauss fit to D, directly added as columns to table_trans
-    colnames = ['FLUX_OPT_D_alt3', 'FLUXERR_OPT_D_alt3', 'X_GAUSS', 'XERR_GAUSS',
+    colnames = ['E_FLUX_OPT_D_alt3', 'E_FLUXERR_OPT_D_alt3', 'X_GAUSS', 'XERR_GAUSS',
                 'Y_GAUSS', 'YERR_GAUSS', 'FWHM_GAUSS', 'ELONG_GAUSS',
                 'CHI2_GAUSS']
     table_trans.add_columns(help_psffit_D (False, False, True), names=colnames)
@@ -3190,20 +3194,22 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
         fluxerr=np.abs(fluxerr_peak))
     
     mag_psf_D, magerr_psf_D = apply_zp (
-        np.abs(table_trans['FLUX_PSF_D']), zp, airmass_trans, exptime, filt, log,
-        fluxerr=np.abs(table_trans['FLUXERR_PSF_D']), zp_std=None)
+        np.abs(table_trans['E_FLUX_PSF_D']), zp, airmass_trans, exptime, filt, log,
+        fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']), zp_std=None)
     
     mag_opt_D, magerr_opt_D = apply_zp (
-        np.abs(table_trans['FLUX_OPT_D']), zp, airmass_trans, exptime, filt, log,
-        fluxerr=np.abs(table_trans['FLUXERR_OPT_D']), zp_std=None)
+        np.abs(table_trans['E_FLUX_OPT_D']), zp, airmass_trans, exptime, filt, log,
+        fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']), zp_std=None)
 
     log.info ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
 
-    # adding magnitudes to table
-    table_trans.add_columns([mag_peak,  magerr_peak,
+    # adding magnitudes and also flux_peak to table
+    table_trans.add_columns([flux_peak, fluxerr_peak,
+                             mag_peak,  magerr_peak,
                              mag_psf_D, magerr_psf_D,
                              mag_opt_D, magerr_opt_D],
                             names=['MAG_PEAK',  'MAGERR_PEAK',
+                                   'E_FLUX_PEAK',  'E_FLUXERR_PEAK',
                                    'MAG_PSF_D', 'MAGERR_PSF_D',
                                    'MAG_OPT_D', 'MAGERR_OPT_D'])
     
@@ -3212,7 +3218,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                     'Y_POS': 'Y_POS_D',
                     'XVAR_POS': 'XVAR_POS_D',
                     'YVAR_POS': 'YVAR_POS_D',
-                    'XYCOVAR_POS': 'XYCOVAR_POS_D',
+                    'XYCOV_POS': 'XYCOV_POS_D',
                     'ELONGATION': 'ELONGATION_D',
                     'FWHM': 'FWHM_D',
                     'FLAGS': 'FLAGS_D',
@@ -3846,11 +3852,11 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     #'ELONGATION',
     names = ('NUMBER', 'NPIX_MASK',
              'X_PEAK', 'Y_PEAK', 'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK', 
-             'FLUX_PEAK', 'FLUXERR_PEAK',  'MAG_PEAK', 'MAGERR_PEAK',
-             'FLUX_OPT_D', 'FLUXERR_OPT_D', 'MAG_OPT_D', 'MAGERR_OPT_D',
+             'E_FLUX_PEAK', 'E_FLUXERR_PEAK',  'MAG_PEAK', 'MAGERR_PEAK',
+             'E_FLUX_OPT_D', 'E_FLUXERR_OPT_D', 'MAG_OPT_D', 'MAGERR_OPT_D',
              'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D', 
              'RA_PSF_D', 'DEC_PSF_D',
-             'FLUX_PSF_D', 'FLUXERR_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D',
+             'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D',
              'CHI2_PSF_D',
              'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
              'RA_MOFFAT', 'DEC_MOFFAT',
@@ -5020,8 +5026,14 @@ def flux_psffit (P, D, bkg_var, flux_opt, mask_use=None, max_nfev=100,
     # to determine the chi-square of this region 
     mask_inner = (P >= 0.06 * np.amax(P))
     chi2_inner = np.sum(fcn2min(result.params, P, D, bkg_var, mask_inner)**2)
-    chi2red_inner = chi2_inner / (np.sum(mask_inner) - result.nvarys)
-    
+
+    # reduced chi2_inner
+    denom = (np.sum(mask_inner) - result.nvarys)
+    if denom != 0:
+        chi2red_inner = chi2_inner / denom
+    else:
+        chi2red_inner = chi2_inner
+        
     if show:
 
         log.info(fit_report(result))
@@ -5718,7 +5730,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
     
 
-    if ('FLUX_OPT' not in data_sex.dtype.names or redo or
+    if ('E_FLUX_OPT' not in data_sex.dtype.names or redo or
         # also execute this block if PSF-RADP in header is not equal
         # to psf_rad_phot in the settings file
         not ('PSF-RADP' in header and
@@ -5816,9 +5828,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # below to go as deep as possible and not discard any
             # faint galaxies
             header['NSIGMA'] = (0, '[sigma] source detection threshold')
-
-        header['LIMFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
-                             'limiting flux'.format(nsigma))
+            
+        header['LIMEFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
+                              'limiting flux'.format(nsigma))
 
         # get airmasses for SExtractor catalog sources
         ra_sex = data_sex['RA']
@@ -6192,15 +6204,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # conversion of catalog fluxes to magnitudes
         # ==========================================
         
-        # if 'FLUX_OPT' and 'FLUXERR_OPT' columns are already present
+        # if 'E_FLUX_OPT' and 'E_FLUXERR_OPT' columns are already present
         # in catalog, delete them; this could happen in case
         # [set_zogy.redo] is set to True
         colnames = data_sex.dtype.names
-        if 'FLUX_OPT' in colnames:
-            drop_fields(data_sex, ['FLUX_OPT', 'FLUXERR_OPT'])
+        if 'E_FLUX_OPT' in colnames:
+            drop_fields(data_sex, ['E_FLUX_OPT', 'E_FLUXERR_OPT'])
 
         # add optimal flux columns to table
-        data_sex = append_fields(data_sex, ['FLUX_OPT', 'FLUXERR_OPT'],
+        data_sex = append_fields(data_sex, ['E_FLUX_OPT', 'E_FLUXERR_OPT'],
                                  [flux_opt, fluxerr_opt], usemask=False,
                                  asrecarray=True)
 
@@ -6209,7 +6221,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         apphot_radii = get_par(set_zogy.apphot_radii,tel)
         colnames = data_sex.dtype.names
         for col in colnames:
-            if col=='FLUX_APER' or col=='FLUXERR_APER':
+            if col=='E_FLUX_APER' or col=='E_FLUXERR_APER':
                 # update column names of aperture fluxes to include radii
                 # loop apertures
                 for i_ap in range(len(apphot_radii)):
@@ -6227,11 +6239,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         # convert fluxes to magnitudes and add to catalog
         colnames = data_sex.dtype.names
         for col in colnames:
-            if 'FLUX_' in col and col!='FLUX_RADIUS' and col!='FLUX_MAX':
+            if 'E_FLUX_' in col and 'RADIUS' not in col and 'FLUX_MAX' not in col:
                 col_flux = col
-                col_fluxerr = col.replace('FLUX', 'FLUXERR')
-                col_mag = col.replace('FLUX', 'MAG')
-                col_magerr = col.replace('FLUX', 'MAGERR')
+                col_fluxerr = col.replace('E_FLUX', 'E_FLUXERR')
+                col_mag = col.replace('E_FLUX', 'MAG')
+                col_magerr = col.replace('E_FLUX', 'MAGERR')
 
                 mag_tmp, magerr_tmp = apply_zp(data_sex[col_flux], zp, airmass_sex,
                                                exptime, filt, log,
@@ -6248,11 +6260,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 
             # also convert MU_MAX in the ref catalog from e- to
             # magnitudes (per pix**2); SExtractor calculation is as
-            # follows: -2.5 log10 (FLUX_MAX (in e-) / pixscale**2), so
-            # easiest to use FLUX_MAX to convert to magnitude
+            # follows: -2.5 log10 (E_FLUX_MAX (in e-) / pixscale**2), so
+            # easiest to use E_FLUX_MAX to convert to magnitude
             if 'MU_MAX' in col:
-                if 'FLUX_MAX' in colnames:
-                    flux_max = data_sex['FLUX_MAX']
+                if 'E_FLUX_MAX' in colnames:
+                    flux_max = data_sex['E_FLUX_MAX']
                 else:
                     flux_max = 10**(-0.4*data_sex['MU_MAX']) * pixscale**2
                 
@@ -6363,26 +6375,26 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
 
 
-    if get_par(set_zogy.make_plots,tel) and 'FLUX_AUTO' in data_sex.dtype.names:
+    if get_par(set_zogy.make_plots,tel) and 'E_FLUX_AUTO' in data_sex.dtype.names:
 
         # in case optimal flux block above was skipped, the SExtractor
-        # catalogue with FLUX_OPT needs to be read in here to be able
+        # catalogue with E_FLUX_OPT needs to be read in here to be able
         # to make the plots below
         try:
-            data_sex['FLUX_OPT'][0]
+            data_sex['E_FLUX_OPT'][0]
         except NameError:
             # read SExtractor fits table
             data_sex = read_hdulist (sexcat)
             # and define flux_opt and fluxerr_opt
-            flux_opt = data_sex['FLUX_OPT']
-            fluxerr_opt = data_sex['FLUXERR_OPT']
+            flux_opt = data_sex['E_FLUX_OPT']
+            fluxerr_opt = data_sex['E_FLUXERR_OPT']
             # and corresponding calibrated magnitudes
             if os.path.isfile(get_par(set_zogy.cal_cat,tel)) and 'mag_opt' in locals():
                 mag_opt = data_sex['MAG_OPT']
                 magerr_opt = data_sex['MAGERR_OPT']
             if mypsffit:
-                flux_mypsf = data_sex['FLUX_PSF']
-                fluxerr_mypsf = data_sex['FLUXERR_PSF']
+                flux_mypsf = data_sex['E_FLUX_PSF']
+                fluxerr_mypsf = data_sex['E_FLUXERR_PSF']
                 x_psf = data_sex['X_PSF']
                 y_psf = data_sex['Y_PSF']
             # read a few extra header keywords needed below
@@ -6393,13 +6405,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 log.info('data_sex array is already defined; no need to read it in')
 
         # filter arrays by FLAG
-        index = ((data_sex['FLUX_AUTO']>0) & (data_sex['FLAGS']==0))
+        index = ((data_sex['E_FLUX_AUTO']>0) & (data_sex['FLAGS']==0))
         class_star = data_sex['CLASS_STAR'][index]
-        flux_auto = data_sex['FLUX_AUTO'][index] * gain
-        fluxerr_auto = data_sex['FLUXERR_AUTO'][index] * gain
+        flux_auto = data_sex['E_FLUX_AUTO'][index] * gain
+        fluxerr_auto = data_sex['E_FLUXERR_AUTO'][index] * gain
         s2n_auto = flux_auto / fluxerr_auto
-        flux_opt = data_sex['FLUX_OPT'][index]
-        fluxerr_opt = data_sex['FLUXERR_OPT'][index]
+        flux_opt = data_sex['E_FLUX_OPT'][index]
+        fluxerr_opt = data_sex['E_FLUXERR_OPT'][index]
         if os.path.isfile(get_par(set_zogy.cal_cat,tel)) and 'mag_opt' in locals():
             mag_opt = data_sex['MAG_OPT'][index]
             magerr_opt = data_sex['MAGERR_OPT'][index]
@@ -6437,7 +6449,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         limits = (1,2*np.amax(s2n_auto),-0.3,0.3)
         plot_scatter (s2n_auto, flux_diff, limits, class_star,
                       xlabel='S/N (AUTO)',
-                      ylabel='(FLUX_OPT - FLUX_AUTO) / FLUX_AUTO',
+                      ylabel='(E_FLUX_OPT - E_FLUX_AUTO) / E_FLUX_AUTO',
                       filename='{}_fluxopt_vs_fluxauto.pdf'.format(base),
                       title='rainbow color coding follows CLASS_STAR: '
                       'from purple (star) to red (galaxy)')
@@ -6447,7 +6459,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             flux_diff = (flux_mypsf - flux_auto) / flux_auto
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)',
-                          ylabel='(FLUX_MYPSF - FLUX_AUTO) / FLUX_AUTO', 
+                          ylabel='(E_FLUX_MYPSF - E_FLUX_AUTO) / E_FLUX_AUTO', 
                           filename='{}_fluxmypsf_vs_fluxauto.pdf'.format(base),
                           title='rainbow color coding follows CLASS_STAR: '
                           'from purple (star) to red (galaxy)')
@@ -6456,7 +6468,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             flux_diff = (flux_opt - flux_mypsf) / flux_mypsf
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)',
-                          ylabel='(FLUX_OPT - FLUX_MYPSF) / FLUX_MYPSF',
+                          ylabel='(E_FLUX_OPT - E_FLUX_MYPSF) / E_FLUX_MYPSF',
                           filename='{}_fluxopt_vs_fluxmypsf.pdf'.format(base),
                           title='rainbow color coding follows CLASS_STAR: '
                           'from purple (star) to red (galaxy)')
@@ -6481,10 +6493,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
         for i in range(len(get_par(set_zogy.apphot_radii,tel))):
 
             aper = get_par(set_zogy.apphot_radii[i],tel)
-            field = 'FLUX_APER'
-            field_err = 'FLUXERR_APER'
-            field_format = 'FLUX_APER_R{}xFWHM'.format(aper)
-            field_format_err = 'FLUXERR_APER_R{}xFWHM'.format(aper)
+            field = 'E_FLUX_APER'
+            field_err = 'E_FLUXERR_APER'
+            field_format = 'E_FLUX_APER_R{}xFWHM'.format(aper)
+            field_format_err = 'E_FLUXERR_APER_R{}xFWHM'.format(aper)
 
             if field in data_sex.dtype.names:
                 flux_aper = data_sex[field][index,i] * gain
@@ -6495,7 +6507,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 
             flux_diff = (flux_opt - flux_aper) / flux_aper
             xlabel = 'S/N (AUTO)'
-            ylabel = '(FLUX_OPT - {}) / {}'.format(field_format, field_format)
+            ylabel = '(E_FLUX_OPT - {}) / {}'.format(field_format, field_format)
 
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel=xlabel, ylabel=ylabel,
@@ -6504,7 +6516,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                           'from purple (star) to red (galaxy)')
 
             flux_diff = (flux_auto - flux_aper) / flux_aper
-            ylabel = '(FLUX_AUTO - {}) / {}'.format(field_format, field_format)
+            ylabel = '(E_FLUX_AUTO - {}) / {}'.format(field_format, field_format)
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel=xlabel, ylabel=ylabel,
                           filename='{}_fluxauto_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
@@ -6514,7 +6526,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
             if mypsffit:
                 flux_diff = (flux_mypsf - flux_aper) / flux_aper
-                ylabel = '(FLUX_MYPSF - {}) / {}'.format(field_format, field_format)
+                ylabel = '(E_FLUX_MYPSF - {}) / {}'.format(field_format, field_format)
                 plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel=xlabel, ylabel=ylabel, 
                               filename='{}_fluxmypsf_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
@@ -6528,14 +6540,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # read SExtractor psffit fits table
             data_sex = read_hdulist (sexcat_ldac_psffit)
                 
-            flux_sexpsf = data_sex['FLUX_PSF'][index] * gain
-            fluxerr_sexpsf = data_sex['FLUXERR_PSF'][index] * gain
-            s2n_sexpsf = data_sex['FLUX_PSF'][index] / data_sex['FLUXERR_PSF'][index]
+            flux_sexpsf = data_sex['E_FLUX_PSF'][index] * gain
+            fluxerr_sexpsf = data_sex['E_FLUXERR_PSF'][index] * gain
+            s2n_sexpsf = data_sex['E_FLUX_PSF'][index] / data_sex['E_FLUXERR_PSF'][index]
             
             flux_diff = (flux_sexpsf - flux_opt) / flux_opt
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
                           xlabel='S/N (AUTO)',
-                          ylabel='(FLUX_SEXPSF - FLUX_OPT) / FLUX_OPT', 
+                          ylabel='(E_FLUX_SEXPSF - E_FLUX_OPT) / E_FLUX_OPT', 
                           filename='{}_fluxsexpsf_vs_fluxopt.pdf'.format(base),
                           title='rainbow color coding follows CLASS_STAR: '
                           'from purple (star) to red (galaxy)')
@@ -6545,7 +6557,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 flux_diff = (flux_sexpsf - flux_mypsf) / flux_mypsf
                 plot_scatter (s2n_auto, flux_diff, limits, class_star,
                               xlabel='S/N (AUTO)',
-                              ylabel='(FLUX_SEXPSF - FLUX_MYPSF) / FLUX_MYPSF', 
+                              ylabel='(E_FLUX_SEXPSF - E_FLUX_MYPSF) / E_FLUX_MYPSF', 
                               filename='{}_fluxsexpsf_vs_fluxmypsf.pdf'.format(base),
                               title='rainbow color coding follows CLASS_STAR: '
                               'from purple (star) to red (galaxy)')
@@ -6553,7 +6565,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             # and compare auto with SExtractor psf
             flux_diff = (flux_sexpsf - flux_auto) / flux_auto
             plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)', ylabel='(FLUX_SEXPSF - FLUX_AUTO) / FLUX_AUTO', 
+                          xlabel='S/N (AUTO)', ylabel='(E_FLUX_SEXPSF - E_FLUX_AUTO) / E_FLUX_AUTO', 
                           filename='{}_fluxsexpsf_vs_fluxauto.pdf'.format(base),
                           title='rainbow color coding follows CLASS_STAR: '
                           'from purple (star) to red (galaxy)')
@@ -9107,7 +9119,12 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     else:
         chi2_inner = 0
 
-    chi2red_inner = chi2_inner / (np.sum(mask_inner) - result.nvarys)
+    # reduced chi2_inner
+    denom = (np.sum(mask_inner) - result.nvarys)
+    if denom != 0:
+        chi2red_inner = chi2_inner / denom
+    else:
+        chi2red_inner = chi2_inner
 
     
     # this block is to display the images related to the best-fit model
@@ -9396,7 +9413,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     dy_match = np.asarray(dy_match)
     fratio_match = np.asarray(fratio_match)
 
-    log.info ('fratio_match using FLUX_AUTO: {}'.format(fratio_match))
+    log.info ('fratio_match using E_FLUX_AUTO: {}'.format(fratio_match))
 
     if use_optflux:
     
@@ -9420,43 +9437,45 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             index_ref.append(np.argmin(dist2))
 
 
-        if ('FLUX_OPT' in table_new.colnames and
-            'FLUX_OPT' in table_ref.colnames): 
-            
+        # determining flux ratio from the magnitude requires the
+        # airmasses and extinction coefficient
+        #if ('MAG_OPT' in table_new.colnames and
+        #    'MAG_OPT' in table_ref.colnames): 
+        #    
+        #    fratio_match_mag = 10**(-0.4*(
+        #        table_new['MAG_OPT'][np.asarray(index_new)]-
+        #        table_ref['MAG_OPT'][np.asarray(index_ref)]))
+        #
+        #    log.info('fratio_match using MAG_OPT: {}'.format(fratio_match_mag))
+
+
+        if ('E_FLUX_OPT' in table_new.colnames and
+            'E_FLUX_OPT' in table_ref.colnames):
+
             # final catalog fluxes have been saved in e-/s, while the
             # corresponding header EXPTIME indicates the image EXPTIME;
             # the intermediate catalogs are still in e-; solution:
             # check the column unit
-            if '/s' in str(table_new['FLUX_OPT'].unit):
+            if '/s' in str(table_new['E_FLUX_OPT'].unit):
                 exptime_new = 1.
             else:
                 exptime_new = header_new['EXPTIME']
-            
-            if '/s' in str(table_ref['FLUX_OPT'].unit):
+
+            if '/s' in str(table_ref['E_FLUX_OPT'].unit):
                 exptime_ref = 1.
             else:
                 exptime_ref = header_ref['EXPTIME']
-            
+
             fratio_match = ((exptime_ref/exptime_new) * 
-                            (table_new['FLUX_OPT'][np.asarray(index_new)] /
-                             table_ref['FLUX_OPT'][np.asarray(index_ref)]))
-            
+                            (table_new['E_FLUX_OPT'][np.asarray(index_new)] /
+                             table_ref['E_FLUX_OPT'][np.asarray(index_ref)]))
 
-        elif ('MAG_OPT' in table_new.colnames and
-              'MAG_OPT' in table_ref.colnames): 
-            
-            fratio_match = 10**(-0.4*(
-                table_new['MAG_OPT'][np.asarray(index_new)]-
-                table_ref['MAG_OPT'][np.asarray(index_ref)]))
-
-
-            
         else:
-            log.warning ('MAG_OPT or FLUX_OPT not available in catalogs to '
-                         'calculate flux ratios; using FLUX_AUTO instead')
-            
+            log.warning ('E_FLUX_OPT not available in catalogs to calculate '
+                         'flux ratios; using E_FLUX_AUTO instead')
 
-        log.info('fratio_match using FLUX_OPT: {}'.format(fratio_match))
+
+        log.info('fratio_match using E_FLUX_OPT: {}'.format(fratio_match))
 
 
     # now also determine fratio, dx and dy for each subimage which can
@@ -9703,13 +9722,13 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     else:
         mask_use = (data_sexcat['FLAGS']<=3)
         
-    # sort in brightness (FLUX_AUTO)
-    if 'FLUX_AUTO' in data_sexcat.dtype.names:
-        column_sort = 'FLUX_AUTO'
-    elif 'FLUX_OPT' in data_sexcat.dtype.names:
-        column_sort = 'FLUX_OPT'
+    # sort in brightness (E_FLUX_AUTO)
+    if 'E_FLUX_AUTO' in data_sexcat.dtype.names:
+        column_sort = 'E_FLUX_AUTO'
+    elif 'E_FLUX_OPT' in data_sexcat.dtype.names:
+        column_sort = 'E_FLUX_OPT'
     else:
-        column_sort = 'FLUX_APER_R5xFWHM'
+        column_sort = 'E_FLUX_APER_R5xFWHM'
 
     index_sort = np.argsort(data_sexcat[column_sort][mask_use])
 
@@ -10362,7 +10381,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     """Function that accepts a FITS_LDAC table produced by SExtractor and
     returns the FWHM and its standard deviation in pixels.  The
     columns that need to be present in the fits table are 'FLAGS',
-    'FLUX_AUTO' and 'CLASS_STAR'. By default, the function takes the
+    'E_FLUX_AUTO' and 'CLASS_STAR'. By default, the function takes the
     brightest [fraction] of objects, and determines the median FWHM
     from them using sigma clipping. If [class_sort] is True, it
     instead takes the fraction of objects with the highest CLASS_STAR
@@ -10379,12 +10398,12 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
     # these arrays correspond to objecst with flag==0 and flux_auto>0.
     # add a S/N requirement
-    index = ((data['FLAGS']==0) & (data['FLUX_AUTO']>0.) &
-             (data['FLUXERR_AUTO']>0.) &
-             (data['FLUX_AUTO']/data['FLUXERR_AUTO']>20.))
+    index = ((data['FLAGS']==0) & (data['E_FLUX_AUTO']>0.) &
+             (data['E_FLUXERR_AUTO']>0.) &
+             (data['E_FLUX_AUTO']/data['E_FLUXERR_AUTO']>20.))
     fwhm = data['FWHM'][index]
     class_star = data['CLASS_STAR'][index]
-    flux_auto = data['FLUX_AUTO'][index]
+    flux_auto = data['E_FLUX_AUTO'][index]
     mag_auto = -2.5*np.log10(flux_auto)
     if get_elong:
         elong = data['ELONGATION'][index]
@@ -10393,7 +10412,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         # sort by CLASS_STAR
         index_sort = np.argsort(class_star)
     else:
-        # sort by FLUX_AUTO
+        # sort by E_FLUX_AUTO
         index_sort = np.argsort(flux_auto)
 
     # select fraction of targets
@@ -10431,9 +10450,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         mag_auto_select = mag_auto[index_sort][index_select]
 
         # to get initial values before discarding flagged objects
-        index = (data['FLUX_AUTO']>0.)
+        index = (data['E_FLUX_AUTO']>0.)
         fwhm = data['FWHM'][index]
-        flux_auto = data['FLUX_AUTO'][index]
+        flux_auto = data['E_FLUX_AUTO'][index]
         mag_auto = -2.5*np.log10(flux_auto)
 
         plt.plot(fwhm, mag_auto, 'bo', markersize=1)
@@ -11012,19 +11031,36 @@ def rename_catcols (cat_in, log=None):
                    'BWIN_IMAGE':     'B',
                    'THETAWIN_IMAGE': 'THETA'}
 
+
+
+
     # open input catalog to update
     with fits.open(cat_in, mode='update') as hdulist:
         data = hdulist[-1].data
 
-        # loop keys of col_old2new dictionary
+        print (data.dtype.names)
+
+        # loop through above dictionary keys
         for col in col_old2new.keys():
-            # check if this key/col is present in the LDAC catalog
+            # check if column is present in catalog
             if col in data.dtype.names:
                 # if so, rename it
-                data.columns[col].name = col_old2new[col]
+                col_new = col_old2new[col]
+                data.columns[col].name = col_new
                 if log is not None:
-                    log.info ('renamed column {} to {}'
-                              .format(col, col_old2new[col]))
+                    log.info ('renamed column {} to {}'.format(col, col_new))
+                    
+        # loop through all catalog keys
+        for col in data.dtype.names:
+            # prefix all flux column names with E_ to indicate unit is
+            # electrons
+            if ('FLUX' in col and 'E_' not in col and
+                'RADIUS' not in col and 'GROWTHSTEP' not in col):
+                col_new = 'E_{}'.format(col)
+                data.columns[col].name = col_new
+                if log is not None:
+                    log.info ('renamed column {} to {}'.format(col, col_new))
+
 
     return
 
