@@ -3208,11 +3208,11 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                              mag_peak,  magerr_peak,
                              mag_psf_D, magerr_psf_D,
                              mag_opt_D, magerr_opt_D],
-                            names=['MAG_PEAK',  'MAGERR_PEAK',
-                                   'E_FLUX_PEAK',  'E_FLUXERR_PEAK',
+                            names=['E_FLUX_PEAK',  'E_FLUXERR_PEAK',
+                                   'MAG_PEAK',  'MAGERR_PEAK',
                                    'MAG_PSF_D', 'MAGERR_PSF_D',
                                    'MAG_OPT_D', 'MAGERR_OPT_D'])
-    
+
     # change some of the column names
     colnames_new = {'X_POS': 'X_POS_D',
                     'Y_POS': 'Y_POS_D',
@@ -11448,13 +11448,20 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new,
     # determine subimage s_new and s_ref from background RMS
     # images
     if np.sum(~mask_zero) != 0:
+
         sn = np.median(data_new_bkg_std[~mask_zero])
         sr = np.median(data_ref_bkg_std[~mask_zero])
+        # try providing full subimages for sn and sr
+        #sn = data_new_bkg_std
+        #sr = data_ref_bkg_std
+
     else:
+        
         log.warning('empty subimage; large shift between new and ref image?')
         sn = 1
         sr = 1
 
+        
     # variance estimate: background-subtracted image +
     # measured background variance
     Vn = N + data_new_bkg_std**2
