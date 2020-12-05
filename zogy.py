@@ -2519,7 +2519,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
             if formats[key][1]=='e-/s':
                 data_key /= exptime
                 #key_new = 'E-{}'.format(key_new)
-                key_new = 'E-{}'.format(key_new)
+                key_new = '{}'.format(key_new)
         else:
             # if [format_cat] is called from [qc], then dummy catalogs
             # are being made and no exptime is provided
@@ -2828,12 +2828,12 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # Filter on significance
     # ======================
 
-    # filter by abs(SCORR_PEAK) >= 6 / std_Scorr, i.e. normalized by the
-    # STD of the background-subtracted Scorr image
-    nsigma_norm = get_par(set_zogy.transient_nsigma,tel) / std_Scorr
+    # filter by abs(SCORR_PEAK) >= 6 (source extractor was run on the
+    # normalized Scorr images)
+    nsigma_norm = get_par(set_zogy.transient_nsigma,tel)
     mask_signif = np.abs(table_trans['SCORR_PEAK']) >= nsigma_norm
     table_trans = table_trans[mask_signif]
-    log.info ('normalized threshold: {}'.format(nsigma_norm))
+    log.info ('transient detection threshold: {}'.format(nsigma_norm))
     log.info ('ntrans after threshold cut: {}'.format(len(table_trans)))
 
     if get_par(set_zogy.make_plots,tel):
@@ -2871,12 +2871,13 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
             radius=ds9_rad, width=2, color='blue',
             value=table_trans['FLAGS'])
 
-        ds9_rad += 2
-        result = prep_ds9regions(
-            '{}_ds9regions_trans_filt2_flagswinmask.txt'.format(base),
-            table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='blue',
-            value=table_trans['FLAGS_WIN'])
+        if False:
+            ds9_rad += 2
+            result = prep_ds9regions(
+                '{}_ds9regions_trans_filt2_flagswinmask.txt'.format(base),
+                table_trans['X_POS'], table_trans['Y_POS'],
+                radius=ds9_rad, width=2, color='blue',
+                value=table_trans['FLAGS_WIN'])
 
     
     # filter on FLAGS values (all = 2**8 - 1 = 255)
@@ -8466,13 +8467,15 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
         psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
         log.info('psf_samp: {:.3f}, psf_size_config: {} in [get_psf] for {}'
                  .format(psf_samp, psf_size_config, imtype))
-
-        # if the required [psf_size_config] is smaller than or equal
-        # to the psf_size_config of the PSF image header, both for new
-        # and ref, then no need to run PSFEx again, because the size
-        # will be adjusted to the size required ([psf_size]) in
-        # function [get_psf_ima]
-        if psf_size_config <= header_psf['PSFAXIS1']:
+        log.info('psf_size_config of existing PSFEx file {}: {}'
+                 .format(psfex_bintable, header_psf['PSFAXIS1']))
+        
+        # if the required [psf_size_config] is smaller than or roughly
+        # equal (2 pixel difference) to the psf_size_config of the PSF
+        # image header, both for new and ref, then no need to run
+        # PSFEx again, because the size will be adjusted to the size
+        # required ([psf_size]) in function [get_psf_ima]
+        if np.abs(psf_size_config-header_psf['PSFAXIS1']) <= 2:
             skip_psfex = True
             if get_par(set_zogy.verbose,tel):
                 log.info ('Skipping run_psfex for image: {}'.format(image))
@@ -9417,26 +9420,43 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             index_ref.append(np.argmin(dist2))
 
 
-        # final catalog fluxes have been saved in e-/s, while the
-        # corresponding header EXPTIME indicates the image EXPTIME;
-        # the intermediate catalogs are still in e-; solution:
-        # check the column unit
-        if '/s' in str(table_new['FLUX_OPT'].unit):
-            exptime_new = 1.
-        else:
-            exptime_new = header_new['EXPTIME']
+        if ('FLUX_OPT' in table_new.colnames and
+            'FLUX_OPT' in table_ref.colnames): 
             
-        if '/s' in str(table_ref['FLUX_OPT'].unit):
-            exptime_ref = 1.
-        else:
-            exptime_ref = header_ref['EXPTIME']
+            # final catalog fluxes have been saved in e-/s, while the
+            # corresponding header EXPTIME indicates the image EXPTIME;
+            # the intermediate catalogs are still in e-; solution:
+            # check the column unit
+            if '/s' in str(table_new['FLUX_OPT'].unit):
+                exptime_new = 1.
+            else:
+                exptime_new = header_new['EXPTIME']
             
-        fratio_match = ((exptime_ref/exptime_new) * 
-                        (table_new['FLUX_OPT'][np.asarray(index_new)] /
-                         table_ref['FLUX_OPT'][np.asarray(index_ref)]))
+            if '/s' in str(table_ref['FLUX_OPT'].unit):
+                exptime_ref = 1.
+            else:
+                exptime_ref = header_ref['EXPTIME']
+            
+            fratio_match = ((exptime_ref/exptime_new) * 
+                            (table_new['FLUX_OPT'][np.asarray(index_new)] /
+                             table_ref['FLUX_OPT'][np.asarray(index_ref)]))
+            
+
+        elif ('MAG_OPT' in table_new.colnames and
+              'MAG_OPT' in table_ref.colnames): 
+            
+            fratio_match = 10**(-0.4*(
+                table_new['MAG_OPT'][np.asarray(index_new)]-
+                table_ref['MAG_OPT'][np.asarray(index_ref)]))
+
+
+            
+        else:
+            log.warning ('MAG_OPT or FLUX_OPT not available in catalogs to '
+                         'calculate flux ratios; using FLUX_AUTO instead')
+            
 
         log.info('fratio_match using FLUX_OPT: {}'.format(fratio_match))
-
 
 
     # now also determine fratio, dx and dy for each subimage which can
@@ -10732,8 +10752,8 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
                 set_zogy.fwhm_detect_thresh,tel))
         elif Scorr_mode is not None:
             # detection threshold for transient detection of
-            # at least 4 pixels above 1/3 * set_zogy.transient_nsigma
-            det_th = str(0.33*get_par(set_zogy.transient_nsigma,tel))
+            # at least 4 pixels above 1/2 * set_zogy.transient_nsigma
+            det_th = str(0.5*get_par(set_zogy.transient_nsigma,tel))
             ana_th = det_th
             # increase in 'init' mode - only important for
             # background-subtracted image
@@ -11259,7 +11279,7 @@ def get_samp_PSF_config_size (imtype):
 
 
     # convert to integer
-    psf_size_config = int(np.ceil(psf_size_config))
+    psf_size_config = int(np.round(psf_size_config))
     # make sure it's odd
     if psf_size_config % 2 == 0:
         psf_size_config += 1
