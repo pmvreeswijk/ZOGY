@@ -1113,7 +1113,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         fits_ref_psf = '{}_psf.fits'.format(base_ref)
         fits_new_cat = '{}_cat.fits'.format(base_new)
         fits_ref_cat = '{}_cat.fits'.format(base_ref)
-            
+
 
         mem_use (label='just before get_trans', log=log)
         
@@ -2667,7 +2667,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                    fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
                    header_new, header_ref, header_trans,
                    fits_new_psf, fits_ref_psf, log):
-    
+
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
     values above the set threshold, and down to where the region wings
@@ -2713,25 +2713,12 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
     # read Scorr image and its header
     data_Scorr, header = read_hdulist (fits_Scorr, get_header=True)
-    
 
-    # read a few header keywords
+
+    # read a few header keywords 
     pixscale = header['A-PSCALE']
-    fwhm = header['S-FWHM']
-
-
-    if False:
-        # FWHM determination from Scorr not very reliable
-        sexcat_fwhm = '{}_Scorr_cat_fwhm.fits'.format(base)
-        fwhm, fwhm_std, elong, elong_std = run_sextractor(
-            fits_Scorr, sexcat_fwhm, get_par(set_zogy.sex_cfg,tel),
-            get_par(set_zogy.sex_par,tel), pixscale, log, header,
-            return_fwhm_elong=True, fraction=get_par(set_zogy.fwhm_imafrac,tel),
-            fwhm=fwhm_new, update_vignet=False, tel=tel, set_zogy=set_zogy,
-            nthreads=nthreads)
-        
-        log.info ('fwhm:       {:.2f} +- {:.2f}'.format(fwhm, fwhm_std))
-        log.info ('elongation: {:.2f} +- {:.2f}'.format(elong, elong_std))
+    # for the FWHM, use the average of fwhm_new and fwhm_ref
+    fwhm = (header_new['S-FWHM'] + header_ref['S-FWHM']) / 2
 
 
     # run Source Extractor on Scorr image and accompanying mask
@@ -2751,8 +2738,9 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     data_Scorr_bkgsub = read_hdulist (fits_Scorr_bkgsub)
 
     
-    # create background-subtracted positive Scorr fits image with its
-    # standard deviation normalized to 1
+    # determine statistics on background-subtracted Scorr image (done
+    # already before, but possibly the background subtraction will
+    # change the result slightly)
     edge = 100
     ysize, xsize = data_Scorr_bkgsub.shape
     nstat = int(0.1 * (xsize*ysize))
@@ -2767,27 +2755,35 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     log.info ('mean_Scorr: {:.3f}, median_Scorr: {:.3f}, std_Scorr: {:.3f}'
               .format(mean_Scorr, median_Scorr, std_Scorr))
 
-    # write normalized Scorr image to disk
-    data_Scorr_bkgsub_norm = data_Scorr_bkgsub/std_Scorr
-    fits_Scorr_bkgsub_norm = '{}_Scorr_bkgsub_norm.fits'.format(base)
-    fits.writeto (fits_Scorr_bkgsub_norm, data_Scorr_bkgsub_norm, header,
-                  overwrite=True)
+    # update values in transient header
+    header_trans['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
+    header_trans['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
 
+    
+    if False:
+        # write normalized Scorr image to disk
+        data_Scorr_bkgsub_norm = data_Scorr_bkgsub/std_Scorr
+        fits_Scorr_bkgsub_norm = '{}_Scorr_bkgsub_norm.fits'.format(base)
+        fits.writeto (fits_Scorr_bkgsub_norm, data_Scorr_bkgsub_norm, header,
+                      overwrite=True)
+
+        
     # run source extractor on the positive and negative
-    # background-subtracted and normalized Scorr images as the
-    # detection image, with the difference image as the analysis image
-    result = run_sextractor(fits_Scorr_bkgsub_norm, sexcat_pos,
+    # background-subtracted (and possibly normalized) Scorr images as
+    # the detection image, with the difference image as the analysis
+    # image
+    result = run_sextractor(fits_Scorr_bkgsub, sexcat_pos,
                             get_par(set_zogy.sex_cfg,tel),
                             get_par(set_zogy.sex_par,tel), pixscale, log, header,
                             return_fwhm_elong=False, fwhm=fwhm,
                             update_vignet=False, fits_mask=fits_newref_mask,
                             npasses=1, tel=tel, set_zogy=set_zogy,
                             nthreads=nthreads, Scorr_mode='pos',
-                            image_analysis=fits_D)
+                            image_analysis=fits_D, std_Scorr=std_Scorr)
 
     # prepare the negative Scorr and D images
-    fits_Scorr_bkgsub_norm_neg = '{}_Scorr_bkgsub_norm_neg.fits'.format(base)
-    fits.writeto (fits_Scorr_bkgsub_norm_neg, -data_Scorr_bkgsub_norm, header,
+    fits_Scorr_bkgsub_neg = '{}_Scorr_bkgsub_neg.fits'.format(base)
+    fits.writeto (fits_Scorr_bkgsub_neg, -data_Scorr_bkgsub, header,
                   overwrite=True)
     
     data_D = read_hdulist(fits_D)
@@ -2795,14 +2791,14 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     fits.writeto (fits_D_neg, -data_D, overwrite=True)
     
     sexcat_neg = '{}_Scorr_cat_neg.fits'.format(base)
-    result = run_sextractor(fits_Scorr_bkgsub_norm_neg, sexcat_neg,
+    result = run_sextractor(fits_Scorr_bkgsub_neg, sexcat_neg,
                             get_par(set_zogy.sex_cfg,tel),
                             get_par(set_zogy.sex_par,tel), pixscale, log, header,
                             return_fwhm_elong=False, fwhm=fwhm,
                             update_vignet=False, fits_mask=fits_newref_mask,
                             npasses=1, tel=tel, set_zogy=set_zogy,
                             nthreads=nthreads, Scorr_mode='neg',
-                            image_analysis=fits_D_neg)
+                            image_analysis=fits_D_neg, std_Scorr=std_Scorr)
 
 
 
@@ -2811,7 +2807,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # read off values at indices of X_PEAK and Y_PEAK
     index_x = table_trans_pos['X_PEAK'] - 1
     index_y = table_trans_pos['Y_PEAK'] - 1
-    Scorr_peak_pos = data_Scorr_bkgsub_norm[index_y, index_x]
+    Scorr_peak_pos = data_Scorr_bkgsub[index_y, index_x]
     # add 'SCORR_PEAK' to table
     table_trans_pos.add_column (Scorr_peak_pos, name='SCORR_PEAK')
 
@@ -2819,7 +2815,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans_neg = Table.read(sexcat_neg)
     index_x = table_trans_neg['X_PEAK'] - 1
     index_y = table_trans_neg['Y_PEAK'] - 1
-    Scorr_peak_neg = data_Scorr_bkgsub_norm[index_y, index_x]
+    Scorr_peak_neg = data_Scorr_bkgsub[index_y, index_x]
     table_trans_neg.add_column (Scorr_peak_neg, name='SCORR_PEAK')
 
     # merge positive and negative catalogs
@@ -2831,9 +2827,10 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # Filter on significance
     # ======================
 
-    # filter by abs(SCORR_PEAK) >= 6 (source extractor was run on the
-    # normalized Scorr images)
-    nsigma_norm = get_par(set_zogy.transient_nsigma,tel)
+    # filter by abs(SCORR_PEAK) >= 6 / std_Scorr (do not divide by
+    # std_Scorr if source extractor was run on the normalized Scorr
+    # images)
+    nsigma_norm = get_par(set_zogy.transient_nsigma,tel) / std_Scorr
     mask_signif = np.abs(table_trans['SCORR_PEAK']) >= nsigma_norm
     table_trans = table_trans[mask_signif]
     log.info ('transient detection threshold: {}'.format(nsigma_norm))
@@ -10542,9 +10539,9 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
                     header, fit_psf=False, return_fwhm_elong=True, fraction=1.0,
                     fwhm=5.0, update_vignet=True, imtype=None, fits_mask=None, 
                     npasses=2, tel=None, set_zogy=None, nthreads=0,
-                    Scorr_mode=None, image_analysis=None):
+                    Scorr_mode=None, image_analysis=None, std_Scorr=1):
 
-
+    
     """Function that runs SExtractor on [image], and saves the output
        catalog in [cat_out], using the configuration file
        [file_config] and the parameters defining the output recorded
@@ -10748,15 +10745,17 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
             cmd_dict['-DETECT_THRESH'] = str(get_par(
                 set_zogy.fwhm_detect_thresh,tel))
         elif Scorr_mode is not None:
-            # detection threshold for transient detection of
-            # at least 4 pixels above 1/2 * set_zogy.transient_nsigma
-            det_th = str(0.5*get_par(set_zogy.transient_nsigma,tel))
+            # detection threshold for transient detection of at least
+            # 4 pixels above 1/2 * set_zogy.transient_nsigma; scale
+            # with std_Scorr as source extractor will use actual Scorr
+            # STD
+            det_th = str(0.5*get_par(set_zogy.transient_nsigma,tel)/std_Scorr)
             ana_th = det_th
-            # increase in 'init' mode - only important for
-            # background-subtracted image
+            # increase in 'init' mode - exact detection threshold is
+            # only important for background-subtracted image
             if Scorr_mode=='init':
-                det_th = str(10.*get_par(set_zogy.transient_nsigma,tel))
-
+                det_th *= 10
+                
             cmd_dict['-DETECT_THRESH'] = det_th
             cmd_dict['-DETECT_MINAREA'] = '4'
             cmd_dict['-DETECT_MAXAREA'] = '2000'
