@@ -5489,6 +5489,22 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     log.info('background already subtracted from {}?: {}'
              .format(input_fits, bkg_sub))
 
+
+    # [interp_Xchan] determines whether interpolation is allowed
+    # across different channels in [mini2back]
+    if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or
+        get_par(set_zogy.MLBG_chancorr,tel)):
+        interp_Xchan = True
+    else:
+        interp_Xchan = False
+
+    # for bkg_std, do not interpolate for ML/BG images
+    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        inter_Xchan_std = False
+    else:
+        inter_Xchan_std = True
+
+
     # if not, then read in background image; N.B.: this if block below
     # is not relevant anymore, since the background is subtracted from
     # the image in [run_sextractor], but leave it be for now
@@ -5507,11 +5523,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                 bkg_size = header_mini['BKG-SIZE']
             else:
                 bkg_size = get_par(set_zogy.bkg_boxsize,tel)
-                
+
             data_bkg = mini2back (data_bkg_mini, data_wcs.shape,
                                   order_interp=2, bkg_boxsize=bkg_size,
+                                  interp_Xchan=interp_Xchan,
                                   timing=get_par(set_zogy.timing,tel),
-                                  log=log, tel=tel, set_zogy=set_zogy)
+                                  log=log)
 
         # subtract the background
         data_wcs -= data_bkg
@@ -5558,8 +5575,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape,
                                   order_interp=1, bkg_boxsize=bkg_size,
-                                  timing=get_par(set_zogy.timing,tel),
-                                  log=log, tel=tel, set_zogy=set_zogy)
+                                  interp_Xchan=interp_Xchan_std,
+                                  timing=get_par(set_zogy.timing,tel), log=log)
         # and write to fits; needed below for SWarp
         fits.writeto (fits_bkg_std, data_bkg_std, overwrite=True)
         
@@ -8229,7 +8246,7 @@ def get_rand_indices (shape, fraction=0.2):
 ################################################################################
 
 def mini2back (data_mini, output_shape, order_interp=3, bkg_boxsize=None,
-               timing=True, log=None, tel=None, set_zogy=None):
+               interp_Xchan=True, timing=True, log=None):
 
     if log is not None:
         if timing: t = time.time()
@@ -8267,11 +8284,9 @@ def mini2back (data_mini, output_shape, order_interp=3, bkg_boxsize=None,
         return background
 
 
-    # if ML/BG channels were corrected, then expand the mini image to
-    # the full image in one go; if they were not corected, then this
-    # expansion needs to be done for each channel separately
-    if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or
-        get_par(set_zogy.MLBG_chancorr,tel)):
+    # if interp_Xchan is True, then expand the mini image to the full
+    # image allowing the interpolation to cross the different channels
+    if interp_Xchan:
         
         data_full = help_mini2back (data_mini, output_shape)
         
@@ -10650,6 +10665,21 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
     else:
         bkg_sub = False
 
+    # [interp_Xchan] determines whether interpolation is allowed
+    # across different channels in [mini2back]
+    if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or
+        get_par(set_zogy.MLBG_chancorr,tel)):
+        interp_Xchan = True
+    else:
+        interp_Xchan = False
+
+    # for bkg_std, do not interpolate for ML/BG images
+    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        inter_Xchan_std = False
+    else:
+        inter_Xchan_std = True
+
+
     # get gain from header
     gain = read_header(header, ['gain'], log=log)
 
@@ -10847,13 +10877,13 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
             bkg_size = get_par(set_zogy.bkg_boxsize,tel)
             data_bkg = mini2back (data_bkg_mini, data.shape, order_interp=2,
                                   bkg_boxsize=bkg_size,
-                                  timing=get_par(set_zogy.timing,tel),
-                                  log=log, tel=tel, set_zogy=set_zogy)
+                                  interp_Xchan=interp_Xchan, log=log,
+                                  timing=get_par(set_zogy.timing,tel))
             data_bkg_std = mini2back (data_bkg_std_mini, data.shape,
                                       order_interp=1, bkg_boxsize=bkg_size,
-                                      timing=get_par(set_zogy.timing,tel),
-                                      log=log, tel=tel, set_zogy=set_zogy) 
-            
+                                      interp_Xchan=interp_Xchan_std, log=log,
+                                      timing=get_par(set_zogy.timing,tel))
+
 
             # subtract the background
             data -= data_bkg
@@ -10925,8 +10955,8 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
                     data_shape = (header['NAXIS2'], header['NAXIS1']) 
                     data_bkg = mini2back (data_bkg_mini, data_shape,
                                           order_interp=2, bkg_boxsize=bkg_size,
-                                          timing=get_par(set_zogy.timing,tel),
-                                          log=log, tel=tel, set_zogy=set_zogy)
+                                          interp_Xchan=interp_Xchan, log=log,
+                                          timing=get_par(set_zogy.timing,tel))
 
             # replace the background column in the output catalog in
             # case 'data_bkg' now exists - could be absent, e.g. for
