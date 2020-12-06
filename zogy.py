@@ -1134,8 +1134,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # catalog
             if get_par(set_zogy.nfakestars,tel)>0:
 
-                # read in background-subtracted and normalized Scorr image
-                data_Scorr_full = read_hdulist('{}_Scorr_bkgsub_norm.fits'
+                # read in background-subtracted and (possibly)
+                # normalized Scorr image
+                data_Scorr_full = read_hdulist('{}_Scorr_bkgsub.fits'
                                                .format(base_newref))
 
                 if 'data_Fpsf_full' not in locals():
@@ -2730,7 +2731,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                             update_vignet=False, fits_mask=fits_newref_mask,
                             npasses=1, tel=tel, set_zogy=set_zogy,
                             nthreads=nthreads, Scorr_mode='init')
-
+    
 
     # read background-subtracted output image (created by source
     # extractor) from 'initial' run above
@@ -5500,9 +5501,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
     # for bkg_std, do not interpolate for ML/BG images
     if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
-        inter_Xchan_std = False
+        interp_Xchan_std = False
     else:
-        inter_Xchan_std = True
+        interp_Xchan_std = True
 
 
     # if not, then read in background image; N.B.: this if block below
@@ -9397,8 +9398,9 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     dx_match = np.asarray(dx_match)
     dy_match = np.asarray(dy_match)
     fratio_match = np.asarray(fratio_match)
-
-    log.info ('fratio_match using E_FLUX_AUTO: {}'.format(fratio_match))
+    
+    log.info ('median(fratio_match) using E_FLUX_AUTO: {}'
+              .format(np.median(fratio_match)))
 
     if use_optflux:
     
@@ -9460,7 +9462,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                          'flux ratios; using E_FLUX_AUTO instead')
 
 
-        log.info('fratio_match using E_FLUX_OPT: {}'.format(fratio_match))
+        log.info('median(fratio_match) using E_FLUX_OPT: {}'
+                 .format(np.median(fratio_match)))
 
 
     # now also determine fratio, dx and dy for each subimage which can
@@ -10675,9 +10678,9 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
 
     # for bkg_std, do not interpolate for ML/BG images
     if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
-        inter_Xchan_std = False
+        interp_Xchan_std = False
     else:
-        inter_Xchan_std = True
+        interp_Xchan_std = True
 
 
     # get gain from header
@@ -10779,17 +10782,17 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
             # 4 pixels above 1/2 * set_zogy.transient_nsigma; scale
             # with std_Scorr as source extractor will use actual Scorr
             # STD
-            det_th = str(0.5*get_par(set_zogy.transient_nsigma,tel)/std_Scorr)
+            det_th = 0.5 * get_par(set_zogy.transient_nsigma,tel) / std_Scorr
             ana_th = det_th
             # increase in 'init' mode - exact detection threshold is
             # only important for background-subtracted image
             if Scorr_mode=='init':
                 det_th *= 10
                 
-            cmd_dict['-DETECT_THRESH'] = det_th
+            cmd_dict['-DETECT_THRESH'] = str(det_th)
             cmd_dict['-DETECT_MINAREA'] = '4'
             cmd_dict['-DETECT_MAXAREA'] = '2000'
-            cmd_dict['-ANALYSIS_THRESH'] = ana_th
+            cmd_dict['-ANALYSIS_THRESH'] = str(ana_th)
             cmd_dict['-CATALOG_TYPE'] = 'FITS_1.0'
             cmd_dict['-FILTER'] = 'N'
             #cmd_dict['-FILTER_THRESH'] = '2.0'
