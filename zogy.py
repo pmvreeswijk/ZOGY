@@ -1698,8 +1698,7 @@ def extract_fakestars (fakestar_xcoord, fakestar_ycoord,
         # coordinates in the full image by using [subcutfft],
         # which defines the pixel indices [y1 y2 x1 x2]
         # identifying the corners of the fft subimage in the
-        # entire input/output image coordinate frame; used various
-        # times below
+        # entire input/output image coordinate frame
         subcutfft = cuts_ima_fft[nsub]
         fakestar_xcoord[index_fake] += subcutfft[2]
         fakestar_ycoord[index_fake] += subcutfft[0]
@@ -4441,22 +4440,21 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             
             # perform optimal photometry measurements
             try:
-                x_tmp = (119, 535, 755,  8095, 8183, 8987)
-                y_tmp = (571, 679, 1556, 5031, 3120, 4048)
 
-                dist = [np.sqrt((xcoords[i]-xc)**2+(ycoords[i]-yc)**2)
-                        for (xc,yc) in zip(x_tmp, y_tmp)]
-                
-                if min(dist) < 3.:
-                    log.info ('xcoord: {}, ycoord: {}, min(dist): {}'
-                              .format(xcoords[i], ycoords[i], min(dist)))
-                    show = True
-                else:
-                    show = False
+                if False:
+                    x_tmp = (119, 535, 755,  8095, 8183, 8987)
+                    y_tmp = (571, 679, 1556, 5031, 3120, 4048)
+                    dist = [np.sqrt((xcoords[i]-xc)**2+(ycoords[i]-yc)**2)
+                            for (xc,yc) in zip(x_tmp, y_tmp)]
+                    if min(dist) < 3.:
+                        log.info ('xcoord: {}, ycoord: {}, min(dist): {}'
+                                  .format(xcoords[i], ycoords[i], min(dist)))
+                        show = True
+                    else:
+                        show = False
 
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
-                    P_shift, D_sub, bkg_var_sub, mask_use=mask_use, show=show,
-                    log=log)
+                    P_shift, D_sub, bkg_var_sub, mask_use=mask_use, log=log)
             except Exception as e:
                 log.info('Warning: problem running [flux_optimal] on object '
                          'at pixel coordinates: x={}, y={}; returning zero flux '
@@ -4466,31 +4464,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 
 
 
-            if psffit or moffat or gauss:
-            
-                (x0,y0) = (3934,5151)
-                if np.sqrt((xcoords[i]-x0)**2 + (ycoords[i]-y0)**2) < 10:
-                    show = True
-                else:
-                    show = False
-                
-                if np.abs(xcoords[i]-3934) < 20:
-                    show = True
-                    
-                show = False
-
-                if show:
-                    s2n_opt = 0
-                    if fluxerr_opt[i] != 0:
-                        s2n_opt = flux_opt[i] / fluxerr_opt[i]
-                    
-                    log.info ('xcoord: {}, ycoord: {}, flux_opt: {:.3f} '
-                              '+/- {:.3f}, S/N_opt: {:.3f}'
-                              .format(xcoords[i], ycoords[i], flux_opt[i],
-                                      fluxerr_opt[i], s2n_opt))
-
-                    
-
             # if psffit=True, perform PSF fitting
             if psffit:
                 
@@ -4498,7 +4471,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     flux_psf[i], fluxerr_psf[i], xshift_psf[i], yshift_psf[i], \
                         chi2_psf[i], xerr_psf[i], yerr_psf[i] = (
                             flux_psffit (P_shift, D_sub, bkg_var_sub, flux_opt[i],
-                                         mask_use=mask_use, show=show, log=log))
+                                         mask_use=mask_use, log=log))
 
                 except Exception as e:
                     log.info('Warning: problem running [flux_psffit] on object '
@@ -4521,7 +4494,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
                             fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
                                                fit_gauss=gauss, fwhm=psf_fwhm, 
-                                               show=show, log=log)
+                                               log=log)
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
                     
@@ -10565,11 +10538,11 @@ def get_vignet_size (imtype, log):
 
 ################################################################################
 
-def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
-                   header, fit_psf=False, return_fwhm_elong=True, fraction=1.0,
-                   fwhm=5.0, update_vignet=True, imtype=None, fits_mask=None, 
-                   npasses=2, tel=None, set_zogy=None, nthreads=0,
-                   Scorr_mode=None, image_analysis=None):
+def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
+                    header, fit_psf=False, return_fwhm_elong=True, fraction=1.0,
+                    fwhm=5.0, update_vignet=True, imtype=None, fits_mask=None, 
+                    npasses=2, tel=None, set_zogy=None, nthreads=0,
+                    Scorr_mode=None, image_analysis=None):
 
 
     """Function that runs SExtractor on [image], and saves the output
@@ -10605,6 +10578,7 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     if not os.path.exists(image_orig):
         shutil.copy2 (image, image_orig)
 
+        
     # if fraction less than one, run SExtractor on specified fraction of
     # the image
     if fraction < 1:
@@ -10679,6 +10653,10 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     else:
         bkg_sub = False
 
+    # get gain from header
+    gain = read_header(header, ['gain'], log=log)
+
+    
     log.info('background already subtracted?: {}'.format(bkg_sub))
 
     # do not apply weighting
@@ -10882,10 +10860,10 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
             data -= data_bkg
             header['BKG-SUB'] = (True, 'sky background was subtracted?')
 
-            header['S-BKG'] = (np.median(data_bkg_mini), '[e-] median background '
-                               'full image')
-            header['S-BKGSTD'] = (np.median(data_bkg_std_mini), '[e-] sigma '
-                                  '(STD) background full image')
+            header['S-BKG'] = (gain * np.median(data_bkg_mini), '[e-] median '
+                               'background full image')
+            header['S-BKGSTD'] = (gain * np.median(data_bkg_std_mini), '[e-] '
+                                  'sigma (STD) background full image')
 
             # edge pixels will be negative, best to ensure that they
             # are set to zero
@@ -10978,12 +10956,12 @@ def run_sextractor(image, cat_out, file_config, file_params, pixscale, log,
     # background was determined by source-extractor
     if (get_par(set_zogy.bkg_method,tel)==1 and not return_fwhm_elong):
         data_bkg = read_hdulist (fits_bkg)
-        header['S-BKG'] = (np.median(data_bkg), '[e-] median background '
+        header['S-BKG'] = (gain * np.median(data_bkg), '[e-] median background '
                            'full image')
         data_bkg_std = read_hdulist (fits_bkg_std)
-        header['S-BKGSTD'] = (np.median(data_bkg_std), '[e-] sigma '
-                              '(STD) background full image')
-        
+        header['S-BKGSTD'] = (gain * np.median(data_bkg_std), '[e-] sigma (STD) '
+                              'background full image')
+
         
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_sextractor', log=log)
