@@ -25,6 +25,5 @@ FLUXERR_AUTO           # * RMS error for AUTO flux                         [coun
 FLUX_RADIUS            # * Fraction-of-light radii                         [pixel]
 SNR_WIN                # * Signal-to-noise ratio in a Gaussian window      
 # added for transient extraction:
-FLAGS_WIN              #   Windowed extraction flags
 XPEAK_IMAGE            #   x-coordinate of the brightest pixel             [pixel]
 YPEAK_IMAGE            #   y-coordinate of the brightest pixel             [pixel]
