@@ -117,7 +117,7 @@ psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
 psf_rad_phot = 5         # PSF radius in units of FWHM used in optimal photometry
-psf_rad_zogy = 5         # PSF radius in units of FWHM used in optimal subtraction
+psf_rad_zogy = 3         # PSF radius in units of FWHM used in optimal subtraction
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
                          # new and ref image as follows:
