@@ -6026,6 +6026,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                         zp_type='channels')
 
 
+                    for i_chan in range(zp_chan.size):
+                        header['PC-ZP{}'.format(i_chan+1)] = (
+                            zp_chan.ravel()[i_chan], '[mag] channel {} zeropoint'
+                            .format(i_chan+1))
+                    for i_chan in range(zp_chan.size):
+                        header['PC-ZPS{}'.format(i_chan+1)] = (
+                            zp_std_chan.ravel()[i_chan], '[mag] channel {} sigma '
+                            '(STD) zeropoint'.format(i_chan+1))
+                    for i_chan in range(zp_chan.size):
+                        header['PC-NCC{}'.format(i_chan+1)] = (
+                            ncal_chan.ravel()[i_chan], 'channel {} number of '
+                            'photcal stars used'.format(i_chan+1))
+
+
                     # fit low-order 2D polynomial to zeropoint array;
                     # normalize coordinates by image size to make it
                     # easier on the polynomial fit
@@ -6165,21 +6179,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                               '[mag] default filter zeropoint in settings file')
         header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
         header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
-
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
-            for i_chan in range(zp_chan.size):
-                header['PC-ZP{}'.format(i_chan+1)] = (
-                    zp_chan.ravel()[i_chan], '[mag] channel {} zeropoint'
-                    .format(i_chan+1))
-            for i_chan in range(zp_chan.size):
-                header['PC-ZPS{}'.format(i_chan+1)] = (
-                    zp_std_chan.ravel()[i_chan], '[mag] channel {} sigma (STD) '
-                    'zeropoint'.format(i_chan+1))
-            for i_chan in range(zp_chan.size):
-                header['PC-NCC{}'.format(i_chan+1)] = (
-                    ncal_chan.ravel()[i_chan], 'channel {} number of photcal '
-                    'stars used'.format(i_chan+1))
-
+        
 
         header['PC-EXTCO'] = (get_par(set_zogy.ext_coeff,tel)[filt], 
                               '[mag] filter extinction coefficient (k)')
