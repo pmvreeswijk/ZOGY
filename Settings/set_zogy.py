@@ -126,13 +126,10 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet_ref = 89     # size of the square VIGNETs saved in the SExtractor
-                         # catalog and used by PSFEx for the reference image.
-                         # For the new image this value will be set to
-                         # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * FWHM_new
-                         # The ref image value should be set to
+size_vignet = 89         # size of the square VIGNETs saved in the SExtractor
+                         # LDAC catalog used by PSFEx; its value should be set to
                          # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * maximum
-                         # expected FWHM in any of the new images.
+                         # expected FWHM in any of the images.
 psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
                          # (don't set this too high as otherwise the PSF
                          #  will be mainly based on bright stars)
@@ -219,11 +216,9 @@ cfg_dir = os.environ['ZOGYHOME']+'/Config/'
 sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
 sex_cfg_psffit = cfg_dir+'sex_psffit.config' # same for PSF-fitting version
 sex_det_filt = cfg_dir+'default.conv'        # SExtractor detection filter file
-sex_par = cfg_dir+'sex.params'               # SExtractor output parameters definition file
+sex_par = cfg_dir+'sex.params'               # SExtractor output parameters file
 sex_par_psffit = cfg_dir+'sex_psffit.params' # same for PSF-fitting version
-# change back after ADC runs!!!
-#sex_par_ref = cfg_dir+'sex_ADC.params'       # same for reference image output version
-sex_par_ref = cfg_dir+'sex_ref.params'       # same for reference image output version
+sex_par_ref = cfg_dir+'sex_ref.params'       # same for ref image output version
 psfex_cfg = cfg_dir+'psfex.config'           # PSFex configuration file
 swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 
@@ -236,8 +231,8 @@ mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
 low_RAM = True
 
 # switch on/off different functions
-redo_new = False         # execute functions even if new files already exist
-redo_ref = False         # execute functions even if ref files already exist
+redo_new = False         # execute SExtractor, astrometry.net, PSFEx, optimal flux
+redo_ref = False         # determination even if new/ref products already present
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
