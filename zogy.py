@@ -296,8 +296,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             get_par(set_zogy.sex_par,tel), pixscale, log, header,
             fit_psf=False, return_fwhm_elong=True,
             fraction=get_par(set_zogy.fwhm_imafrac,tel),
-            fwhm=5.0, update_vignet=False,
-            tel=tel, set_zogy=set_zogy)
+            fwhm=5.0, tel=tel, set_zogy=set_zogy)
 
         log.info('fwhm_{}: {:.3f} +- {:.3f}'.format(imtype, fwhm, fwhm_std))
 
@@ -326,16 +325,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         
         return fwhm, fwhm_std, elong, elong_std
             
-    # if [new_fits] is not defined, [fwhm_new]=0 ensures that code
-    # does not crash in function [get_vignet_size] which uses both
-    # [fwhm_new] and [fwhm_ref]
-    #fwhm_new = 0
+
+    # run SExtractor for seeing estimate of new_fits
     if new:
         sexcat_new = '{}_ldac.fits'.format(base_new)
-        # run SExtractor for seeing estimate of new_fits and ref_fits;
-        # both new and ref need to have their fwhm determined before
-        # continuing, as both [fwhm_new] and [fwhm_ref] are required
-        # to determine the VIGNET size set in the full SExtractor run
         keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
         if np.all([k in header_new for k in keys_temp]):
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = [
@@ -344,11 +337,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
                 base_new, sexcat_new, pixscale_new, 'new', header_new, log)
 
-    #fwhm_ref = 0
+    # same for the reference image
     if ref:
-        # do the same for the reference image
         sexcat_ref = '{}_ldac.fits'.format(base_ref)
-
         keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
         if np.all([k in header_ref for k in keys_temp]):
             fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = [
@@ -390,7 +381,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 SE_processed = True
             finally:
                 # add header keyword(s):
-                header['S-P'] = (SE_processed, 'successfully processed by SExtractor?')
+                header['S-P'] = (SE_processed, 'successfully processed by '
+                                 'SExtractor?')
                 # SExtractor version
                 cmd = ['source-extractor', '-v']
                 result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -482,17 +474,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # inside [sex_wcs] are False, i.e. an exception occurred
             # during [run_sextractor] or [run_wcs]
             return header_ref            
-
-        # N.B.: two differences with new image: SExtractor parameter
-        # file (new: set_zogy.sex_par, ref: set_zogy.sex_par_ref) and update_vignet
-        # boolean (new: True, ref: False). For the ref image, this
-        # will lead to the VIGNET size to be as defined in the
-        # parameter file [set_zogy.sex_par_ref], which by default is set to
-        # the large value: (99,99). Instead of scaling it to the FWHM
-        # and [set_zogy.psf_radius]. This is to be able to compare different
-        # new images with different FWHMs to the same reference image
-        # without needing to run SExtractor and possibly also PSFEx
-        # again for the reference image.
 
 
     if new and ref:
@@ -2728,7 +2709,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                             get_par(set_zogy.sex_cfg,tel),
                             get_par(set_zogy.sex_par,tel), pixscale, log, header,
                             return_fwhm_elong=False, fwhm=fwhm,
-                            update_vignet=False, fits_mask=fits_newref_mask,
+                            fits_mask=fits_newref_mask,
                             npasses=1, tel=tel, set_zogy=set_zogy,
                             nthreads=nthreads, Scorr_mode='init')
     
@@ -2777,7 +2758,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                             get_par(set_zogy.sex_cfg,tel),
                             get_par(set_zogy.sex_par,tel), pixscale, log, header,
                             return_fwhm_elong=False, fwhm=fwhm,
-                            update_vignet=False, fits_mask=fits_newref_mask,
+                            fits_mask=fits_newref_mask,
                             npasses=1, tel=tel, set_zogy=set_zogy,
                             nthreads=nthreads, Scorr_mode='pos',
                             image_analysis=fits_D, std_Scorr=std_Scorr)
@@ -2796,7 +2777,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                             get_par(set_zogy.sex_cfg,tel),
                             get_par(set_zogy.sex_par,tel), pixscale, log, header,
                             return_fwhm_elong=False, fwhm=fwhm,
-                            update_vignet=False, fits_mask=fits_newref_mask,
+                            fits_mask=fits_newref_mask,
                             npasses=1, tel=tel, set_zogy=set_zogy,
                             nthreads=nthreads, Scorr_mode='neg',
                             image_analysis=fits_D_neg, std_Scorr=std_Scorr)
@@ -8452,33 +8433,16 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
 
     # run psfex on SExtractor output catalog
     #
-    # If the PSFEx output file is already present with at least the
-    # [psf_size_config] as currently required, and redo is not True,
-    # then skip [run_psfex].
+    # If the PSFEx output file is already present, then skip run_psfex
     psfex_bintable = '{}_psf.fits'.format(base)
-    skip_psfex = False
-    if os.path.isfile(psfex_bintable) and not redo:
-        data_psf, header_psf = read_hdulist (psfex_bintable, get_header=True)
-        data_psf = data_psf[0][0][:]
-        # use function [get_samp_PSF_config_size] to determine [psf_samp]
-        # and [psf_size_config]
-        psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
-        log.info('psf_samp: {:.3f}, psf_size_config: {} in [get_psf] for {}'
-                 .format(psf_samp, psf_size_config, imtype))
-        log.info('psf_size_config of existing PSFEx file {}: {}'
-                 .format(psfex_bintable, header_psf['PSFAXIS1']))
+    if os.path.isfile(psfex_bintable):
+        skip_psfex = True
+        if get_par(set_zogy.verbose,tel):
+            log.info ('skipping run_psfex for image: {}'.format(image))
+    else:
+        skip_psfex = False
+
         
-        # if the required [psf_size_config] is smaller than or roughly
-        # equal (2 pixel difference) to the psf_size_config of the PSF
-        # image header, both for new and ref, then no need to run
-        # PSFEx again, because the size will be adjusted to the size
-        # required ([psf_size]) in function [get_psf_ima]
-        if np.abs(psf_size_config-header_psf['PSFAXIS1']) <= 2:
-            skip_psfex = True
-            if get_par(set_zogy.verbose,tel):
-                log.info ('Skipping run_psfex for image: {}'.format(image))
-
-
     if not skip_psfex:
         psfexcat = '{}_psfex.cat'.format(base)
         log.info('psfexcat: {}'.format(psfexcat))
@@ -8526,8 +8490,8 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
                                 get_par(set_zogy.sex_cfg_psffit,tel),
                                 get_par(set_zogy.sex_par_psffit,tel),
                                 pixscale, log, header, fit_psf=True,
-                                update_vignet=False, fwhm=fwhm,
-                                tel=tel, set_zogy=set_zogy, nthreads=nthreads)
+                                fwhm=fwhm, tel=tel, set_zogy=set_zogy,
+                                nthreads=nthreads)
 
 
     # read in PSF output binary table from psfex, containing the
@@ -8597,6 +8561,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
         log.info ('fwhm_ref (pix): {:.2f}'.format(fwhm_ref))
         
     log.info ('fwhm_use (pix): {:.2f}'.format(fwhm_use))
+
     log.info ('psf_size used in [get_psf]: {} pix for imtype: {}'
               .format(psf_size, imtype))
     log.info ('psf_samp used in [get_psf]: {:.2f} for imtype: {}'
@@ -9412,16 +9377,17 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         table_ref = Table.read(cat_ref)
         
         index_new = []
-        for i in range(len(x_new_match)):
-            dist2 = ((table_new['X_POS']-x_new_match[i])**2 + 
-                     (table_new['Y_POS']-y_new_match[i])**2)
-            index_new.append(np.argmin(dist2))
-
         index_ref = []
-        for i in range(len(x_ref_match)):
-            dist2 = ((table_ref['X_POS']-x_ref_match[i])**2 + 
-                     (table_ref['Y_POS']-y_ref_match[i])**2)
-            index_ref.append(np.argmin(dist2))
+        for i in range(len(x_new_match)):
+            dist2_new = ((table_new['X_POS']-x_new_match[i])**2 + 
+                         (table_new['Y_POS']-y_new_match[i])**2)
+            
+            dist2_ref = ((table_ref['X_POS']-x_ref_match[i])**2 + 
+                         (table_ref['Y_POS']-y_ref_match[i])**2)
+
+            if len(dist2_new) > 0 and len(dist2_ref) > 0:
+                index_new.append(np.argmin(dist2_new))
+                index_ref.append(np.argmin(dist2_ref))
 
 
         # determining flux ratio from the magnitude requires the
@@ -9453,9 +9419,10 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             else:
                 exptime_ref = header_ref['EXPTIME']
 
-            fratio_match = ((exptime_ref/exptime_new) * 
-                            (table_new['E_FLUX_OPT'][np.asarray(index_new)] /
-                             table_ref['E_FLUX_OPT'][np.asarray(index_ref)]))
+            if len(index_new) > 0 and len(index_ref) > 0:
+                fratio_match = ((exptime_ref/exptime_new) * 
+                                (table_new['E_FLUX_OPT'][np.asarray(index_new)] /
+                                 table_ref['E_FLUX_OPT'][np.asarray(index_ref)]))
 
         else:
             log.warning ('E_FLUX_OPT not available in catalogs to calculate '
@@ -10506,56 +10473,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
 ################################################################################
 
-def get_vignet_size (imtype, log):
-
-    if imtype=='ref':
-        # set vignet size to the value defined in [set_zogy.size_vignet_ref]
-        size_vignet = get_par(set_zogy.size_vignet_ref,tel)
-    else:
-        
-        # in case [set_zogy.psf_sampling] is set to zero, scale the
-        # size of the VIGNET output in the output catalog with 2 *
-        # max(set_zogy.psf_rad_zogy, set_zogy_psf_rad_phot) * [fwhm]
-        # where fwhm is taken to be the largest of global parameters
-        # [fwhm_new] and [fwhm_ref], where the latter is scaled with
-        # the pixelscale ratio in case new and ref images have
-        # different scales
-        if get_par(set_zogy.psf_sampling,tel) == 0.:
-
-            if 'fwhm_ref' in globals() and 'pixscale_ref' in globals():
-                # fwhm_ref not present if no reference image is provided
-                fwhm_vignet = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
-            else:
-                fwhm_vignet = fwhm_new
-
-            # set psf_radius to the maximum of psf_rad_phot and
-            # psf_rad_zogy defined in the settings file
-            psf_radius = max(get_par(set_zogy.psf_rad_phot,tel),
-                             get_par(set_zogy.psf_rad_zogy,tel))
-                             
-            size_vignet = np.int(np.ceil(2. * psf_radius * fwhm_vignet))
-            # make sure it's odd
-            if size_vignet % 2 == 0:
-                size_vignet += 1
-
-            # provide a warning if the resulting size is bigger than
-            # the reference image size
-            if size_vignet > get_par(set_zogy.size_vignet_ref,tel):
-                log.info('Warning: VIGNET size of {} is larger than ref image '
-                         'value of {}'.format(
-                             size_vignet, get_par(set_zogy.size_vignet_ref,tel)))
-        else:
-            # otherwise set it to the value defined for the ref image
-            size_vignet = get_par(set_zogy.size_vignet_ref,tel)
-
-    return size_vignet
-
-
-################################################################################
-
 def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
                     header, fit_psf=False, return_fwhm_elong=True, fraction=1.0,
-                    fwhm=5.0, update_vignet=True, imtype=None, fits_mask=None, 
+                    fwhm=5.0, update_vignet=False, imtype=None, fits_mask=None, 
                     npasses=2, tel=None, set_zogy=None, nthreads=0,
                     Scorr_mode=None, image_analysis=None, std_Scorr=1):
 
@@ -10643,7 +10563,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
     
         # update size of VIGNET
         if update_vignet:
-            size_vignet = get_vignet_size (imtype, log)
+            size_vignet = get_par(set_zogy.size_vignet,tel)
             # write vignet_size to header
             header['S-VIGNET'] = (size_vignet, '[pix] size square VIGNET used '
                                   'in SExtractor')
@@ -11077,8 +10997,8 @@ def rename_catcols (cat_in, log=None):
 
 ################################################################################
 
-def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
-              nsnap=8, limit_ldac=True, log=None):
+def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
+               limit_ldac=True, log=None):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -11146,7 +11066,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
         
     # use function [get_samp_PSF_config_size] to determine [psf_samp]
     # and [psf_size_config] required to run PSFEx
-    psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
+    psf_samp, psf_size_config = get_samp_PSF_config_size(imtype, log=log)
     psf_size_config_str = '{},{}'.format(psf_size_config, psf_size_config)
     
     if get_par(set_zogy.verbose,tel):
@@ -11164,9 +11084,6 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
     #maxellip_str= str(np.amin([maxellip, 1.]))
     #print ('maxellip_str', maxellip_str)
 
-    # Need to check whether the VIGNET size from the SExtractor run is
-    # sufficient large compared to [psf_samp] and [psf_size_config].
-    
     # run psfex from the unix command line
     cmd = ['psfex', cat_in, '-c', file_config,'-OUTCAT_NAME', cat_out,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
@@ -11177,14 +11094,18 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
     #       '-SAMPLE_MAXELLIP', maxellip_str]
 
     if get_par(set_zogy.make_plots,tel):
-        cmd += ['-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, CHI2, RESIDUALS',
+        cmd += ['-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, '
+                'CHI2, RESIDUALS',
                 '-CHECKPLOT_DEV', 'PS',
                 '-CHECKPLOT_ANTIALIAS', 'N',
                 '-CHECKPLOT_NAME',
-                'psfex_fwhm, psfex_ellip, psfex_counts, psfex_countfrac, psfex_chi2, psfex_resi']
-        cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,BASIS,MOFFAT,-MOFFAT,-SYMMETRICAL',
+                'psfex_fwhm, psfex_ellip, psfex_counts, psfex_countfrac, '
+                'psfex_chi2, psfex_resi']
+        cmd += ['-CHECKIMAGE_TYPE', 'CHI,PROTOTYPES,SAMPLES,RESIDUALS,SNAPSHOTS,'
+                'BASIS,MOFFAT,-MOFFAT,-SYMMETRICAL',
                 '-CHECKIMAGE_NAME',
-                'psfex_chi, psfex_proto, psfex_samp, psfex_resi, psfex_snap, psfex_basis, psfex_moffat, psfex_minmoffat, psfex_minsymmetrical']
+                'psfex_chi, psfex_proto, psfex_samp, psfex_resi, psfex_snap, '
+                'psfex_basis, psfex_moffat, psfex_minmoffat, psfex_minsymmetrical']
 
     # log cmd executed
     cmd_str = ' '.join(cmd)
@@ -11201,27 +11122,30 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
     psf_out = '{}_psf.fits'.format(base)
     os.rename (psf_in, psf_out)
 
-    
-    # for the reference image, limit the size of the ldac catalog fits
-    # file to be saved with only those catalog entries used by PSFEx
-    # --> why not for new image as well?
-    if imtype=='ref' or imtype=='new':
-        psfexcat = '{}_psfex.cat'.format(base)
-        table = ascii.read(psfexcat, format='sextractor')
-        # In PSFEx version 3.18.2 all objects from the input
-        # SExtractor catalog are recorded, and in that case the
-        # entries with FLAGS_PSF=0 need to be selected.
-        if 'FLAGS_PSF' in table.colnames:
-            mask_psfstars = (table['FLAGS_PSF']==0)
-        # In PSFEx version 3.17.1 (last stable version), only stars
-        # with zero flags are recorded in the output catalog, so need
-        # to pick the source number of the input catalog minus 1.
-        else:
-            mask_psfstars = table['SOURCE_NUMBER']-1
 
-        # overwrite the input catalog with these selected stars
-        with fits.open(cat_in, mode='update') as hdulist:
-            hdulist[2].data = hdulist[2].data[mask_psfstars]
+    # no need to limit disk space of LDAC catalog anymore, as it is no
+    # longer saved
+    if False:
+        # for the reference image, limit the size of the ldac catalog fits
+        # file to be saved with only those catalog entries used by PSFEx
+        # --> why not for new image as well?
+        if imtype=='ref' or imtype=='new':
+            psfexcat = '{}_psfex.cat'.format(base)
+            table = ascii.read(psfexcat, format='sextractor')
+            # In PSFEx version 3.18.2 all objects from the input
+            # SExtractor catalog are recorded, and in that case the
+            # entries with FLAGS_PSF=0 need to be selected.
+            if 'FLAGS_PSF' in table.colnames:
+                mask_psfstars = (table['FLAGS_PSF']==0)
+            # In PSFEx version 3.17.1 (last stable version), only stars
+            # with zero flags are recorded in the output catalog, so need
+            # to pick the source number of the input catalog minus 1.
+            else:
+                mask_psfstars = table['SOURCE_NUMBER']-1
+
+            # overwrite the input catalog with these selected stars
+            with fits.open(cat_in, mode='update') as hdulist:
+                hdulist[2].data = hdulist[2].data[mask_psfstars]
 
 
     # record the PSFEx output check images defined above, into
@@ -11270,7 +11194,7 @@ def run_psfex(cat_in, file_config, cat_out, imtype, poldeg,
         
 ################################################################################
 
-def get_samp_PSF_config_size (imtype):
+def get_samp_PSF_config_size (imtype, log=None):
 
     """function to determine [psf_samp] and [psf_config_size] to be used
        in run_psfex
@@ -11296,39 +11220,32 @@ def get_samp_PSF_config_size (imtype):
     else:
         psf_samp = get_par(set_zogy.psf_sampling,tel)
 
-    # [psf_size_config] is the size of the square
-    # image on which PSFEx constructs the PSF. That image is
-    # resized to the original pixel scale in function [get_psf_ima]
-    # and cut to the [psf_size] needed for the optimal photometry
-    # measurements or the PSFs needed for the optimal subtraction.
-    # For the ref image, set 
-
-    if imtype=='ref':
-        # for the reference image, make [psf_size_config] as large as
-        # allowed by [set_zogy.size_vignet_ref] and [psf_samp]
-        # determined above
-        psf_size_config = get_par(set_zogy.size_vignet_ref,tel) / psf_samp
-    else:
-        # for the new image; if the ref image is also provided, set
-        # the FWHM to the maximum of new and ref
-        if 'fwhm_ref' in globals() and 'pixscale_ref' in globals():
-            fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
-        else:
-            fwhm_use = fwhm_new
-
-        # set psf_radius to the maximum of psf_rad_phot and
-        # psf_rad_zogy defined in the settings file
-        psf_radius = max(get_par(set_zogy.psf_rad_phot,tel),
-                         get_par(set_zogy.psf_rad_zogy,tel))
-
-        psf_size_config = ((2. * psf_radius * fwhm_use) / psf_samp)
-
-
+    # [psf_size_config] is the size of the square image on which PSFEx
+    # constructs the PSF. That image is resized to the original pixel
+    # scale in function [get_psf_ima] and cut to the [psf_size] needed
+    # for the optimal photometry measurements or the PSFs needed for
+    # the optimal subtraction. Make [psf_size_config] as large as
+    # allowed by [set_zogy.size_vignet_ref] and [psf_samp] determined
+    # above
+    psf_size_config = get_par(set_zogy.size_vignet,tel) / psf_samp
     # convert to integer
     psf_size_config = int(np.round(psf_size_config))
     # make sure it's odd
     if psf_size_config % 2 == 0:
         psf_size_config += 1
+
+
+    # provide warning if actually required psf_size_config is larger
+    # than allowed by size_vignet
+    if log is not None:
+        psf_radius = max(get_par(set_zogy.psf_rad_phot,tel),
+                         get_par(set_zogy.psf_rad_zogy,tel))
+        if 2 * fwhm * psf_radius > psf_size_config:
+            log.warning ('psf_size_config of {} is limited by VIGNET size of {}: '
+                         '2 * FWHM_{} * max(psf_rad_phot, psf_rad_zogy) = {:.2f}'
+                         .format(psf_size_config,
+                                 get_par(set_zogy.size_vignet,tel), imtype,
+                                 2 * fwhm * psf_rad))
 
 
     # now slightly change [psf_samp] such that [psf_samp] *
@@ -11930,12 +11847,12 @@ def main():
                         help='name of settings file')
     parser.add_argument('--log', type=str, default=None,
                         help='if name is provided, an output logfile is created')
-    params.add_argument('--redo_new', default=None,
-                        help='force re-doing new-image steps (source-extractor, '
-                        'astrometry, PSFEx, even when products already present)')
-    params.add_argument('--redo_ref', default=None,
-                        help='force re-doing ref-image steps (source-extractor, '
-                        'astrometry, PSFEx, even when products already present)')
+    parser.add_argument('--redo_new', default=None,
+                        help='force re-doing new-image source-extractor and '
+                        'astrometry.net parts even when products already present)')
+    parser.add_argument('--redo_ref', default=None,
+                        help='force re-doing ref-image source-extractor and '
+                        'astrometry.net parts even when products already present)')
     parser.add_argument('--verbose', default=None,
                         help='increase verbosity level')
     parser.add_argument('--nthreads', type=int, default=1,
