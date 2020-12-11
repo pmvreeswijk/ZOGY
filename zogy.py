@@ -452,7 +452,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         return data_cal
 
-    
+
+    # initialize header_trans
+    if new and ref:
+        remap = True
+        # initialize header to be recorded for keywords related to the
+        # comparison of new and ref
+        header_trans = fits.Header()
+    else:
+        remap = False
+
+
     if new:
         # now run above function [sex_wcs] on new image
         data_cal_new = sex_wcs(base_new, sexcat_new, get_par(set_zogy.sex_par,tel), 
@@ -462,8 +472,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # leave because either SE_processed or WCS_processed
             # inside [sex_wcs] are False, i.e. an exception occurred
             # during [run_sextractor] or [run_wcs]
-            return header_new            
-        
+            if not ref:
+                return header_new
+            else:
+                return header_new, header_trans
+            
     if ref:
         # and reference image
         data_cal_ref = sex_wcs(base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel), 
@@ -473,17 +486,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # leave because either SE_processed or WCS_processed
             # inside [sex_wcs] are False, i.e. an exception occurred
             # during [run_sextractor] or [run_wcs]
-            return header_ref            
-
-
-    if new and ref:
-        remap = True
-        # initialize header to be recorded for keywords related to the
-        # comparison of new and ref
-        header_trans = fits.Header()
-    else:
-        remap = False
-        
+            if not new:
+                return header_ref            
+            else:
+                return header_new, header_trans
+            
 
     # determine cutouts
     if new:
@@ -654,24 +661,26 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.nfakestars,tel)>0:
 
             nfake = nsubs * get_par(set_zogy.nfakestars,tel)
-            fakestar_xcoord = np.zeros(nfake, dtype=int)
-            fakestar_ycoord = np.zeros(nfake, dtype=int)
+            fakestar_xcoord = np.zeros(nfake)
+            fakestar_ycoord = np.zeros(nfake)
             fakestar_flux_in = np.zeros(nfake)
-            fakestar_flux_out = np.zeros(nfake)
-            fakestar_fluxerr_out = np.zeros(nfake)        
-            fakestar_s2n_out = np.zeros(nfake)
 
             # add the fake stars to the new subimages
+            nfake_sub = get_par(set_zogy.nfakestars,tel)
             for nsub in range(nsubs):
-
-                index_fake = tuple([slice(
-                    nsub*get_par(set_zogy.nfakestars,tel),
-                    (nsub+1)*get_par(set_zogy.nfakestars,tel))])
-                
+                index_fake = tuple([slice(nsub * nfake_sub, (nsub+1) * nfake_sub)])
                 fakestar_xcoord[index_fake], fakestar_ycoord[index_fake], \
                     fakestar_flux_in[index_fake] = add_fakestars (
                         psf_orig_new[nsub], data_new[nsub],
                         data_new_bkg_std[nsub], fwhm_new, log)
+
+                
+            # create table_fake
+            table_fake = Table([fakestar_xcoord, fakestar_ycoord, fakestar_flux_in],
+                               names=['X', 'Y', 'E_FLUX_IN'])
+            table_fake.add_columns([0.]*4, names=['S2N_IN', 'E_FLUX_OUT',
+                                                  'E_FLUXERR_OUT', 'S2N_OUT'])
+            table_fake['S2N_IN'] = get_par(set_zogy.fakestar_s2n,tel)
 
 
 
@@ -871,13 +880,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     index_fake = tuple([slice(
                         nsub*get_par(set_zogy.nfakestars,tel),
                         (nsub+1)*get_par(set_zogy.nfakestars,tel))])
-                    x_fake = fakestar_xcoord[index_fake]-1
-                    y_fake = fakestar_ycoord[index_fake]-1
-                    fakestar_flux_out[index_fake] = data_Fpsf[y_fake, x_fake]
-                    fakestar_fluxerr_out[index_fake] = data_Fpsferr[y_fake,
-                                                                       x_fake]
+                    # fake stars pixel coordinates (X and Y) were
+                    # given offset between -0.5 and +0.5; convert
+                    # these back to integer indices
+                    x_fake = table_fake['X'][index_fake]-1
+                    y_fake = table_fake['Y'][index_fake]-1
+                    table_fake['E_FLUX_OUT'][index_fake] = data_Fpsf[y_fake,
+                                                                     x_fake]
+                    table_fake['E_FLUXERR_OUT'][index_fake] = data_Fpsferr[y_fake,
+                                                                           x_fake]
                     # and S/N from Scorr
-                    fakestar_s2n_out[index_fake] = data_Scorr[y_fake, x_fake]
+                    table_fake['S2N_OUT'][index_fake] = data_Scorr[y_fake, x_fake]
                     # x,y coords are in the fft frame; infer the x,y pixel
                     # coordinates in the full image by using [subcutfft],
                     # which defines the pixel indices [y1 y2 x1 x2]
@@ -885,8 +898,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     # entire input/output image coordinate frame; used various
                     # times below
                     subcutfft = cuts_ima_fft[nsub]
-                    fakestar_xcoord[index_fake] += subcutfft[2]
-                    fakestar_ycoord[index_fake] += subcutfft[0]
+                    table_fake['X'][index_fake] += subcutfft[2]
+                    table_fake['Y'][index_fake] += subcutfft[0]
 
 
                 # put sub images without the borders into output frames
@@ -1021,25 +1034,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                      .format(mean_Fpsferr, median_Fpsferr, std_Fpsferr))
 
 
-        # this block was moved to after [get_trans_alt] to work on the
-        # background-corrected and normalized Scorr image
-        if False:
-            # if one or more fake stars were added to the subimages,
-            # compare the input flux with the PSF flux determined by
-            # run_ZOGY.
-            if get_par(set_zogy.nfakestars,tel)>0:
-                
-                if 'data_Fpsf_full' not in locals():
-                    data_Fpsf_full = read_hdulist('{}_Fpsf.fits'
-                                                  .format(base_newref))
-
-                extract_fakestars (fakestar_xcoord, fakestar_ycoord,
-                                   fakestar_flux_out, fakestar_fluxerr_out,
-                                   fakestar_s2n_out, nsubs, cuts_ima, cuts_ima_fft,
-                                   index_extract, data_Fpsf_full, data_Fpsferr_full,
-                                   data_Scorr_full)
-
-
         # convert Fpsferr image to limiting magnitude image
         index_zero = np.nonzero(data_Fpsferr_full==0)
         data_Fpsferr_full[index_zero] = median_Fpsferr
@@ -1123,12 +1117,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 if 'data_Fpsf_full' not in locals():
                     data_Fpsf_full = read_hdulist('{}_Fpsf.fits'
                                                   .format(base_newref))
-
-                extract_fakestars (fakestar_xcoord, fakestar_ycoord,
-                                   fakestar_flux_out, fakestar_fluxerr_out,
-                                   fakestar_s2n_out, nsubs, cuts_ima, cuts_ima_fft,
-                                   index_extract, data_Fpsf_full, data_Fpsferr_full,
-                                   data_Scorr_full, table_trans)
+                    
+                log.info ('extracting fake stars from data')
+                extract_fakestars (
+                    table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
+                    index_extract, data_Fpsf_full, data_Fpsferr_full,
+                    data_Scorr_full, pixscale_new, log=log)
 
 
         else:
@@ -1206,92 +1200,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                          get_par(set_zogy.transient_nsigma,tel)))
 
 
-        if get_par(set_zogy.nfakestars,tel)==0:
+        # add fakestar header keywords
+        header_trans['T-NFAKE'] = (nsubs * get_par(set_zogy.nfakestars,tel),
+                                   'number of fake stars added to full frame')
+        header_trans['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
+                                    'fake stars input S/N')
             
-            # still write these header keywords
-            header_trans['T-NFAKE'] = (get_par(set_zogy.nfakestars,tel), 
-                                      'number of fake stars added to full frame')
-            header_trans['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
-                                       'fake stars input S/N')
-            
-        else:
-
-            
-            # compare input and output flux
-            fluxdiff = ((fakestar_flux_in - fakestar_flux_out) /
-                        fakestar_flux_in)
-            fluxdiff_err = fakestar_fluxerr_out / fakestar_flux_in
-            
-            fd_mean, fd_median, fd_std = sigma_clipped_stats(
-                fluxdiff.astype('float64'))
-            fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(
-                fluxdiff_err.astype('float64'))
-
-            # add header keyword(s):
-            nfake = len(fakestar_flux_in)
-            header_trans['T-NFAKE'] = (nfake,
-                                      'number of fake stars added to full frame')
-            header_trans['T-FAKESN'] = (get_par(set_zogy.fakestar_s2n,tel),
-                                       'fake stars input S/N')
-
-            # write to ascii file
-            filename = '{}_fakestars.dat'.format(base_new)
-            f = open(filename, 'w')
-            f.write('{:1} {:11} {:11} {:12} {:12} {:16} {:11} {:11}\n'
-                    .format('#', 'xcoord[pix]', 'ycoord[pix]', 'flux_in[e-]',
-                            'flux_out[e-]', 'fluxerr_out[e-]', 'S/N_input',
-                            'S/N_output'))
-
-            for i in range(nfake):
-                f.write('{:11.2f} {:11.2f} {:12.2e} {:12.2e} {:16.2e} {:11.2f} '
-                        '{:11.2f}\n'
-                        .format(fakestar_xcoord[i], fakestar_ycoord[i],
-                                fakestar_flux_in[i], fakestar_flux_out[i],
-                                fakestar_fluxerr_out[i],
-                                get_par(set_zogy.fakestar_s2n,tel),
-                                fakestar_s2n_out[i]))
-            f.close()
-
-            # make comparison plot of flux input and output
-            if get_par(set_zogy.make_plots,tel):
-            
-                x = np.arange(nsubs*get_par(set_zogy.nfakestars,tel))+1
-                y = fakestar_flux_in
-                plt.plot(x, y, 'o', color='tab:blue', markersize=7,
-                         markeredgecolor='k')
-                plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
-                plt.ylabel('true flux (e-)')
-                plt.title('fake stars true input flux')
-                plt.savefig('{}_fakestar_flux_in.pdf'.format(base_newref))
-                if get_par(set_zogy.show_plots,tel): plt.show()
-                plt.close()
-
-                #plt.axis((0,nsubs,0,2))
-                plt.errorbar(x, fluxdiff, yerr=fluxdiff_err, linestyle='None',
-                             ecolor='k', capsize=2)
-                plt.plot(x, fluxdiff, 'o', color='tab:blue', markersize=7,
-                         markeredgecolor='k')
-                plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
-                plt.ylabel('(true flux - ZOGY flux) / true flux')
-                plt.title('true flux vs. ZOGY Fpsf; mean:{:.3f}, std:{:.3f}, '
-                          'data err:{:.3f}'.format(fd_mean, fd_std, fderr_mean))
-                plt.savefig('{}_fakestar_flux_in_vs_ZOGYout.pdf'
-                            .format(base_newref))
-                if get_par(set_zogy.show_plots,tel): plt.show()
-                plt.close()
-
-                # same for S/N as determined by Scorr
-                y = fakestar_s2n_out
-                plt.plot(x, y, 'o', color='tab:blue', markersize=7,
-                         markeredgecolor='k')
-                plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
-                plt.ylabel('S/N from Scorr')
-                plt.title('fakestars signal-to-noise ratio from Scorr')
-                plt.savefig('{}_fakestar_S2N_ZOGYoutput.pdf'.format(base_newref))
-                if get_par(set_zogy.show_plots,tel): plt.show()
-                plt.close()
-
-
 
         # apply Zafiirah's MeerCRAB module to the thumbnails in
         # the transient catalog just created, using the function
@@ -1451,7 +1365,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              keys_thumbnails=keys_thumbnails,
                              size_thumbnails=size_thumbnails,
                              ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
-                             ML_prob_real=ML_prob_real, tel=tel, log=log)
+                             ML_prob_real=ML_prob_real,
+                             nfakestars=get_par(set_zogy.nfakestars,tel),
+                             tel=tel, log=log)
 
         # test: calculate old ML_prob_real on the fits catalog
         #ML_model = get_par(set_zogy.ML_model,tel)
@@ -1638,12 +1554,9 @@ def create_full (name_full, header_full, shape_full, dtype_full, nsubs, cuts_ima
 
 ################################################################################
 
-def extract_fakestars (fakestar_xcoord, fakestar_ycoord,
-                       fakestar_flux_out, fakestar_fluxerr_out,
-                       fakestar_s2n_out, nsubs, cuts_ima,
-                       cuts_ima_fft, index_extract, data_Fpsf_full,
-                       data_Fpsferr_full, data_Scorr_full,
-                       table_trans):
+def extract_fakestars (table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
+                       index_extract, data_Fpsf_full, data_Fpsferr_full,
+                       data_Scorr_full, pixscale, log=None):
 
 
     size_fft = (get_par(set_zogy.subimage_size,tel) +
@@ -1669,12 +1582,14 @@ def extract_fakestars (fakestar_xcoord, fakestar_ycoord,
         index_fake = tuple([slice(
             nsub*get_par(set_zogy.nfakestars,tel),
             (nsub+1)*get_par(set_zogy.nfakestars,tel))])
-        x_fake = fakestar_xcoord[index_fake]-1
-        y_fake = fakestar_ycoord[index_fake]-1
-        fakestar_flux_out[index_fake] = data_Fpsf[y_fake, x_fake]
-        fakestar_fluxerr_out[index_fake] = data_Fpsferr[y_fake, x_fake]
+        # fake stars pixel coordinates (X and Y) were given offset
+        # between -0.5 and +0.5; convert these back to integer indices
+        x_fake = (table_fake['X'][index_fake]+0.5).astype(int) - 1
+        y_fake = (table_fake['Y'][index_fake]+0.5).astype(int) - 1
+        table_fake['E_FLUX_OUT'][index_fake] = data_Fpsf[y_fake, x_fake]
+        table_fake['E_FLUXERR_OUT'][index_fake] = data_Fpsferr[y_fake, x_fake]
         # and S/N from Scorr
-        fakestar_s2n_out[index_fake] = data_Scorr[y_fake, x_fake]
+        table_fake['S2N_OUT'][index_fake] = data_Scorr[y_fake, x_fake]
 
         # x,y coords are in the fft frame; infer the x,y pixel
         # coordinates in the full image by using [subcutfft],
@@ -1682,9 +1597,98 @@ def extract_fakestars (fakestar_xcoord, fakestar_ycoord,
         # identifying the corners of the fft subimage in the
         # entire input/output image coordinate frame
         subcutfft = cuts_ima_fft[nsub]
-        fakestar_xcoord[index_fake] += subcutfft[2]
-        fakestar_ycoord[index_fake] += subcutfft[0]
+        table_fake['X'][index_fake] += subcutfft[2]
+        table_fake['Y'][index_fake] += subcutfft[0]
 
+
+    # add zero-valued fake columns to table_trans
+    table_trans.add_columns([0.]*4, names=['X_FAKE', 'Y_FAKE',
+                                           'S2N_FAKE_IN', 'E_FLUX_FAKE_IN'])
+    
+    # match entries in table_trans with table_fake within some distance
+    # and add table_fake column values to that specific entry
+    dist2_max = (3./pixscale)**2 #pixels
+    for i_fake in range(len(table_fake)):
+        dist2 = ((table_trans['X_POS_D'] - table_fake['X'][i_fake])**2 +
+                 (table_trans['Y_POS_D'] - table_fake['Y'][i_fake])**2)
+        dist2_min, i_trans = np.amin(dist2), np.argmin(dist2)
+        #log.info ('dist2_min: {}, i_trans: {}'.format(dist2_min, i_trans))
+        if dist2_min <= dist2_max:
+            table_trans['X_FAKE'][i_trans] = table_fake['X'][i_fake]
+            table_trans['Y_FAKE'][i_trans] = table_fake['Y'][i_fake]
+            table_trans['S2N_FAKE_IN'][i_trans] = table_fake['S2N_IN'][i_fake]
+            table_trans['E_FLUX_FAKE_IN'][i_trans] = table_fake['E_FLUX_IN'][i_fake]
+            # replace peak-pixel OUT values with actually extracted values
+            table_fake['E_FLUX_OUT'][i_fake] = table_trans['E_FLUX_PEAK'][i_trans]
+            table_fake['E_FLUXERR_OUT'][i_fake] = table_trans['E_FLUXERR_PEAK'][i_trans]
+            table_fake['S2N_OUT'][i_fake] = table_trans['SCORR_PEAK'][i_trans]
+            
+            
+    # overwrite output fits catalog created in [get_trans_alt]
+    table_trans.write('{}.transcat'.format(base_newref), format='fits',
+                      overwrite=True)
+
+    
+    # create plot comparing input and extracted fluxes
+    # compare input and output flux
+    fluxdiff = ((table_fake['E_FLUX_IN'] - table_fake['E_FLUX_OUT']) /
+                table_fake['E_FLUX_IN'])
+    fluxdiff_err = table_fake['E_FLUXERR_OUT'] / table_fake['E_FLUX_IN']
+    
+    fd_mean, fd_median, fd_std = sigma_clipped_stats(
+        fluxdiff.astype('float64'))
+    fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(
+        fluxdiff_err.astype('float64'))
+
+    # write to ascii file
+    filename = '{}_fakestars.dat'.format(base_new)
+    f = open(filename, 'w')
+    f.write('{:1} {:11} {:11} {:12} {:12} {:16} {:11} {:11}\n'
+            .format('#', 'xcoord[pix]', 'ycoord[pix]', 'flux_in[e-]',
+                    'flux_out[e-]', 'fluxerr_out[e-]', 'S/N_input',
+                    'S/N_output'))
+
+    for i in range(len(table_fake)):
+        f.write('{:11.2f} {:11.2f} {:12.2e} {:12.2e} {:16.2e} {:11.2f} '
+                '{:11.2f}\n'
+                .format(table_fake['X'][i], table_fake['Y'][i],
+                        table_fake['E_FLUX_IN'][i], table_fake['E_FLUX_OUT'][i],
+                        table_fake['E_FLUXERR_OUT'][i],
+                        table_fake['S2N_IN'][i],
+                        table_fake['S2N_OUT'][i]))
+    f.close()
+
+    # make comparison plot of flux input and output
+    if get_par(set_zogy.make_plots,tel):
+        
+        x = np.arange(nsubs*get_par(set_zogy.nfakestars,tel))+1
+
+        #plt.axis((0,nsubs,0,2))
+        plt.errorbar(x, fluxdiff, yerr=fluxdiff_err, linestyle='None',
+                     ecolor='k', capsize=2)
+        plt.plot(x, fluxdiff, 'o', color='tab:blue', markersize=7,
+                 markeredgecolor='k')
+        plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
+        plt.ylabel('(true flux - ZOGY flux) / true flux')
+        plt.title('true flux vs. ZOGY Fpsf; mean:{:.3f}, std:{:.3f}, '
+                  'data err:{:.3f}'.format(fd_mean, fd_std, fderr_mean))
+        plt.savefig('{}_fakestar_flux_in_vs_ZOGYout.pdf'
+                    .format(base_newref))
+        if get_par(set_zogy.show_plots,tel): plt.show()
+        plt.close()
+        
+        # same for S/N as determined by Scorr
+        y = table_fake['S2N_OUT']
+        plt.plot(x, y, 'o', color='tab:blue', markersize=7,
+                 markeredgecolor='k')
+        plt.xlabel('fakestar number (total: nsubs x set_zogy.nfakestars)')
+        plt.ylabel('S/N from Scorr')
+        plt.title('fakestars signal-to-noise ratio from Scorr')
+        plt.savefig('{}_fakestar_S2N_ZOGYoutput.pdf'.format(base_newref))
+        if get_par(set_zogy.show_plots,tel): plt.show()
+        plt.close()
+        
+            
     return
 
 
@@ -2038,36 +2042,46 @@ def add_fakestars (psf, data, bkg_std, fwhm, log):
     
     # place stars in random positions across the image, keeping
     # set_zogy.subimage_border + psf_size/2 pixels off each edge
+    nfake = get_par(set_zogy.nfakestars,tel)
     edge = get_par(set_zogy.subimage_border,tel) + psf_hsize + 1
-    xpos = (np.random.rand(get_par(set_zogy.nfakestars,tel))*(xsize_fft-2*edge)
-            + edge).astype(int)
-    ypos = (np.random.rand(get_par(set_zogy.nfakestars,tel))*(ysize_fft-2*edge)
-            + edge).astype(int)
+    # xpos and ypos are indices
+    xpos = (np.random.rand(nfake)*(xsize_fft-2*edge) + edge).astype(int)
+    ypos = (np.random.rand(nfake)*(ysize_fft-2*edge) + edge).astype(int)
+
+    # random offsets between -0.5 and +0.5 pixels
+    dx = np.random.rand(nfake) - 0.5
+    dy = np.random.rand(nfake) - 0.5
+    
     # place first star at the center of the image
     xpos[0] = int(xsize_fft/2)
     ypos[0] = int(ysize_fft/2)
-    flux_fakestar = np.zeros(get_par(set_zogy.nfakestars,tel))
+    flux_fakestar = np.zeros(nfake)
 
-    for nstar in range(get_par(set_zogy.nfakestars,tel)):
+    for nstar in range(nfake):
             
         index_temp = tuple([slice(ypos[nstar]-psf_hsize, ypos[nstar]+psf_hsize+1),
                             slice(xpos[nstar]-psf_hsize, xpos[nstar]+psf_hsize+1)])
 
         # determine background variance
         bkg_var = bkg_std[index_temp]**2
-    
+
+        # shift psf to random fractional pixel position
+        psf_shift = ndimage.shift(psf, (dy[nstar], dx[nstar]), order=2)
+        # normalize
+        psf_shift /= np.sum(psf_shift)
+        
         # Use function [flux_optimal_s2n] to estimate flux needed for
         # star with S/N of [set_zogy.fakestar_s2n].  This S/N estimate
         # includes the Poisson noise from any object that happens to
         # be present in the image at the fakestar position.  If this
         # should be just the background instead, replace
         # data[index_temp]+bkg_var with bkg_var
-        flux_fakestar[nstar] = flux_optimal_s2n (psf, data[index_temp]+bkg_var,
+        flux_fakestar[nstar] = flux_optimal_s2n (psf_shift, data[index_temp]+bkg_var,
                                                  get_par(set_zogy.fakestar_s2n,tel),
                                                  fwhm=fwhm)
 
-        # multiply psf_orig_new to contain fakestar_flux
-        psf_fakestar = psf * flux_fakestar[nstar]
+        # multiply psf to contain fakestar_flux
+        psf_fakestar = psf_shift * flux_fakestar[nstar]
         # add fake star to new image
         data[index_temp] += psf_fakestar
 
@@ -2080,22 +2094,22 @@ def add_fakestars (psf, data, bkg_std, fwhm, log):
             V = bkg_var + np.abs(psf_fakestar)
 
             # determine fakestar optimal flux
-            flux, fluxerr = flux_optimal(psf, data_fakestar, bkg_var, log=log)
+            flux, fluxerr = flux_optimal(psf_shift, data_fakestar, bkg_var, log=log)
             log.info('recovered flux: {}, fluxerr: {}, S/N: {}'
                      .format(flux, fluxerr, flux/fluxerr))
             
             # check S/N with Eq. 51 from Zackay & Ofek 2017, ApJ, 836, 187
-            s2n = get_s2n_ZO(psf, data_fakestar, V)
+            s2n = get_s2n_ZO(psf_shift, data_fakestar, V)
             log.info('S/N check (Eq. 51 Zackay & Ofek 2017): {}'.format(s2n))
             
             # check S/N with Eqs. from Naylor (1998)
-            flux, fluxerr = get_optflux_Naylor(psf, data_fakestar, V)
+            flux, fluxerr = get_optflux_Naylor(psf_shift, data_fakestar, V)
             log.info('Naylor recovered flux: {}, fluxerr: {}, S/N: {}'
                      .format(flux, fluxerr, flux/fluxerr))
 
-    return xpos+1, ypos+1, flux_fakestar
-            
-            
+    return xpos+1+dx, ypos+1+dy, flux_fakestar
+
+
 ################################################################################
 
 def read_hdulist (fits_file, get_data=True, get_header=False, 
@@ -2272,7 +2286,7 @@ def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
 def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 exptime=0, apphot_radii=None, data_thumbnails=None,
                 keys_thumbnails=None, size_thumbnails=100, ML_calc_prob=False,
-                ML_prob_real=None, tel=None, log=None):
+                ML_prob_real=None, nfakestars=0, tel=None, log=None):
 
 
     """Function that formats binary fits table [cat_in] according to
@@ -2311,7 +2325,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'Y_POS':          ['E', 'pix'  ], #, 'flt32' ],
         'XVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
         'YVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
-        'XYCOV_POS':    ['E', 'pix^2'], #, 'flt16' ],
+        'XYCOV_POS':      ['E', 'pix^2'], #, 'flt16' ],
         'X_POS_D':        ['E', 'pix'  ], #, 'flt32' ],
         'Y_POS_D':        ['E', 'pix'  ], #, 'flt32' ],
         'XVAR_POS_D':     ['E', 'pix^2'], #, 'flt16' ],
@@ -2408,6 +2422,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'ELONG_GAUSS':    ['E', ''     ], #, 'flt32' ],
         'CHI2_GAUSS':     ['E', ''     ], #, 'flt32' ],
         'CLASS_REAL':     ['E', ''     ], #, 'flt32' ],
+        'X_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
+        'Y_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
+        'S2N_FAKE_IN':    ['E', ''     ], #, 'flt32' ],
+        'E_FLUX_FAKE_IN': ['E', 'e-/s' ], #, 'flt32' ],
         'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
@@ -2461,9 +2479,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                           'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                           'RA_PSF_D', 'DEC_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D', 
                           'CHI2_PSF_D',
-                          'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
-                          'RA_MOFFAT', 'DEC_MOFFAT', 
-                          'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT',
+                          #'X_MOFFAT', 'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT',
+                          #'RA_MOFFAT', 'DEC_MOFFAT', 
+                          #'FWHM_MOFFAT', 'ELONG_MOFFAT', 'CHI2_MOFFAT',
                           'X_GAUSS', 'XERR_GAUSS', 'Y_GAUSS', 'YERR_GAUSS',
                           'RA_GAUSS', 'DEC_GAUSS', 
                           'FWHM_GAUSS', 'ELONG_GAUSS', 'CHI2_GAUSS']
@@ -2482,6 +2500,13 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 # function is done when MeerCRAB is processed
                 data = append_fields(data, 'CLASS_REAL', ML_prob_real,
                                      usemask=False, asrecarray=True)
+
+        if nfakestars > 0:
+            # add fakestar columns
+            keys_to_record.append('X_FAKE')
+            keys_to_record.append('Y_FAKE')
+            keys_to_record.append('S2N_FAKE_IN')
+            keys_to_record.append('E_FLUX_FAKE_IN')
 
 
     # rename any of the keys using this dictionary, such as the
@@ -3019,41 +3044,44 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
     log.info('ntrans after PSF fit chi2 filter: {}'.format(len(table_trans)))
 
-
-    # Moffat fit to D
-    # ===============
     
-    # Moffat fit to D, directly added as columns to table_trans
-    colnames = ['E_FLUX_OPT_D_alt2', 'E_FLUXERR_OPT_D_alt2', 'X_MOFFAT',
-                'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT', 'FWHM_MOFFAT',
-                'ELONG_MOFFAT', 'CHI2_MOFFAT']
-    table_trans.add_columns(help_psffit_D (False, True, False), names=colnames)
+    # skip Moffat fit to D for now
+    if True:
+    
+        # Moffat fit to D
+        # ===============
+    
+        # Moffat fit to D, directly added as columns to table_trans
+        colnames = ['E_FLUX_OPT_D_alt2', 'E_FLUXERR_OPT_D_alt2', 'X_MOFFAT',
+                    'XERR_MOFFAT', 'Y_MOFFAT', 'YERR_MOFFAT', 'FWHM_MOFFAT',
+                    'ELONG_MOFFAT', 'CHI2_MOFFAT']
+        table_trans.add_columns(help_psffit_D (False, True, False), names=colnames)
 
-    log.info ('[get_trans] time after Moffat fit to D: {}'.format(time.time()-t))
-
-
-    if get_par(set_zogy.make_plots,tel):
-        ds9_rad += 2
-        result = prep_ds9regions(
-            '{}_ds9regions_trans_filt7_PSF_D.txt'.format(base),
-            table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='red',
-            value=table_trans['CHI2_MOFFAT'])
+        log.info ('[get_trans] time after Moffat fit to D: {}'.format(time.time()-t))
 
 
-    # add mask_finite, checking if table_trans contains finite values
-    #mask_finite = np.ones(len(table_trans), dtype=bool)
-    #for col in colnames:
-    #    mask_finite &= np.isfinite(table_trans[col])
-   
-    # filter out transient candidates with high chi2 and non-finite values
-    mask_keep = (table_trans['CHI2_MOFFAT'] <= chi2_max)
+        if get_par(set_zogy.make_plots,tel):
+            ds9_rad += 2
+            result = prep_ds9regions(
+                '{}_ds9regions_trans_filt7_PSF_D.txt'.format(base),
+                table_trans['X_POS'], table_trans['Y_POS'],
+                radius=ds9_rad, width=2, color='red',
+                value=table_trans['CHI2_MOFFAT'])
+            
 
-    # CHECK!!! UPDATE!!!
-    if False:
-        table_trans = table_trans[mask_keep]
+        # add mask_finite, checking if table_trans contains finite values
+        #mask_finite = np.ones(len(table_trans), dtype=bool)
+        #for col in colnames:
+        #    mask_finite &= np.isfinite(table_trans[col])
+        
+        # filter out transient candidates with high chi2 and non-finite values
+        mask_keep = (table_trans['CHI2_MOFFAT'] <= chi2_max)
 
-    log.info('ntrans after Moffat fit chi2 filter: {}'.format(len(table_trans)))
+        # CHECK!!! UPDATE!!!
+        if False:
+            table_trans = table_trans[mask_keep]
+
+        log.info('ntrans after Moffat fit chi2 filter: {}'.format(len(table_trans)))
 
 
     # Gauss fit to D
@@ -3714,7 +3742,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
 
         return results
 
-
+    
     # PSF fit to D
     flux_opt_D[mk], fluxerr_opt_D[mk], flux_psf_D[mk], fluxerr_psf_D[mk], \
         x_psf_D[mk], y_psf_D[mk], chi2_psf_D[mk], xerr_psf_D[mk], yerr_psf_D[mk] \
@@ -4196,11 +4224,15 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # fwhm_ref.
     if imtype=='new':
         fwhm_use = fwhm_new
+        # initial fwhm used for flux limits and Moffat/Gauss fits below
+        fwhm_init_fit = fwhm_new
     elif imtype=='ref':
         fwhm_use = fwhm_ref
+        fwhm_init_fit = fwhm_ref
     elif imtype is None:
         fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
-
+        fwhm_init_fit = (fwhm_new + fwhm_ref) / 2.
+        
     psf_size = int(2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use)
     # force the psf size to be odd
     if psf_size % 2 == 0:
@@ -4399,7 +4431,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # taken into account, then add background-subtracted image
             # to the background variance: bkg_var_sub + D_sub
             flux_opt[i] = flux_optimal_s2n (P_shift, bkg_var_sub,
-                                            limflux_nsigma, fwhm=psf_fwhm)
+                                            limflux_nsigma, fwhm=fwhm_init_fit)
 
         else:
 
@@ -4412,7 +4444,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # flux will be zero and source will not be included in
             # output catalog - may result in very saturated stars not
             # ending up in output catalog
-            mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+            mask_central = (P_shift >= 0.06 * np.amax(P_shift))
             if (np.sum(mask_use & mask_central)/np.sum(mask_central) <
                 get_par(set_zogy.source_minpixfrac,tel)):
                 return
@@ -4468,12 +4500,17 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     # construct error image
                     D_sub_err = np.sqrt(np.abs(bkg_var_sub))
 
+                    if i < 5:
+                        show = True
+                    else:
+                        show = False
+                    
                     # fit moffat
                     x_moffat[i], xerr_moffat[i], y_moffat[i], yerr_moffat[i], \
                         fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
                             fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
-                                               fit_gauss=gauss, fwhm=psf_fwhm, 
-                                               log=log)
+                                               fit_gauss=gauss, fwhm=fwhm_init_fit,
+                                               P_shift=P_shift, show=show, log=log)
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
                     
@@ -5204,7 +5241,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=10, nsigma_outer=5, max_iters=10,
 
 ################################################################################
 
-def flux_optimal_s2n (P, bkg_var, s2n, fwhm=5., max_iters=10, epsilon=1e-6):
+def flux_optimal_s2n (P, bkg_var, s2n, fwhm=5., max_iters=15, epsilon=1e-7):
     
     """Similar to function [flux_optimal] above, but this function returns
     the total flux [in e-] required for the point source to have a
@@ -8433,16 +8470,23 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
 
     # run psfex on SExtractor output catalog
     #
-    # If the PSFEx output file is already present, then skip run_psfex
+    # If the PSFEx output file is already present with right
+    # psf_size_config or larger, then skip run_psfex
+    skip_psfex=False
     psfex_bintable = '{}_psf.fits'.format(base)
     if os.path.isfile(psfex_bintable):
-        skip_psfex = True
-        if get_par(set_zogy.verbose,tel):
-            log.info ('skipping run_psfex for image: {}'.format(image))
-    else:
-        skip_psfex = False
+        header_psf = read_hdulist (psfex_bintable, get_data=False,
+                                   get_header=True)
+        psf_samp, psf_size_config = get_samp_PSF_config_size(imtype, log=log)
+        if header_psf['PSFAXIS1'] >= psf_size_config:
+            skip_psfex = True
+            if get_par(set_zogy.verbose,tel):
+                log.info ('skipping run_psfex for image {} as existing PSFEx '
+                          'output file: {} was built with [psf_size_config]: ' 
+                          '{} equal to or larger than [size_vignet]/[psf_samp]'
+                          .format(image, psfex_bintable, psf_size_config))
 
-        
+
     if not skip_psfex:
         psfexcat = '{}_psfex.cat'.format(base)
         log.info('psfexcat: {}'.format(psfexcat))
@@ -8952,8 +8996,8 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, log,
 ################################################################################
 
 def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False, 
-                       fwhm=5, max_nfev=100, show=False, log=None):
-    
+                       P_shift=None, fwhm=5, max_nfev=100, show=False, log=None):
+
     #if get_par(set_zogy.timing,tel): t = time.time()
     
     # make 2D x,y grid of pixel coordinates corresponding to PSF data
@@ -8962,21 +9006,38 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     x = range(1, imsize_x+1)
     y = range(1, imsize_y+1)
     xx, yy = np.meshgrid(x, y, indexing='ij')
-    
+
+    # estimate x- and ycenter (pixel coordinates) in
+    # D_sub from maximum in P_shift; for objects near
+    # image edge, this will not be the central pixel
+    if P_shift is not None:
+        yc_indx, xc_indx = np.unravel_index(np.argmax(P_shift),
+                                            P_shift.shape)
+        ycenter = yc_indx + 1
+        xcenter = xc_indx + 1
+        # create mask with pixel values above 1 percent of the peak of
+        # the PSF used to determine the chi-square of this region
+        mask_inner = (P_shift >= 0.06 * np.amax(P_shift))
+    else:
+        ycenter = (imsize_y-1)/2 + 1
+        xcenter = (imsize_x-1)/2 + 1
+        mask_inner = (np.sqrt((xx-xcenter)**2+(yy-ycenter)**2) < fwhm)
+
+
     # create a set of Parameters
     params = Parameters()
-    xcenter = (imsize_x-1)/2 + 1
-    ycenter = (imsize_y-1)/2 + 1
-    mask_central = (np.sqrt((xx-xcenter)**2+(yy-ycenter)**2) < 10)
-    
-    params.add('x0', value=xcenter, min=xcenter-3, max=xcenter+3, vary=True)
-    params.add('y0', value=ycenter, min=ycenter-3, max=ycenter+3, vary=True)
+    params.add('x0', value=xcenter, min=xcenter-fwhm/2, max=xcenter+fwhm/2,
+               vary=True)
+    params.add('y0', value=ycenter, min=ycenter-fwhm/2, max=ycenter+fwhm/2,
+               vary=True)
     params.add('theta', value=0, min=-180, max=180, vary=True)
-    val_min = np.amin(image[mask_central])
-    val_max = np.amax(image[mask_central])
-    params.add('amplitude', value=val_max, min=2*val_min, max=2*val_max, vary=True)
-    params.add('background', value=0, min=val_min, max=val_max, vary=True)
-    
+    val_min = np.amin(image[mask_inner])
+    val_max = np.amax(image[mask_inner])
+    # assume image is positive
+    params.add('amplitude', value=val_max, min=0, max=2*val_max, vary=True)
+    # assume background is zero
+    params.add('background', value=0, vary=False)
+
     if fit_gauss:
         sigma = fwhm / sigma2fwhm(1.)
         params.add('sigma1', value=sigma, min=0.01, max=2*sigma, vary=True)
@@ -9045,25 +9106,17 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
 
     # create model image
     if fit_gauss:
-        #print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red:',
-        #       xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red)
         model_ima = EllipticalGauss2D (xx, yy, x0=x0, y0=y0,
                                        sigma1=sigma1, sigma2=sigma2,
                                        theta=theta, amplitude=amplitude,
                                        background=p['background'])
     else:
-        #print ('xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta:',
-        #       xcenter, ycenter, x0, x0err, y0, y0err, fwhm_ave, elongation, chi2red, beta, theta)
         model_ima = EllipticalMoffat2D (xx, yy, x0=x0, y0=y0, beta=beta,
                                         alpha1=alpha1, alpha2=alpha2,
                                         theta=theta, amplitude=amplitude,
                                         background=p['background'])
 
 
-    # create mask with pixel values above 6 percent of the peak of the
-    # PSF (corresponding to a radius of about 1xFWHM if Gaussian) used
-    # to determine the chi-square of this region
-    mask_inner = (np.abs(model_ima-background) >= 0.06 * np.abs(amplitude))
     if np.sum(mask_inner) != 0:
         chi2_inner = np.sum(moffat2min(result.params, image, xx, yy, fit_gauss,
                                        image_err, mask_inner)**2)
@@ -9071,7 +9124,7 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
         chi2_inner = 0
 
     # reduced chi2_inner
-    denom = (np.sum(mask_inner) - result.nvarys)
+    denom = max(1, (np.sum(mask_inner) - result.nvarys))
     if denom != 0:
         chi2red_inner = chi2_inner / denom
     else:
@@ -9090,6 +9143,8 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
             log.info('Moffat fit')
 
         log.info('--------------------')
+        log.info('x0 (xc_init):   {} ({})'.format(x0, xcenter))
+        log.info('y0 (yc_init):   {} ({})'.format(y0, ycenter))
         log.info('fwhm (average): {}'.format(fwhm_ave))
         log.info('elongation:     {}'.format(elongation))
         log.info('chi2red:        {}'.format(chi2red))
@@ -9102,8 +9157,9 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
         ds9_arrays(image=image, model_ima=model_ima,
                    image_err=image_err, resid=resid, 
                    mask_use=mask_use.astype(int),
-                   mask_inner=mask_inner.astype(int))
-        
+                   mask_inner=mask_inner.astype(int),
+                   P_shift=P_shift)
+
         
     #if get_par(set_zogy.timing,tel):
     #    log_timing_memory (t0=t, label='fit_moffat_single', log=log)
@@ -11240,12 +11296,14 @@ def get_samp_PSF_config_size (imtype, log=None):
     if log is not None:
         psf_radius = max(get_par(set_zogy.psf_rad_phot,tel),
                          get_par(set_zogy.psf_rad_zogy,tel))
-        if 2 * fwhm * psf_radius > psf_size_config:
+        if (2 * fwhm * psf_radius) > (psf_samp * psf_size_config):
             log.warning ('psf_size_config of {} is limited by VIGNET size of {}: '
-                         '2 * FWHM_{} * max(psf_rad_phot, psf_rad_zogy) = {:.2f}'
+                         '2 * FWHM_{} * max(psf_rad_phot, psf_rad_zogy) / '
+                         'psf_samp = 2 * {:.2f} * {} / {:.2f} = {:.2f}'
                          .format(psf_size_config,
-                                 get_par(set_zogy.size_vignet,tel), imtype,
-                                 2 * fwhm * psf_rad))
+                                 get_par(set_zogy.size_vignet,tel),
+                                 imtype, fwhm, psf_radius, psf_samp,
+                                 (2 * fwhm * psf_radius)/psf_samp))
 
 
     # now slightly change [psf_samp] such that [psf_samp] *
