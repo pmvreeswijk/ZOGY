@@ -1029,25 +1029,29 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         nstat = int(0.1 * (xsize_new*ysize_new))
         x_stat = (np.random.rand(nstat)*(xsize_new-2*edge)).astype(int) + edge
         y_stat = (np.random.rand(nstat)*(ysize_new-2*edge)).astype(int) + edge
-        mean_Scorr, std_Scorr, median_Scorr = (
-            clipped_stats (data_Scorr_full[y_stat,x_stat], clip_zeros=True,
-                           make_hist=get_par(set_zogy.make_plots,tel),
-                           name_hist='{}_Scorr_hist.pdf'.format(base_newref),
-                           hist_xlabel='value in Scorr image', log=log))
+        mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
+            data_Scorr_full[y_stat,x_stat].astype('float64'))
+
         if get_par(set_zogy.verbose,tel):
             log.info('Scorr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
                      .format(mean_Scorr, median_Scorr, std_Scorr))
 
-        # compute statistics on Fpsferr image
-        mean_Fpsferr, std_Fpsferr, median_Fpsferr = (
-            clipped_stats (data_Fpsferr_full[y_stat,x_stat],
+        # make histrogram plot if needed
+        if get_par(set_zogy.make_plots,tel):
+            clipped_stats (data_Scorr_full[y_stat,x_stat], clip_zeros=True,
                            make_hist=get_par(set_zogy.make_plots,tel),
-                           name_hist='{}_Fpsferr_hist.pdf'.format(base_newref),
-                           hist_xlabel='value in Fpsferr image', log=log))
+                           name_hist='{}_Scorr_hist.pdf'.format(base_newref),
+                           hist_xlabel='value in Scorr image', log=log)
+
+
+        # compute statistics on Fpsferr image
+        mean_Fpsferr, median_Fpsferr, std_Fpsferr = sigma_clipped_stats (
+            data_Fpsferr_full[y_stat,x_stat].astype('float64'))
+
         if get_par(set_zogy.verbose,tel):
             log.info('Fpsferr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
                      .format(mean_Fpsferr, median_Fpsferr, std_Fpsferr))
-
+            
 
         # convert Fpsferr image to limiting magnitude image
         index_zero = np.nonzero(data_Fpsferr_full==0)
@@ -2786,7 +2790,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     #print ('mean: {}, median: {}, std: {}'
     #       .format(mean, median, std))
     mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
-        data_Scorr_bkgsub[y_stat,x_stat])
+        data_Scorr_bkgsub[y_stat,x_stat].astype('float64'))
     log.info ('mean_Scorr: {:.3f}, median_Scorr: {:.3f}, std_Scorr: {:.3f}'
               .format(mean_Scorr, median_Scorr, std_Scorr))
 
@@ -5803,7 +5807,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
 
         if get_par(set_zogy.timing,tel): t2 = time.time()
 
-        # read a few extra header keywords needed in [get_zp] and [apply_zp]
+        # read a few extra header keywords needed in [collect_zps],
+        # [calc_zp] and [apply_zp]
         keywords = ['exptime', 'filter', 'obsdate']
         exptime, filt, obsdate = read_header(header, keywords, log=log)
         if get_par(set_zogy.verbose,tel):
@@ -6661,103 +6666,6 @@ def create_modify_mask (data, satlevel, data_mask=None):
 
 ################################################################################
 
-def get_zp (ra_sex, dec_sex, airmass_sex, flux_opt, fluxerr_opt, ra_cal, dec_cal,
-            mag_cal, magerr_cal, exptime, filt, imtype, log, data_cal):
-
-    if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('executing get_zp ...')
-
-    if imtype=='new':
-        base = base_new
-    else:
-        base = base_ref
-
-    # maximum distance in degrees between sources to match
-    dist_max = 3./3600
-
-    # return zeropoints in array with same number of rows as ra_sex
-    # allows to potentially build a zeropoint map as a function of x,y
-    # coordinates
-    nrows = np.shape(ra_sex)[0]
-    zp_array = np.zeros(nrows)
-
-    # instrumental magnitudes and errors
-    mag_sex_inst = np.zeros(nrows)-1
-    magerr_sex_inst = np.zeros(nrows)-1
-    mag_sex_inst = -2.5*np.log10(flux_opt/exptime)
-    pogson = 2.5/np.log(10.)
-    magerr_sex_inst = pogson*fluxerr_opt/flux_opt
-
-    # sort calibration catalog arrays in brightness
-    index_sort = np.argsort(mag_cal)
-    ra_cal = ra_cal[index_sort]
-    dec_cal = dec_cal[index_sort]
-    mag_cal = mag_cal[index_sort]
-    magerr_cal = magerr_cal[index_sort]
-
-    ncal = np.shape(ra_cal)[0]
-    nmatch = 0
-    # loop calibration stars and find closest match in SExtractor sources
-    for i in range(ncal):
-        
-        index_match = find_stars (ra_sex, dec_sex, ra_cal[i], dec_cal[i],
-                                  dist_max, search='circle', log=log)
-
-        if len(index_match) > 0:
-            # take closest object if more than a single match
-            index_match = index_match[0]
-
-            # calculate its zeropoint; need to calculate airmass for
-            # each star because around A=2 difference in airmass
-            # across the FOV is 0.1, i.e. a 5% change
-            zp_array[index_match] = (mag_cal[i] - mag_sex_inst[index_match] +
-                                     airmass_sex[index_match] *
-                                     get_par(set_zogy.ext_coeff,tel)[filt])
-
-            #if get_par(get_par(set_zogy.verbose,tel):
-            #    if 'spectype' in data_cal.dtype.names:
-            #        log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}, spectype: {}, chi2: {}, absdev: {}'.
-            #                 format(ra_cal[i], dec_cal[i], mag_cal[i],
-            #                        magerr_sex_inst[index_match], zp_array[index_match],
-            #                        data_cal['spectype'][i], data_cal['chi2'][i], data_cal['absdev'][i]))
-            #    else:
-            #        log.info('ra_cal: {}, dec_cal: {}, mag_cal: {}, magerr_sex: {}, zp_array: {}'.
-            #                 format(ra_cal[i], dec_cal[i], mag_cal[i],
-            #                        magerr_sex_inst[index_match], zp_array[index_match]))
-
-                    
-            # done when number of matches equals [set_zogy.phot_ncal_max]
-            nmatch += 1
-            if nmatch == get_par(set_zogy.phot_ncal_max,tel):
-                break
-                
-                
-    # determine median zeropoint, requiring at least 3 non-zero values
-    # in zp_array
-    if np.sum(zp_array != 0) >= 3:
-        zp_mean, zp_std, zp_median = clipped_stats(
-            zp_array, clip_zeros=True, make_hist=get_par(set_zogy.make_plots,tel),
-            name_hist='{}_zp_hist.pdf'.format(base),
-            hist_xlabel='{} zeropoint (mag)'.format(filt),
-            log=log)
-    else:
-        log.info('Warning: could not determine mean, std and/or median zeropoint; '
-                 'returning zeros')
-        zp_mean, zp_std, zp_median = 0, 0, 0
-        
-        
-    if get_par(set_zogy.verbose,tel):
-        log.info('zp_mean: {:.3f}, zp_median: {:.3f}, zp_std: {:.3f}'.
-                 format(zp_mean, zp_median, zp_std))
-
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_zp', log=log)
-
-    return zp_median, zp_std, nmatch
-    
-
-################################################################################
-
 def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
                  flux_opt, fluxerr_opt, ra_cal, dec_cal, mag_cal, magerr_cal,
                  exptime, filt, log=None):
@@ -6847,12 +6755,18 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
         # in zp_array
         nmax = get_par(set_zogy.phot_ncal_max,tel)
         if np.sum(zp_array != 0) >= 5:
-            __, zp_std, zp_median = clipped_stats(
-                zp_array[0:nmax], clip_zeros=True,
-                make_hist=get_par(set_zogy.make_plots,tel),
-                name_hist='{}_zp_hist.pdf'.format(base),
-                hist_xlabel='{} zeropoint (mag)'.format(filt),
-                log=log)
+
+            __, zp_median, zp_std = sigma_clipped_stats (
+                zp_array[0:nmax].astype('float64'))
+
+            # make histrogram plot if needed
+            if get_par(set_zogy.make_plots,tel):
+                clipped_stats (zp_array[0:nmax], clip_zeros=True,
+                               make_hist=get_par(set_zogy.make_plots,tel),
+                               name_hist='{}_zp_hist.pdf'.format(base),
+                               hist_xlabel='{} zeropoint (mag)'.format(filt),
+                               log=log)
+
             nmatch = len(zp_array[0:nmax])
             
         else:
