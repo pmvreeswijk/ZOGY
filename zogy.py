@@ -3021,6 +3021,16 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # filter out transient candidates with high chi2 and non-finite values
     chi2_max = get_par(set_zogy.chi2_max,tel)
     mask_keep = (table_trans['CHI2_PSF_D'] <= chi2_max)
+    # discard rows where fit values are infinite or NaN
+    for col in colnames:
+        mask_finite = np.isfinite(table_trans[col])
+        nbad = np.sum(~mask_finite)
+        if nbad > 0:
+            mask_keep &= mask_finite
+            log.warning ('column {} contains {} infinite or NaN values for image '
+                         '{}; discarding the corresponding row(s)'
+                         .format(col, nbad, new_fits))
+    # filter
     table_trans = table_trans[mask_keep]
 
     log.info('ntrans after PSF_D fit chi2 filter: {}'.format(len(table_trans)))
@@ -3071,8 +3081,18 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
             value=table_trans['CHI2_GAUSS_D'])
 
 
-    # filter out transient candidates with high chi2 and non-finite values
+    # filter out transient candidates with high chi2 values
     mask_keep = (table_trans['CHI2_GAUSS_D'] <= chi2_max)
+    # discard rows where fit values are infinite or NaN
+    for col in colnames:
+        mask_finite = np.isfinite(table_trans[col])
+        nbad = np.sum(~mask_finite)
+        if nbad > 0:
+            mask_keep &= mask_finite
+            log.warning ('column {} contains {} infinite or NaN values for image '
+                         '{}; discarding the corresponding row(s)'
+                         .format(col, nbad, new_fits))
+    # filter
     table_trans = table_trans[mask_keep]
 
     log.info('ntrans after Gauss fit chi2 filter: {}'.format(len(table_trans)))
