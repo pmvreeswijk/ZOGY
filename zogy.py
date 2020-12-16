@@ -3018,7 +3018,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
         result = prep_ds9regions(
             '{}_ds9regions_trans_filt3_elong.txt'.format(base),
             table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='red',
+            radius=ds9_rad, width=2, color='blue',
             value=table_trans['CHI2_PSF_D'])
 
 
@@ -3081,7 +3081,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
         result = prep_ds9regions(
             '{}_ds9regions_trans_filt5_s2n_PSF_D.txt'.format(base),
             table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='red',
+            radius=ds9_rad, width=2, color='blue',
             value=table_trans['CHI2_GAUSS_D'])
 
 
@@ -3097,7 +3097,9 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                          '{}; discarding the corresponding row(s)'
                          .format(col, nbad, new_fits))
     # filter
-    table_trans = table_trans[mask_keep]
+    # switch off for the moment; CHECK!!!
+    if False:
+        table_trans = table_trans[mask_keep]
 
     log.info('ntrans after Gauss fit chi2 filter: {}'.format(len(table_trans)))
 
@@ -4460,7 +4462,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         chi2_psf[i], xerr_psf[i], yerr_psf[i] = (
                             flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
                                          mask_use=mask_use, fwhm=fwhm_fit_init,
-                                         show=False, log=log))
+                                         show=False, max_nfev=300, log=log))
 
                 except Exception as e:
                     log.info('Warning: problem running [flux_psffit] on object '
@@ -4480,7 +4482,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
                             fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
                                                fit_gauss=gauss, fwhm=fwhm_fit_init,
-                                               P_shift=P_shift, show=False, log=log)
+                                               P_shift=P_shift, show=False,
+                                               max_nfev=300, log=log)
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
                     
@@ -4902,7 +4905,7 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
 
 ################################################################################
 
-def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=200,
+def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100,
                  show=False, fwhm=6, log=None):
 
 
@@ -6751,7 +6754,7 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
     
     if zp_type == 'single':
 
-        # determine median zeropoint, requiring at least 3 non-zero values
+        # determine median zeropoint, requiring at least 5 non-zero values
         # in zp_array
         nmax = get_par(set_zogy.phot_ncal_max,tel)
         if np.sum(zp_array != 0) >= 5:
@@ -8902,7 +8905,7 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, log,
 ################################################################################
 
 def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False, 
-                       P_shift=None, fwhm=6, max_nfev=200, show=False, log=None):
+                       P_shift=None, fwhm=6, max_nfev=100, show=False, log=None):
 
     #if get_par(set_zogy.timing,tel): t = time.time()
     
