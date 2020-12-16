@@ -19,7 +19,7 @@ fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or ful
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
-chi2_max = 2             # maximum reduced chi2 in PSF/Moffat fit to D to filter
+chi2_max = 5             # maximum reduced chi2 in PSF/Gauss fit to D to filter
                          # transients
                          
 # maximum number of flagged pixels of particular type (corresponding
@@ -36,7 +36,7 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 # add optional fake stars for testing purposes
 nfakestars = 0           # number of fake stars to be added to each subimage; first star
                          # is at the center, the rest (if any) is randomly distributed
-fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars    
+fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
 
 
 #===============================================================================
@@ -145,9 +145,9 @@ skip_wcs = False         # skip Astrometry.net step if image already
 astronet_tweak_order = 3
 # only search in Astrometry.net index files within this radius of the
 # header RA and DEC [deg]
-astronet_radius = 180.
-pixscale_varyfrac = 0.01 # pixscale solution found by Astrometry.net will
-                         # be within this fraction of the assumed pixscale
+astronet_radius = 30.
+pixscale_varyfrac = 0.001  # pixscale solution found by Astrometry.net will
+                           # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
 
 cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
