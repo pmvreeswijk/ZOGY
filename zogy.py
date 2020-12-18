@@ -4239,8 +4239,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
         fwhm_fit_init = (fwhm_new + fwhm_ref) / 2.
         
-    psf_size = int(2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use)
-    # force the psf size to be odd
+    psf_size = 2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use
+    # make sure [psf_size] is not larger than [psf_size_config] *
+    # [psf_samp], which will happen if FWHM is very large
+    psf_size = int(min(psf_size, psf_size_config * psf_samp))
+    # force it to be odd
     if psf_size % 2 == 0:
         psf_size -= 1
 
@@ -4445,18 +4448,34 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # output catalog - may result in very saturated stars not
             # ending up in output catalog
             mask_central = (P_shift >= 0.01 * np.amax(P_shift))
-            if (np.sum(mask_use & mask_central)/np.sum(mask_central) <
-                get_par(set_zogy.source_minpixfrac,tel)):
+
+            if mask_use.shape != mask_central.shape:
+                log.warning ('mask_use.shape: {} not equal to '
+                             'mask_central.shape: {} for object at x,y: '
+                             '{:.2f},{:.2f}; returning zero flux and fluxerr'
+                             .format(mask_use.shape, mask_central.shape,
+                                     xcoords[i], ycoords[i]))
                 return
+
+            else:
+                if (np.sum(mask_use & mask_central)/np.sum(mask_central) <
+                    get_par(set_zogy.source_minpixfrac,tel)):
+                    log.warning ('fraction of useable pixels around source '
+                                 'at x,y: {:.2f},{:.2f} is less than limit set '
+                                 'by set_zogy.source_minpixfrac: {}; returning '
+                                 'zero flux and flux error'
+                                 .format(xcoords[i], ycoords[i],
+                                         get_par(set_zogy.source_minpixfrac,tel)))
+                    return
             
             # perform optimal photometry measurements
             try:
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use, log=log)
             except Exception as e:
-                log.info('Warning: problem running [flux_optimal] on object '
-                         'at pixel coordinates: x={}, y={}; returning zero flux '
-                         'and fluxerr'.format(xcoords[i], ycoords[i]))
+                log.warning('problem running [flux_optimal] on object '
+                            'at pixel coordinates: x={}, y={}; returning zero flux '
+                            'and fluxerr'.format(xcoords[i], ycoords[i]))
                 log.info(traceback.format_exc())
                 return
                 
@@ -8512,8 +8531,11 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
     else:
         fwhm_use = fwhm
 
-    psf_size = int(2 * get_par(set_zogy.psf_rad_zogy,tel) * fwhm_use)
-    # if this is even, make it odd
+    psf_size = 2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use
+    # make sure [psf_size] is not larger than [psf_size_config] *
+    # [psf_samp], which will happen if FWHM is very large
+    psf_size = int(min(psf_size, psf_size_config * psf_samp))
+    # force it to be odd
     if psf_size % 2 == 0:
         psf_size -= 1
 
@@ -9768,7 +9790,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
            '--ra', str(ra),
            '--dec', str(dec),
            '--radius', str(get_par(set_zogy.astronet_radius,tel)),
-           '--new-fits', 'none', '--overwrite',
+           '--new-fits', 'none',
+           '--overwrite',
            '--out', base.split('/')[-1],
            '--dir', dir_out
     ]
@@ -9793,9 +9816,11 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         # read .match file, which describes the quad match that solved the
         # image, before it is deleted
         data_match = read_hdulist ('{}.match'.format(base))
-    
+
         for ext in ['.solved', '.match', '.rdls', '.corr', '-indx.xyls', '.axy']:
-            os.remove('{}{}'.format(base, ext))
+            file2remove = '{}{}'.format(base, ext)
+            if os.path.isfile (file2remove):
+                os.remove(file2remove)
 
     else:
         log.error('solve-field (Astrometry.net) failed with exit code {}'
@@ -11262,7 +11287,7 @@ def get_samp_PSF_config_size (imtype, log=None):
     # above
     psf_size_config = get_par(set_zogy.size_vignet,tel) / psf_samp
     # convert to integer
-    psf_size_config = int(np.round(psf_size_config))
+    psf_size_config = int(np.ceil(psf_size_config))
     # make sure it's odd
     if psf_size_config % 2 == 0:
         psf_size_config += 1
