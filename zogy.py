@@ -4458,14 +4458,20 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 return
 
             else:
-                if (np.sum(mask_use & mask_central)/np.sum(mask_central) <
-                    get_par(set_zogy.source_minpixfrac,tel)):
-                    log.warning ('fraction of useable pixels around source '
-                                 'at x,y: {:.2f},{:.2f} is less than limit set '
-                                 'by set_zogy.source_minpixfrac: {}; returning '
-                                 'zero flux and flux error'
-                                 .format(xcoords[i], ycoords[i],
-                                         get_par(set_zogy.source_minpixfrac,tel)))
+                if np.sum(mask_central) != 0:
+                    frac_tmp = (np.sum(mask_use & mask_central) /
+                                np.sum(mask_central))
+                else:
+                    frac_tmp = 0
+                    
+                if frac_tmp < get_par(set_zogy.source_minpixfrac,tel)):
+                    # too many bad pixel objects to warn about
+                    #log.warning ('fraction of useable pixels around source '
+                    #             'at x,y: {:.0f},{:.0f}: {} is less than limit '
+                    #             'set by set_zogy.source_minpixfrac: {}; '
+                    #             'returning zero flux and flux error'
+                    #             .format(xcoords[i], ycoords[i], frac_tmp,
+                    #                     get_par(set_zogy.source_minpixfrac,tel)))
                     return
             
             # perform optimal photometry measurements
