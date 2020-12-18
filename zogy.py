@@ -18,6 +18,7 @@ import math
 import collections
 import itertools
 import gc
+import numbers
 
 import psutil
 
@@ -276,14 +277,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # read in header of new_fits
         t = time.time()
         header_new = read_hdulist (new_fits, get_data=False, get_header=True)
-        ysize_new, xsize_new, gain_new, satlevel_new, ra_new, dec_new, pixscale_new = (
-            read_header(header_new, keywords, log=log))
+        ysize_new, xsize_new, gain_new, satlevel_new, ra_new, dec_new, \
+            pixscale_new = (read_header(header_new, keywords, log=log))
 
     if ref:
         # read in header of ref_fits
         header_ref = read_hdulist (ref_fits, get_data=False, get_header=True)
-        ysize_ref, xsize_ref, gain_ref, satlevel_ref, ra_ref, dec_ref, pixscale_ref = (
-            read_header(header_ref, keywords, log=log))
+        ysize_ref, xsize_ref, gain_ref, satlevel_ref, ra_ref, dec_ref, \
+            pixscale_ref = (read_header(header_ref, keywords, log=log))
 
 
     # function to run SExtractor on fraction of the image, applied
@@ -329,7 +330,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new:
         sexcat_new = '{}_ldac.fits'.format(base_new)
         keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
-        if np.all([k in header_new for k in keys_temp]):
+        if np.all([k in header_new and isinstance(header_new[k], numbers.Number)
+                   for k in keys_temp]):
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = [
                 header_new[k] for k in keys_temp]
         else:
@@ -340,7 +342,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if ref:
         sexcat_ref = '{}_ldac.fits'.format(base_ref)
         keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
-        if np.all([k in header_ref for k in keys_temp]):
+        if np.all([k in header_ref and isinstance(header_ref[k], numbers.Number)
+                   for k in keys_temp]):
             fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = [
                 header_ref[k] for k in keys_temp]
         else:
@@ -435,11 +438,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             finally:
                 # add header keyword(s):
-                header['A-P'] = (WCS_processed, 'successfully processed by Astrometry.net?')
+                header['A-P'] = (WCS_processed, 'successfully processed by '
+                                 'Astrometry.net?')
                 # Astrometry.net version
                 cmd = ['solve-field', '-h']
                 result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-                version = str(result.stdout.read()).split('Revision')[1].split(',')[0]
+                version = (str(result.stdout.read()).split('Revision')[1]
+                           .split(',')[0])
                 header['A-V'] = (version, 'Astrometry.net version used')
                 if not WCS_processed:
                     return True
@@ -464,11 +469,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     if new:
         # now run above function [sex_wcs] on new image
-        data_cal_new = sex_wcs(base_new, sexcat_new, get_par(set_zogy.sex_par,tel), 
-                               pixscale_new, fwhm_new, True, 'new', new_fits_mask, 
-                               ra_new, dec_new, xsize_new, ysize_new, header_new, log)
-        if data_cal_new is True:
-            # leave because either SE_processed or WCS_processed
+        if isinstance(fwhm_new, numbers.Number):
+            data_cal_new = sex_wcs(
+                base_new, sexcat_new, get_par(set_zogy.sex_par,tel), pixscale_new,
+                fwhm_new, True, 'new', new_fits_mask, ra_new, dec_new, xsize_new,
+                ysize_new, header_new, log)
+        else:
+            data_cal_new = True
+
+        if data_cal_new:
+            # leave because either FWHM estimate from initial
+            # SExtractor is 'None' or SE_processed or WCS_processed
             # inside [sex_wcs] are False, i.e. an exception occurred
             # during [run_sextractor] or [run_wcs]
             if not ref:
@@ -478,11 +489,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             
     if ref:
         # and reference image
-        data_cal_ref = sex_wcs(base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel), 
-                               pixscale_ref, fwhm_ref, True, 'ref', ref_fits_mask, 
-                               ra_ref, dec_ref, xsize_ref, ysize_ref, header_ref, log)
-        if data_cal_ref is True:
-            # leave because either SE_processed or WCS_processed
+        if isinstance(fwhm_ref, numbers.Number):
+            data_cal_ref = sex_wcs(
+                base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel),
+                pixscale_ref, fwhm_ref, True, 'ref', ref_fits_mask, ra_ref,
+                dec_ref, xsize_ref, ysize_ref, header_ref, log)
+        else:
+            data_cal_ref = True
+            
+        if data_cal_ref:
+            # leave because either FWHM estimate from initial
+            # SExtractor is 'None' or SE_processed or WCS_processed
             # inside [sex_wcs] are False, i.e. an exception occurred
             # during [run_sextractor] or [run_wcs]
             if not new:
@@ -4290,7 +4307,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # coordinates xcoords[i], ycoords[i]; if the footprint is
         # partially off the image, index_P is needed to define the
         # subset of pixels in the PSF footprint that are on the full
-        # image
+        # image. After remapping of the ref image, these indices also
+        # apply to the ref image.
         index, index_P = get_P_indices (
             xcoords[i], ycoords[i], xsize, ysize, psf_size)
 
@@ -4311,13 +4329,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 polscal2_ref, poldeg_ref, xshift=xshift, yshift=yshift,
                 imtype='ref', log=log)
 
-            index_ref, index_P_ref = get_P_indices (
-                xcoords[i], ycoords[i], xsize, ysize, psf_size)
-
-            # if coordinates off the image, the function
-            # [get_P_indices] returns None and the rest can be skipped
-            if index_ref is None:
-                return
 
             # [psf_ima_ref] needs to be rotated to the orientation of
             # the new image
