@@ -4464,7 +4464,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 else:
                     frac_tmp = 0
                     
-                if frac_tmp < get_par(set_zogy.source_minpixfrac,tel)):
+                if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
                     # too many bad pixel objects to warn about
                     #log.warning ('fraction of useable pixels around source '
                     #             'at x,y: {:.0f},{:.0f}: {} is less than limit '
@@ -10690,7 +10690,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
     cmd_dict['-BACK_SIZE'] = str(get_par(set_zogy.bkg_boxsize,tel))
     cmd_dict['-BACK_FILTERSIZE'] = str(get_par(set_zogy.bkg_filtersize,tel))
     cmd_dict['-BACKPHOTO_TYPE'] = 'GLOBAL'
-    cmd_dict['-VERBOSE_TYPE'] = 'NORMAL'
+    cmd_dict['-VERBOSE_TYPE'] = 'QUIET'
     cmd_dict['-CATALOG_NAME'] = cat_out
     cmd_dict['-PARAMETERS_NAME'] = file_params
     cmd_dict['-PIXEL_SCALE'] = str(pixscale)
