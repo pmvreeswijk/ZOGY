@@ -391,8 +391,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 version = str(result.stdout.read()).split()[2]
                 header['S-V'] = (version, 'SExtractor version used')
                 if not SE_processed:
-                    return True
-                
+                    return False
+
             # copy the LDAC binary fits table output from SExtractor (with
             # '_ldac' in the name) to a normal binary fits table;
             # Astrometry.net needs the latter, but PSFEx needs the former,
@@ -405,9 +405,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                      .format(sexcat, '{}_cat.fits'.format(base),
                              '{}.fits'.format(base)))
 
-            
+
         # determine WCS solution
-        data_cal = None
         if ('CTYPE1' not in header and 'CTYPE2' not in header) or redo:
             try:
                 if not get_par(set_zogy.skip_wcs,tel):
@@ -422,8 +421,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                             del header[key]                    
                     WCS_processed = False
                     fits_base = '{}.fits'.format(base)
-                    data_cal = run_wcs(fits_base, fits_base, ra, dec, 
-                                       pixscale, xsize, ysize, header, log)
+                    run_wcs(fits_base, fits_base, ra, dec, pixscale, xsize,
+                            ysize, header, imtype, log)
+
             except Exception as e:
                 log.info(traceback.format_exc())
                 log.error('exception was raised during [run_wcs]: {}'.format(e))
@@ -447,14 +447,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                            .split(',')[0])
                 header['A-V'] = (version, 'Astrometry.net version used')
                 if not WCS_processed:
-                    return True
+                    return False
                 
         else:
             log.info('WCS solution (CTYPE1 and CTYPE2 keywords) present in '
                      'header of {}; skipping astrometric calibration'
                      .format('{}.fits'.format(base)))
 
-        return data_cal
+        return True
+
 
 
     # initialize header_trans
@@ -470,18 +471,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new:
         # now run above function [sex_wcs] on new image
         if isinstance(fwhm_new, numbers.Number):
-            data_cal_new = sex_wcs(
+            success = sex_wcs(
                 base_new, sexcat_new, get_par(set_zogy.sex_par,tel), pixscale_new,
                 fwhm_new, True, 'new', new_fits_mask, ra_new, dec_new, xsize_new,
                 ysize_new, header_new, log)
         else:
-            data_cal_new = True
+            success = False
 
-        if data_cal_new:
+        if not success:
             # leave because either FWHM estimate from initial
-            # SExtractor is 'None' or SE_processed or WCS_processed
-            # inside [sex_wcs] are False, i.e. an exception occurred
-            # during [run_sextractor] or [run_wcs]
+            # SExtractor is 'None', or an exception occurred during
+            # [run_sextractor] or [run_wcs] inside [sex_wcs]
             if not ref:
                 return header_new
             else:
@@ -490,18 +490,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if ref:
         # and reference image
         if isinstance(fwhm_ref, numbers.Number):
-            data_cal_ref = sex_wcs(
+            success = sex_wcs(
                 base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel),
                 pixscale_ref, fwhm_ref, True, 'ref', ref_fits_mask, ra_ref,
                 dec_ref, xsize_ref, ysize_ref, header_ref, log)
         else:
-            data_cal_ref = True
+            success = False
             
-        if data_cal_ref:
+        if not success:
             # leave because either FWHM estimate from initial
-            # SExtractor is 'None' or SE_processed or WCS_processed
-            # inside [sex_wcs] are False, i.e. an exception occurred
-            # during [run_sextractor] or [run_wcs]
+            # SExtractor is 'None', or an exception occurred during
+            # [run_sextractor] or [run_wcs] inside [sex_wcs]
             if not new:
                 return header_ref            
             else:
@@ -534,8 +533,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         data_new, psf_new, psf_orig_new, data_new_bkg_std, data_new_mask = (
             prep_optimal_subtraction('{}.fits'.format(base_new), nsubs, 'new',
                                      fwhm_new, header_new, log,
-                                     fits_mask=new_fits_mask,
-                                     data_cal=data_cal_new))
+                                     fits_mask=new_fits_mask))
 
         if get_par(set_zogy.low_RAM,tel):
             # in low_RAM mode, data_new, psf_new, data_new_bkg_std and
@@ -560,9 +558,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std, data_ref_mask = (
             prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs, 'ref',
                                      fwhm_ref, header_ref, log,
-                                     fits_mask=ref_fits_mask,
-                                     data_cal=data_cal_ref,
-                                     remap=remap))
+                                     fits_mask=ref_fits_mask, remap=remap))
 
         if get_par(set_zogy.low_RAM,tel):
             # in low_RAM mode, data_ref, psf_ref, data_ref_bkg_std and
@@ -5496,7 +5492,7 @@ def get_remap_name(new_name, ref_name, remap_name):
 ################################################################################
 
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
-                             fits_mask=None, data_cal=None, remap=False):
+                             fits_mask=None, remap=False):
     
     log.info('executing prep_optimal_subtraction ...')
     t = time.time()
@@ -5922,13 +5918,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
             cal_name = get_par(set_zogy.cal_cat,tel).split('/')[-1]
             header['PC-CAT-F'] = (cal_name, 'photometric catalog')
             #caldate = time.strftime('%Y-%m-%d',
-            #time.gmtime(os.path.getmtime(set_zogy.cal_cat)))
+            #time.gmtime(os.path.getmtime(set_zogy.cal_cat))
 
-            # Only execute the following block if input [data_cal] is
-            # not defined; if [set_zogy.cal_cat] exists, [data_cal] should
-            # have been already produced by [run_wcs] so that it can
-            # be re-used here.
-            if data_cal is None:
+            # only execute the following block if [fits_calcat_field]
+            # does not exist, which should have been already produced
+            # by [run_wcs]
+            fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
+            if not os.path.isfile(fits_calcat_field):
+
                 # determine cal_cat fits extensions to read using
                 # [get_zone_indices] (each 1 degree strip in declination is
                 # recorded in its own extension in the calibration catalog)
@@ -5950,6 +5947,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
                                           log=log)
                 #index_field = np.where(mask_field)[0]
                 data_cal = data_cal[index_field]
+
+            else:
+                # read fits table containing calibration stars in this field
+                data_cal = read_hdulist (fits_calcat_field)
 
 
             ncalstars = np.shape(data_cal)[0]
@@ -9696,7 +9697,8 @@ def ds9_arrays(regions=None, **kwargs):
     
 ################################################################################
 
-def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
+def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
+            imtype, log):
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing run_wcs ...')
@@ -9945,7 +9947,6 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         log.info('declination zone indices read from calibration catalog: {}'
                  .format(zone_indices))
 
-        t4 = time.time()
         # read specific extensions (=zone_indices+1) of calibration catalog
         data_cal = read_hdulist (get_par(set_zogy.cal_cat,tel),
                                  ext_name_indices=zone_indices+1)
@@ -9966,7 +9967,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         n_aststars = np.shape(index_field)[0]
         log.info('number of potential astrometric stars in FOV: {}'
                  .format(n_aststars))
-        
+
         # add header keyword(s):
         cal_name = get_par(set_zogy.cal_cat,tel).split('/')[-1]
         header['A-CAT-F'] = (cal_name, 'astrometric catalog') 
@@ -9977,7 +9978,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
         index_sort_ast = np.argsort(mag_ast)
         ra_ast_bright = ra_ast[index_sort_ast][0:nbright]
         dec_ast_bright = dec_ast[index_sort_ast][0:nbright]
-        
+
         # calculate array of offsets between astrometry comparison
         # stars and any non-saturated SExtractor source
         newra_bright = newra[mask_use][index_sort][-nbright:]
@@ -10033,6 +10034,15 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
                  .format(get_par(set_zogy.cal_cat,tel)))
         data_cal = None
 
+
+    # write data_cal with selection of calibration stars in this field
+    # to fits table; one for each imtype as the shift may be
+    # considerable
+    if data_cal is not None:
+        fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
+        fits.writeto (fits_calcat_field, data_cal, overwrite=True)
+
+
     # write image_out including header
     header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
     fits.writeto(image_out, data, header, overwrite=True)
@@ -10043,7 +10053,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header, log):
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_wcs', log=log)
 
-    return data_cal
+    return
         
 
 ################################################################################
