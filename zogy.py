@@ -48,7 +48,8 @@ from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
 from scipy import ndimage
 from scipy import interpolate
 from skimage import restoration, measure
-from skimage.util.shape import view_as_windows, view_as_blocks
+from skimage.util.shape import view_as_windows
+#from skimage.util.shape import view_as_blocks
 
 
 #import scipy.fft as fft
@@ -4304,10 +4305,14 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         index, index_P = get_P_indices (
             xcoords[i], ycoords[i], xsize, ysize, psf_size)
 
-        # if coordinates off the image, the function
-        # [get_P_indices] returns None and the rest can be skipped
+        # if coordinates off the image, the function [get_P_indices]
+        # returns None and the rest can be skipped; continue with next
+        # source
         if index is None:
-            return
+            log.warning ('index return from [get_P_indices] is None for object '
+                         'at x,y: {:.2f},{:.2f}; returning zero flux and fluxerr'
+                         .format(xcoords[i], ycoords[i]))
+            continue
 
         # if [psfex_bintable_ref] is provided, the new image [psf_ima]
         # will be convolved with the ref image [psf_ima_ref], and
@@ -4432,10 +4437,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             mask_use = (D_mask_sub==0)
             
             # if the fraction of good pixels around the source is less
-            # than set_zogy.source_minpixfrac, then return; optimal
-            # flux will be zero and source will not be included in
-            # output catalog - may result in very saturated stars not
-            # ending up in output catalog
+            # than set_zogy.source_minpixfrac, then continue with next
+            # source; optimal flux will be zero and source will not be
+            # included in output catalog - may result in very
+            # saturated stars not ending up in output catalog
             mask_central = (P_shift >= 0.01 * np.amax(P_shift))
 
             if mask_use.shape != mask_central.shape:
@@ -4444,7 +4449,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                              '{:.2f},{:.2f}; returning zero flux and fluxerr'
                              .format(mask_use.shape, mask_central.shape,
                                      xcoords[i], ycoords[i]))
-                return
+                continue
 
             else:
                 if np.sum(mask_central) != 0:
@@ -4461,8 +4466,9 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     #             'returning zero flux and flux error'
                     #             .format(xcoords[i], ycoords[i], frac_tmp,
                     #                     get_par(set_zogy.source_minpixfrac,tel)))
-                    return
-            
+                    continue
+
+
             # perform optimal photometry measurements
             try:
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
@@ -4472,7 +4478,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                             'at pixel coordinates: x={}, y={}; returning zero flux '
                             'and fluxerr'.format(xcoords[i], ycoords[i]))
                 log.info(traceback.format_exc())
-                return
+                continue
                 
 
             # infer error image used in psffit and gauss/moffat fits below
@@ -4495,7 +4501,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                              'fluxerr, (x,y) shifts and chi2'
                              .format(xcoords[i], ycoords[i]))
                     log.info(traceback.format_exc())
-                    return
+                    continue
                 
 
             # if moffat=True, perform Moffat fit
@@ -4513,11 +4519,12 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     y_moffat[i] += index[0].start
                     
                 except Exception as e:
-                    log.info('Warning: problem running [fit_moffat_single] on object '
-                             'at pixel coordinates: {}, {}; returning zeros'
-                             .format(xcoords[i], ycoords[i]))
+                    log.error ('problem running [fit_moffat_single] on object '
+                               'at pixel coordinates: {}, {}; returning zeros'
+                               .format(xcoords[i], ycoords[i]))
                     log.info(traceback.format_exc())
-                    return
+                    continue
+
 
         if False:
             if i % 10000 == 0:
@@ -8437,7 +8444,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             # run PSFEx:
             result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel), 
                                psfexcat, imtype, poldeg, nsnap=nsnap,
-                               limit_ldac=False, nthreads=nthreads, log=log)
+                               limit_ldac=True, nthreads=nthreads, log=log)
         except Exception as e:
             PSFEx_processed = False
             log.info(traceback.format_exc())
@@ -10216,7 +10223,9 @@ def ldac2fits (cat_ldac, cat_fits, log):
     """This function converts the LDAC binary FITS table from SExtractor
     to a common binary FITS table (that can be read by Astrometry.net) """
 
-    if get_par(set_zogy.timing,tel): t = time.time()
+    if get_par(set_zogy.timing,tel):
+        t = time.time()
+
     log.info('executing ldac2fits ...')
 
     # read input table and write out primary header and 2nd extension
@@ -10942,6 +10951,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
                                           interp_Xchan=interp_Xchan, log=log,
                                           timing=get_par(set_zogy.timing,tel))
 
+
             # replace the background column in the output catalog in
             # case 'data_bkg' now exists - could be absent, e.g. for
             # the co-added reference image where the background was
@@ -10951,15 +10961,18 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
                 with fits.open(cat_out, mode='update') as hdulist:
                     data_ldac = hdulist[2].data
                     if 'BACKGROUND' in data_ldac.dtype.names:
+                        log.info ('updating initial BACKGROUND determination in '
+                                  'source-extractor catalog with improved values')
                         x_indices = (data_ldac['X_POS']-0.5).astype(int)
                         y_indices = (data_ldac['Y_POS']-0.5).astype(int)
                         background = data_bkg[y_indices, x_indices]
                         hdulist[2].data['BACKGROUND'] = background
 
 
+
     # add number of objects detected (=number of catalog rows) to header
-    with fits.open(cat_out) as hdulist:
-        nobjects = hdulist[-1].header['NAXIS2']
+    header_catout = read_hdulist (cat_out, get_data=False, get_header=True)
+    nobjects = header_catout['NAXIS2']
 
     header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
     log.info('number of objects detected by SExtractor: {}'.format(nobjects))
@@ -11079,8 +11092,10 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     # psfex
     if limit_ldac:
 
+        mem_use ('before limiting LDAC', log=log)
+        
         with fits.open(cat_in, mode='update') as hdulist:
-            data_ldac = hdulist[2].data
+            data_ldac = hdulist[-1].data
             # SExtractor flags 0 or 1 and S/N larger than value
             # defined in settings file; note that this is the same as
             # the default rejection mask on SExtractor FLAGS defined
@@ -11092,6 +11107,9 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
                        # mask flags (IMAFLAGS_ISO) required to be zero
                        (data_ldac['FLAGS_MASK']==0))
 
+
+            mem_use ('after mask_ok filter', log=log)
+            
             mask_sum = np.sum(mask_ok)
             if log is not None:
                 log.info ('number of PSF stars available with FLAGS<=1, SNR>{} '
@@ -11112,7 +11130,6 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             hdulist[2].data = data_ldac[mask_ok][index_keep]
             
             
-
         if get_par(set_zogy.make_plots,tel):
             result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
                                      data_ldac['X_POS'][mask_ok],
@@ -11778,13 +11795,23 @@ def mem_use (label='', log=None):
         
     mem_max = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/norm
     mem_now = psutil.Process().memory_info().rss / 1024**3
+    mem_virt = psutil.Process().memory_info().vms / 1024**3
     
     if log is not None:
-        log.info ('memory used in {}: rss(now)={:.3f} GB'.format(label, mem_now))
-        log.info ('peak memory used so far: maxrss(peak)={:.3f} GB'.format(mem_max))
+        log.info ('current memory use:   rss(now)={:.3f} GB in {}'
+                  .format(mem_now, label))
+        log.info ('virtual memory use:   vms(now)={:.3f} GB in {}'
+                  .format(mem_virt, label))
+        log.info ('peak memory use so far: maxrss={:.3f} GB in {}'
+                  .format(mem_max, label))
     else:
-        print ('memory used in {}: rss(now)={:.3f} GB'.format(label, mem_now))
-        print ('peak memory used so far: maxrss(peak)={:.3f} GB'.format(mem_max))
+        print ('current memory use:   rss(now)={:.3f} GB in {}'
+               .format(mem_now, label))
+        print ('virtual memory use:   vms(now)={:.3f} GB in {}'
+               .format(mem_virt, label))
+        print ('peak memory use so far: maxrss={:.3f} GB in {}'
+               .format(mem_max, label))
+
 
     return
 
