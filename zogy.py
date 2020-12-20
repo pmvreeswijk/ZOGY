@@ -125,7 +125,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                         new_fits_mask=None, ref_fits_mask=None,
                         set_file='set_zogy', log=None,
                         redo_new=None, redo_ref=None,
-                        verbose=None, nthread=1, telescope='ML1'):
+                        verbose=None, nthreads=1, telescope='ML1'):
 
 
     """Function that accepts a new and a reference fits image, finds their
@@ -152,13 +152,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     integration into pipeline for MeerLICHT.
 
     """
-
-    # make nthreads a global parameter instead of passing it on
-    # through different functions, as it is used in many places
-    global nthreads
-    nthreads = nthread
-    # this needs to be done here to allow [optimal_subtraction]
-    # to be run not from the command line
 
     global tel
     tel = telescope
@@ -531,8 +524,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new:
         data_new, psf_new, psf_orig_new, data_new_bkg_std, data_new_mask = (
             prep_optimal_subtraction('{}.fits'.format(base_new), nsubs, 'new',
-                                     fwhm_new, header_new, log,
-                                     fits_mask=new_fits_mask))
+                                     fwhm_new, header_new,
+                                     fits_mask=new_fits_mask,
+                                     nthreads=nthreads, log=log))
 
         if get_par(set_zogy.low_RAM,tel):
             # in low_RAM mode, data_new, psf_new, data_new_bkg_std and
@@ -556,9 +550,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if ref:
         data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std, data_ref_mask = (
             prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs, 'ref',
-                                     fwhm_ref, header_ref, log,
-                                     fits_mask=ref_fits_mask, remap=remap))
-
+                                     fwhm_ref, header_ref,
+                                     fits_mask=ref_fits_mask, remap=remap,
+                                     nthreads=nthreads, log=log))
+            
         if get_par(set_zogy.low_RAM,tel):
             # in low_RAM mode, data_ref, psf_ref, data_ref_bkg_std and
             # data_ref_mask are actually strings pointing to the
@@ -733,7 +728,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            data_new_bkg_std[nsub],
                                            fratio_subs[nsub],
                                            dx_subs[nsub], dy_subs[nsub],
-                                           use_FFTW=use_FFTW, log=log)
+                                           use_FFTW=use_FFTW, nthreads=nthreads,
+                                           log=log)
 
                 results_zogy.append(result_sub)
 
@@ -1129,7 +1125,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                 fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
                 header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
-                log)
+                nthreads=nthreads, log=log)
 
             # number of transients in table to add to header below
             ntrans = len(table_trans)
@@ -2710,7 +2706,7 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                    fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
                    header_new, header_ref, header_trans,
-                   fits_new_psf, fits_ref_psf, log):
+                   fits_new_psf, fits_ref_psf, nthreads=1, log=None):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
@@ -5481,8 +5477,8 @@ def get_remap_name(new_name, ref_name, remap_name):
             
 ################################################################################
 
-def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
-                             fits_mask=None, remap=False):
+def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
+                             fits_mask=None, remap=False, nthreads=1, log=None):
     
     log.info('executing prep_optimal_subtraction ...')
     t = time.time()
@@ -5725,7 +5721,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header, log,
     # PSFEx and create the _psf.fits file that is used in the optimal
     # flux determination
     psf, psf_orig = get_psf (input_fits, header, nsubs, imtype, fwhm,
-                             pixscale, remap, log)
+                             pixscale, remap, nthreads=nthreads, log=log)
 
 
     # -------------------------------
@@ -8369,7 +8365,8 @@ def plot_scatter_hist (x, y, limits, color='tab:blue', marker='o', xlabel=None,
 
 ################################################################################
 
-def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
+def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
+             log=None):
 
     """Function that takes in [image] and determines the actual Point
     Spread Function as a function of position from the full frame, and
@@ -8439,8 +8436,8 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, log):
             nsnap = min(nx, ny)
             # run PSFEx:
             result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel), 
-                               psfexcat, imtype, poldeg,
-                               nsnap=nsnap, limit_ldac=True, log=log)
+                               psfexcat, imtype, poldeg, nsnap=nsnap,
+                               limit_ldac=False, nthreads=nthreads, log=log)
         except Exception as e:
             PSFEx_processed = False
             log.info(traceback.format_exc())
@@ -11062,7 +11059,7 @@ def rename_catcols (cat_in, log=None):
 ################################################################################
 
 def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
-               limit_ldac=True, log=None):
+               limit_ldac=False, nthreads=0, log=None):
     
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -11408,9 +11405,9 @@ def dist_from_center (data):
 
 ################################################################################
 
-def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new,
-              data_ref_bkg_std, data_new_bkg_std,
-              fratio, dx, dy, use_FFTW=True, log=None):
+def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
+              data_new_bkg_std, fratio, dx, dy, use_FFTW=True, nthreads=1,
+              log=None):
 
     """function to run ZOGY on a subimage"""
 
