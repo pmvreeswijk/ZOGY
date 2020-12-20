@@ -22,7 +22,6 @@ import numbers
 
 import psutil
 
-from multiprocessing.dummy import Pool as ThreadPool
 import numpy as np
 from numpy.polynomial.polynomial import polyvander2d, polygrid2d
 
@@ -708,7 +707,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         try:
 
             zogy_processed = False
-            results_pool_zogy = []
+            results_zogy = []
 
             for nsub in range(nsubs):
 
@@ -736,7 +735,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            dx_subs[nsub], dy_subs[nsub],
                                            use_FFTW=use_FFTW, log=log)
 
-                results_pool_zogy.append(result_sub)
+                results_zogy.append(result_sub)
 
 
             if get_par(set_zogy.low_RAM,tel):
@@ -802,7 +801,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                           '{}_Fpsferr.fits'.format(base_newref)]
 
             for i_name, name in enumerate(names_zogy):
-                sublist = [l[i_name] for l in results_pool_zogy]
+                sublist = [l[i_name] for l in results_zogy]
                 create_full (name, header_tmp, (ysize_new, xsize_new),
                              'float32', nsubs, cuts_ima, index_extract,
                              sublist=sublist)
@@ -885,7 +884,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
                 # using results from pool:
                 data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = (
-                    results_pool_zogy[nsub])
+                    results_zogy[nsub])
             
                 # if one or more fake stars were added to the subimages,
                 # compare the input flux with the PSF flux determined by
@@ -4263,12 +4262,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         index_subs = coords2sub (xcoords, ycoords, D.shape)
         
     
-    # previously this was a loop; now turned to a function to
-    # try pool.map multithreading below
+
     # loop coordinates
-    #for i in range(ncoords):
-    def loop_psfoptflux_xycoords(i):
-    
+    for i in range(ncoords):
+        
         t_temp = time.time()
 
         # determine shift to the subpixel center of the object (object
@@ -4535,16 +4532,9 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 if psfex_bintable_ref is not None:
                     log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
                               .format(t_ref, t_ref/t_loop))
-                
-                
-    if get_par(set_zogy.timing,tel): t1 = time.time()
-    pool = ThreadPool(nthreads)
-    pool.map(loop_psfoptflux_xycoords, range(ncoords), chunksize=1000)
-    pool.close()
-    pool.join()
-    #if get_par(set_zogy.verbose,tel): log.info('ncoords: {}'.format(ncoords))
 
-    
+
+
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_psfoptflux', log=log)
 
@@ -11937,7 +11927,7 @@ def main():
     parser.add_argument('--verbose', default=None,
                         help='increase verbosity level')
     parser.add_argument('--nthreads', type=int, default=1,
-                        help='number of threads to use')
+                        help='number of threads (CPUs) to use')
     parser.add_argument('--telescope', type=str, default='ML1', help='telescope')
 
 
