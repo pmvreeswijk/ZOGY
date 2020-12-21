@@ -7489,97 +7489,125 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
             log.warning ('input data contains infinite or nan values')
 
 
-    # construct masked array
-    data_masked = np.ma.masked_array(data, mask=mask_reject)
 
     # image size and number of background boxes along x and y
     ysize, xsize = data.shape
 
-    
-    # reshape the input image in a 3D array of shape (nysubs,
-    # nxsubs, number of pixels in background box), such that when
-    # taking median along last axis, the mini image with the
-    # medians of the subimages are immediately obtained; this
-    # needs to be done in a masked array to be able to discard
-    # pixels in the object mask (note that masked arrays consider
-    # mask values of True to be invalid, i.e. are not used)
+    # reshape the input image in a 3D array of shape (nysubs, nxsubs,
+    # number of pixels in background box), such that when taking
+    # median along last axis, the mini image with the medians of the
+    # subimages are immediately obtained; this needs to be done in a
+    # masked array to be able to discard pixels in the object mask
+    # (note that masked arrays consider mask values of True to be
+    # invalid, i.e. are not used)
     bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
     if log is not None and (ysize % bkg_boxsize != 0 or
                             xsize % bkg_boxsize != 0):
         log.info('Warning: [bkg_boxsize] does not fit integer times in image; '
                  'best to pick a boxsize that does')
 
-    # reshape
+    # number of x,y subimages
     nysubs = int(ysize / bkg_boxsize)
     nxsubs = int(xsize / bkg_boxsize)
 
-    data_masked_reshaped = data_masked.reshape(
-        nysubs,bkg_boxsize,-1,bkg_boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
+    # two alternative ways to determine the median and STD values of
+    # the subimages
+    if True:
 
-    if log is not None:
-        if (np.sum(~np.isfinite(data_masked_reshaped))) > 0:
-            log.warning ('data_masked_reshaped contains infinite or nan values')
+        # construct masked array
+        data_masked = np.ma.masked_array(data, mask=mask_reject)
 
-    # get clipped statistics; if background box is big enough, do the
-    # statistics on a random subset of pixels
-    t0 = time.time()
-    if bkg_boxsize > 300:
-        index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
-        __, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped[:,:,index_stat].astype('float64'),
-            sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
+        data_masked_reshaped = data_masked.reshape(
+            nysubs,bkg_boxsize,-1,bkg_boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
+
         if log is not None:
-            log.warning ('subset of pixels used for statistics')
+            if (np.sum(~np.isfinite(data_masked_reshaped))) > 0:
+                log.warning ('data_masked_reshaped contains infinite or nan values')
+
+        # get clipped statistics; if background box is big enough, do the
+        # statistics on a random subset of pixels
+        t0 = time.time()
+        if bkg_boxsize > 300:
+            index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
+            __, mini_median, mini_std = sigma_clipped_stats (
+                data_masked_reshaped[:,:,index_stat].astype('float64'),
+                sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
+            if log is not None:
+                log.warning ('subset of pixels used for statistics')
         
-    else:
-        __, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped.astype('float64'),
-            sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
-
-    # convert to 'float32'
-    mini_median = mini_median.astype('float32')
-    mini_std = mini_std.astype('float32')
-
-    # check for infinite/nan values that sigma_clipped_stats will return
-    if log is not None:
-        if (np.sum(~np.isfinite(mini_median))) > 0:
-            log.warning ('mini_median contains infinite or nan values')
-        if (np.sum(~np.isfinite(mini_std))) > 0:
-            log.warning ('mini_std contains infinite or nan values')
-            
-        log.info ('time to get statistics: {:.3f}s'.format(time.time()-t0))
-
-
-    # mask subimage if more than some fraction of all subimage pixels
-    # are masked (by OR combination of object mask and input image
-    # mask); do this iteratively starting with a large fraction and
-    # decreasing it to a low fraction, to prevent too many subimages
-    # to be masked - the limit is again defined by
-    # [limfrac_reject_image]
-    for fraction in [1, 0.67, 0.5, 0.33]:
-        npix_lim = fraction * bkg_boxsize**2
-        # if number of invalid pixels along axis 2 is greater than
-        # [mask_minsize] then mask that background subimage
-        npix_bad = np.sum(data_masked_reshaped.mask, axis=2)
-        mask_temp = (npix_bad >= npix_lim)
-        if np.sum(mask_temp)/mask_temp.size < limfrac_reject_image:
-            mask_mini_avoid = mask_temp
         else:
-            break
+            __, mini_median, mini_std = sigma_clipped_stats (
+                data_masked_reshaped.astype('float64'),
+                sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
             
-    # include any nan values in mask_mini_avoid
-    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
-    mask_mini_avoid |= ~mask_mini_finite
-    
-    # set masked values to zero
-    mini_median[mask_mini_avoid] = 0
-    mini_std[mask_mini_avoid] = 0
 
-    
-    # report masked fraction of image
+        # convert to 'float32'
+        mini_median = mini_median.astype('float32')
+        mini_std = mini_std.astype('float32')
+
+
+        # mask subimage if more than some fraction of all subimage pixels
+        # are masked (by OR combination of object mask and input image
+        # mask); do this iteratively starting with a large fraction and
+        # decreasing it to a low fraction, to prevent too many subimages
+        # being masked - the limit is again defined by
+        # [limfrac_reject_image]
+        for fraction in [1, 0.67, 0.5, 0.33]:
+            npix_lim = fraction * bkg_boxsize**2
+            # if number of invalid pixels along axis 2 is greater than
+            # [mask_minsize] then mask that background subimage
+            npix_bad = np.sum(data_masked_reshaped.mask, axis=2)
+            mask_temp = (npix_bad >= npix_lim)
+            if np.sum(mask_temp)/mask_temp.size < limfrac_reject_image:
+                mask_mini_avoid = mask_temp
+            else:
+                break
+        
+        # add any nan values to mask_mini_avoid
+        mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
+        mask_mini_avoid |= ~mask_mini_finite
+        
+        # set masked values to zero
+        mini_median[mask_mini_avoid] = 0
+        mini_std[mask_mini_avoid] = 0
+
+        # report masked fraction of image
+        if log is not None:
+            log.info ('fraction of subimages that were masked: {:.2f}'
+                      .format(np.sum(mask_mini_avoid)/mask_mini_avoid.size))
+
+    else:
+
+        # this block is the old way of iterating over the subimages
+        # which is probably slower but also lower in memory use
+        
+        centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
+            bkg_boxsize, ysize, xsize, log)        
+        nsubs = centers.shape[0]
+
+        # prepare output median and std output arrays
+        mini_median = np.zeros(nsubs, dtype='float32')
+        mini_std = np.zeros(nsubs, dtype='float32')
+
+        # loop over background subimages and determine
+        # their median and standard deviation
+        for nsub in range(nsubs):
+            mini_median[nsub], mini_std[nsub] = get_median_std(
+                nsub, cuts_ima, data, ~mask_reject, mask_minsize=0.5, clip=True)
+
+        # reshape and transpose
+        mini_median = mini_median.reshape((nxsubs, nysubs)).T
+        mini_std = mini_std.reshape((nxsubs, nysubs)).T
+        
+        # report masked fraction of image
+        if log is not None:
+            log.info ('fraction of subimages that were masked: {:.2f}'
+                      .format(np.sum(mini_median==0)))
+
+        
+
     if log is not None:
-        log.info ('fraction of subimages that were masked: {:.2f}'
-                  .format(np.sum(mask_mini_avoid)/mask_mini_avoid.size))
+        log.info ('time to get statistics: {:.3f}s'.format(time.time()-t0))
 
 
     # fill zeros (if needed) and smooth mini images with
@@ -7673,6 +7701,29 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
             bkg_median, bkg_std)
 
 
+################################################################################
+
+def get_median_std (nsub, cuts_ima, data, mask_use, mask_minsize=0.5, clip=True,
+                    log=None):
+
+    subcut = cuts_ima[nsub]
+    data_sub = data[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+    mask_sub = mask_use[subcut[0]:subcut[1], subcut[2]:subcut[3]]
+
+    if np.sum(mask_sub) > mask_minsize:
+        if clip:
+            # get clipped_stats mean, std and median
+            __, median, std = sigma_clipped_stats(data_sub[mask_sub])
+        else:
+            median = np.median(data_sub[mask_sub])
+            std = np.std(data_sub[mask_sub])
+    else:
+        # set to zero
+        median, std = 0, 0
+        
+    return median, std
+
+            
 ################################################################################
 
 def fill_zeros_filter (data_mini, size_filter, use_median=True,
@@ -8444,7 +8495,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             # run PSFEx:
             result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel), 
                                psfexcat, imtype, poldeg, nsnap=nsnap,
-                               limit_ldac=True, nthreads=nthreads, log=log)
+                               limit_ldac=False, nthreads=nthreads, log=log)
         except Exception as e:
             PSFEx_processed = False
             log.info(traceback.format_exc())
@@ -11042,8 +11093,6 @@ def rename_catcols (cat_in, log=None):
     with fits.open(cat_in, mode='update') as hdulist:
         data = hdulist[-1].data
 
-        print (data.dtype.names)
-
         # loop through above dictionary keys
         for col in col_old2new.keys():
             # check if column is present in catalog
@@ -11053,7 +11102,18 @@ def rename_catcols (cat_in, log=None):
                 data.columns[col].name = col_new
                 if log is not None:
                     log.info ('renamed column {} to {}'.format(col, col_new))
-                    
+
+                # for 'IMAFLAGS_ISO' preserve a copy of the column
+                # with the old name to be potentially used in PSFEx to
+                # filter the LDAC catalog
+                if col == 'IMAFLAGS_ISO':
+                    data = append_fields(data, col, data[col_new],
+                                         usemask=False, asrecarray=True)
+                    if log is not None:
+                        log.info ('keeping a copy of column {} with its original '
+                                  'name for potential use in PSFEx'.format(col))
+
+
         # loop through all catalog keys
         for col in data.dtype.names:
             # prefix all flux column names with E_ to indicate unit is
@@ -11079,7 +11139,8 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
        [file_config]"""
 
 
-    if get_par(set_zogy.timing,tel): t = time.time()
+    if get_par(set_zogy.timing,tel):
+        t = time.time()
 
     
     if imtype=='new':
@@ -11104,7 +11165,6 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
             mask_ok = ((data_ldac['FLAGS']<=1) & 
                        (data_ldac['SNR_WIN']>=s2n) &
-                       # mask flags (IMAFLAGS_ISO) required to be zero
                        (data_ldac['FLAGS_MASK']==0))
 
 
@@ -11798,19 +11858,13 @@ def mem_use (label='', log=None):
     mem_virt = psutil.Process().memory_info().vms / 1024**3
     
     if log is not None:
-        log.info ('current memory use:   rss(now)={:.3f} GB in {}'
-                  .format(mem_now, label))
-        log.info ('virtual memory use:   vms(now)={:.3f} GB in {}'
-                  .format(mem_virt, label))
-        log.info ('peak memory use so far: maxrss={:.3f} GB in {}'
-                  .format(mem_max, label))
+        log.info('current RAM use: rss={:.3f} GB in {}'.format(mem_now, label))
+        log.info('peak RAM use: maxrss={:.3f} GB in {}'.format(mem_max, label))
+        log.info('virtual RAM use: vms={:.3f} GB in {}'.format(mem_virt, label))
     else:
-        print ('current memory use:   rss(now)={:.3f} GB in {}'
-               .format(mem_now, label))
-        print ('virtual memory use:   vms(now)={:.3f} GB in {}'
-               .format(mem_virt, label))
-        print ('peak memory use so far: maxrss={:.3f} GB in {}'
-               .format(mem_max, label))
+        print ('current RAM use: rss={:.3f} GB in {}'.format(mem_now, label))
+        print ('peak RAM use: maxrss={:.3f} GB in {}'.format(mem_max, label))
+        print ('virtual RAM use: vms={:.3f} GB in {}'.format(mem_virt, label))
 
 
     return
