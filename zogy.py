@@ -11087,43 +11087,70 @@ def rename_catcols (cat_in, log=None):
                    'THETAWIN_IMAGE': 'THETA'}
 
 
+    def update_colname (table, col, col_new, cat_in, log=None):
+        
+        # if new column name does not exist yet, rename the old column
+        if col_new not in table.colnames:
+            table[col].name = col_new
+            if log is not None:
+                log.info ('renamed column {} to {}'.format(col, col_new))
+        else:
+            if log is not None:
+                log.warning ('column {} already present in catalog {}'
+                             .format(col_new, cat_in))
 
+    
 
-    # open input catalog to update
-    with fits.open(cat_in, mode='update') as hdulist:
-        data = hdulist[-1].data
+    # read 2nd extension of input LDAC catalog
+    table = Table.read(cat_in, hdu=2, memmap=True)
 
-        # loop through above dictionary keys
-        for col in col_old2new.keys():
-            # check if column is present in catalog
-            if col in data.dtype.names:
-                # if so, rename it
-                col_new = col_old2new[col]
-                data.columns[col].name = col_new
-                if log is not None:
-                    log.info ('renamed column {} to {}'.format(col, col_new))
+    # loop through above dictionary keys
+    for col in col_old2new.keys():
 
-                # for 'IMAFLAGS_ISO' preserve a copy of the column
-                # with the old name to be potentially used in PSFEx to
-                # filter the LDAC catalog
-                if col == 'IMAFLAGS_ISO':
-                    data = append_fields(data, col, data[col_new],
-                                         usemask=False, asrecarray=True)
+        # check if column is present in table
+        if col in table.colnames:
+
+            # update column name
+            col_new = col_old2new[col]
+            update_colname (table, col, col_new, cat_in, log=log)
+            
+            # for column 'IMAFLAGS_ISO' preserve a copy of the old
+            # column to possibly use in PSFEx to filter sources
+            if col == 'IMAFLAGS_ISO':
+                
+                # create column with the old name if it does not
+                # already exist
+                if col not in table.colnames:
+                    table[col] = table[col_new]
                     if log is not None:
                         log.info ('keeping a copy of column {} with its original '
-                                  'name for potential use in PSFEx'.format(col))
+                                  'name for possible use in PSFEx'.format(col))
+                else:
+                    if log is not None:
+                        log.warning ('column {} already present in catalog {}'
+                                     .format(col, cat_in))
 
 
-        # loop through all catalog keys
-        for col in data.dtype.names:
-            # prefix all flux column names with E_ to indicate unit is
-            # electrons
-            if ('FLUX' in col and 'E_' not in col and
-                'RADIUS' not in col and 'GROWTHSTEP' not in col):
-                col_new = 'E_{}'.format(col)
-                data.columns[col].name = col_new
-                if log is not None:
-                    log.info ('renamed column {} to {}'.format(col, col_new))
+    # loop through all table columns to update names of flux columns
+    for col in table.colnames:
+
+        # prefix all flux column names with E_ to indicate unit is
+        # electrons
+        if ('FLUX' in col and 'E_' not in col and
+            'RADIUS' not in col and 'GROWTHSTEP' not in col):
+            
+            # update column name
+            col_new = 'E_{}'.format(col)
+            update_colname (table, col, col_new, cat_in, log=log)
+
+
+    # insert table into new 2nd extension of input LDAC catalog;
+    # the character_as_bytes determines whether to return bytes
+    # for string columns when accessed from the HDU; saves some
+    # memory and is not relevant as none of the [cat_in] column
+    # datatypes are strings
+    with fits.open(cat_in, mode='update') as hdulist:
+        hdulist[2] = fits.table_to_hdu(table, character_as_bytes=True)
 
 
     return
@@ -11858,14 +11885,11 @@ def mem_use (label='', log=None):
     mem_virt = psutil.Process().memory_info().vms / 1024**3
     
     if log is not None:
-        log.info('current RAM use: rss={:.3f} GB in {}'.format(mem_now, label))
-        log.info('peak RAM use: maxrss={:.3f} GB in {}'.format(mem_max, label))
-        log.info('virtual RAM use: vms={:.3f} GB in {}'.format(mem_virt, label))
+        log.info ('memory use [GB]: rss={:.3f}, maxrss={:.3f}, vms={:.3f} in {}'
+                  .format(mem_now, mem_max, mem_virt, label))
     else:
-        print ('current RAM use: rss={:.3f} GB in {}'.format(mem_now, label))
-        print ('peak RAM use: maxrss={:.3f} GB in {}'.format(mem_max, label))
-        print ('virtual RAM use: vms={:.3f} GB in {}'.format(mem_virt, label))
-
+        print ('memory use [GB]: rss={:.3f}, maxrss={:.3f}, vms={:.3f} in {}'
+               .format(mem_now, mem_max, mem_virt, label))
 
     return
 
