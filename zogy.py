@@ -9949,7 +9949,10 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     result = sip_to_pv(header_wcs, tpv_format=True, preserve=False)
 
     # update input header with [header_wcs]
-    header += header_wcs
+    #header += header_wcs
+    for key in header_wcs:
+        header[key] = (header_wcs[key], header_wcs.comments[key])
+    
 
     # use astropy.WCS to find RA, DEC corresponding to X_POS,
     # Y_POS, based on WCS info saved by Astrometry.net in .wcs
