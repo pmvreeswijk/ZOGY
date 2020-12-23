@@ -1268,7 +1268,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.timing,tel):
             t_fits = time.time() 
 
-        header_tmp = header_new+header_trans
+        header_tmp = header_new + header_trans
         header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         fits_D = '{}_D.fits'.format(base_newref)
         fits_Scorr = '{}_Scorr.fits'.format(base_newref)
@@ -6345,7 +6345,47 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             log_timing_memory (t0=t2, label='creating binary fits table '
                                'including fluxopt', log=log)
 
-            
+
+    # now that calibration is done, create limiting magnitude image
+    if 'PC-ZP' in header and 'AIRMASSC' in header:
+
+        # create error image from positive background-subtracted
+        # data_wcs and background STD image
+        index_neg = np.nonzero(data_wcs<0)
+        data_wcs_copy = np.copy(data_wcs)
+        data_wcs_copy[index_neg] = 0
+        data_err = np.sqrt(data_wcs_copy + data_bkg_std**2)
+
+        # apply the zeropoint
+        exptime, filt = read_header(header, ['exptime', 'filter'], log=log)
+        zp = header['PC-ZP']
+        airm = header['AIRMASSC']
+        data_limmag = apply_zp( (get_par(set_zogy.source_nsigma,tel) * data_err),
+                                zp, airm, exptime, filt, log).astype('float32')
+
+        # try to write scaled uint8 or int16 limiting magnitude image
+        limmag_range = abs(np.amax(data_limmag)-np.amin(data_limmag))
+
+        # if range less than 7.5 (roughly corrsponding to steps of
+        # about 0.03 mag in the output image) then save as 'uint8'
+        # leading to an fpacked image size of about 15MB; otherwise
+        # use float32 which can be compressed to ~45MB using q=1
+        fits_limmag = '{}_limmag.fits'.format(base)
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        if limmag_range <= 7.5:
+            data_type = 'uint8'
+            hdu = fits.PrimaryHDU(data_limmag, header)
+            hdu.scale(data_type, 'minmax')
+            hdu.writeto(fits_limmag, overwrite=True)
+        else:
+            fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
+
+    else:
+        log.warning ('PC-ZP or AIRMASSC not present in header of {}; limiting '
+                     'magnitude image is therefore not made'.format(input_fits))
+
+
+
     # update header of input fits image with keywords added by PSFEx
     # and photometric calibration
     with fits.open('{}.fits'.format(base), 'update') as hdulist:
@@ -9952,7 +9992,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     #header += header_wcs
     for key in header_wcs:
         header[key] = (header_wcs[key], header_wcs.comments[key])
-    
+
 
     # use astropy.WCS to find RA, DEC corresponding to X_POS,
     # Y_POS, based on WCS info saved by Astrometry.net in .wcs
