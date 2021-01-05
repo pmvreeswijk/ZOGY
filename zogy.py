@@ -392,6 +392,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # so keep both
             ldac2fits (sexcat, '{}_cat.fits'.format(base), log=log)
 
+            # now that normal fits catalog is available, update its
+            # BACKGROUND column with improved background estimate -
+            # this was previously done inside [run_sextractor] but
+            # with large LDAC files this becomes very RAM-expensive
+            if get_par(set_zogy.bkg_method,tel)==2:
+                update_bkgcol (base, header, log=log)
+
+
         else:
             log.info('output catalog {} or {} already present and redo flag '
                      'is set to False; skipping source-extractor run on {}'
@@ -410,8 +418,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                 'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
                                 'PROJP1', 'PROJP3',
                                 'PV1_1', 'PV1_2', 'PV2_1', 'PV2_2']:
-                        if key in header: 
-                            del header[key]                    
+                        if key in header:
+                            del header[key]
                     WCS_processed = False
                     fits_base = '{}.fits'.format(base)
                     run_wcs(fits_base, fits_base, ra, dec, pixscale, xsize,
@@ -9837,11 +9845,12 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
 
     # create ds9 regions text file to show the brightest stars
     if get_par(set_zogy.make_plots,tel):
-        result = prep_ds9regions('{}_cat_bright_ds9regions.txt'.format(base),
-                                 data_sexcat['X_POS'][mask_use][index_sort][-nbright:],
-                                 data_sexcat['Y_POS'][mask_use][index_sort][-nbright:],
-                                 radius=5., width=2, color='green',
-                                 value=np.arange(1,nbright+1))
+        result = prep_ds9regions(
+            '{}_cat_bright_ds9regions.txt'.format(base),
+            data_sexcat['X_POS'][mask_use][index_sort][-nbright:],
+            data_sexcat['Y_POS'][mask_use][index_sort][-nbright:],
+            radius=5., width=2, color='green',
+            value=np.arange(1,nbright+1))
 
     dir_out = '.'
     if '/' in base:
@@ -10320,6 +10329,12 @@ def ldac2fits (cat_ldac, cat_fits, log=None):
         hdulist_new.writeto(cat_fits, overwrite=True)
         hdulist_new.close()
 
+
+    # now that normal fits catalog (not LDAC) has been created, rename
+    # some of the columns using the function rename_catcols
+    rename_catcols(cat_out, log=log)
+
+        
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='ldac2fits', log=log)
 
@@ -10462,7 +10477,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     """Function that accepts a FITS_LDAC table produced by SExtractor and
     returns the FWHM and its standard deviation in pixels.  The
     columns that need to be present in the fits table are 'FLAGS',
-    'E_FLUX_AUTO' and 'CLASS_STAR'. By default, the function takes the
+    'FLUX_AUTO' and 'CLASS_STAR'. By default, the function takes the
     brightest [fraction] of objects, and determines the median FWHM
     from them using sigma clipping. If [class_sort] is True, it
     instead takes the fraction of objects with the highest CLASS_STAR
@@ -10479,12 +10494,12 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
     # these arrays correspond to objecst with flag==0 and flux_auto>0.
     # add a S/N requirement
-    index = ((data['FLAGS']==0) & (data['E_FLUX_AUTO']>0.) &
-             (data['E_FLUXERR_AUTO']>0.) &
-             (data['E_FLUX_AUTO']/data['E_FLUXERR_AUTO']>20.))
+    index = ((data['FLAGS']==0) & (data['FLUX_AUTO']>0.) &
+             (data['FLUXERR_AUTO']>0.) &
+             (data['FLUX_AUTO']/data['FLUXERR_AUTO']>20.))
     fwhm = data['FWHM'][index]
     class_star = data['CLASS_STAR'][index]
-    flux_auto = data['E_FLUX_AUTO'][index]
+    flux_auto = data['FLUX_AUTO'][index]
     mag_auto = -2.5*np.log10(flux_auto)
     if get_elong:
         elong = data['ELONGATION'][index]
@@ -10493,7 +10508,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         # sort by CLASS_STAR
         index_sort = np.argsort(class_star)
     else:
-        # sort by E_FLUX_AUTO
+        # sort by FLUX_AUTO
         index_sort = np.argsort(flux_auto)
 
     # select fraction of targets
@@ -10531,9 +10546,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         mag_auto_select = mag_auto[index_sort][index_select]
 
         # to get initial values before discarding flagged objects
-        index = (data['E_FLUX_AUTO']>0.)
+        index = (data['FLUX_AUTO']>0.)
         fwhm = data['FWHM'][index]
-        flux_auto = data['E_FLUX_AUTO'][index]
+        flux_auto = data['FLUX_AUTO'][index]
         mag_auto = -2.5*np.log10(flux_auto)
 
         plt.plot(fwhm, mag_auto, 'bo', markersize=1)
@@ -10581,8 +10596,8 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         mask_lowfwhm = (data['FWHM'] < fwhm_median-3*fwhm_std)
         result = prep_ds9regions('{}_lowfwhm_ds9regions.txt'
                                  .format(cat_ldac.replace('.fits','')),
-                                 data['X_POS'][mask_lowfwhm],
-                                 data['Y_POS'][mask_lowfwhm],
+                                 data['XWIN_IMAGE'][mask_lowfwhm],
+                                 data['YWIN_IMAGE'][mask_lowfwhm],
                                  radius=5., width=2, color='purple',
                                  value=data['FWHM'][mask_lowfwhm])
 
@@ -10961,8 +10976,12 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
 
 
     # now that catalog has been created, rename some of the columns
-    # using the function rename_catcols
-    rename_catcols(cat_out, log=log)
+    # using the function rename_catcols N.B.: this was moved to the
+    # function [ldac2fits] after converting the LDAC to normal fits
+    # catalog, to avoid opening the potentially very large LDAC table
+    # just to change some column names
+
+    #rename_catcols(cat_out, log=log)
 
 
     if return_fwhm_elong:
@@ -10976,53 +10995,6 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
         fwhm_std = 0.
         elong = 0.
         elong_std = 0.
-
-        # if npasses>1, replace BACKGROUND in the source-extractor output
-        # catalog with values from the improved background
-        if (npasses>1 and get_par(set_zogy.bkg_method,tel)==2 and
-            Scorr_mode is None):
-
-            # if background had already been subtracted, [data_bkg] is
-            # not available - read it from full or mini fits files
-            if 'data_bkg' not in locals():
-                fits_bkg = '{}_bkg.fits'.format(base)
-                fits_bkg_mini = '{}_bkg_mini.fits'.format(base)
-                if os.path.exists(fits_bkg):
-                    # read it from the full background image
-                    data_bkg = read_hdulist (fits_bkg, dtype='float32')
-                elif os.path.exists(fits_bkg_mini):
-                    # create it from the background mesh
-                    data_bkg_mini, header_mini = read_hdulist (
-                        fits_bkg_mini, get_header=True, dtype='float32')
-                    
-                    if 'BKG-SIZE' in header_mini:
-                        bkg_size = header_mini['BKG-SIZE']
-                    else:
-                        bkg_size = get_par(set_zogy.bkg_boxsize,tel)
-
-                    # determine image size from header
-                    data_shape = (header['NAXIS2'], header['NAXIS1']) 
-                    data_bkg = mini2back (data_bkg_mini, data_shape,
-                                          order_interp=2, bkg_boxsize=bkg_size,
-                                          interp_Xchan=interp_Xchan, log=log,
-                                          timing=get_par(set_zogy.timing,tel))
-
-
-            # replace the background column in the output catalog in
-            # case 'data_bkg' now exists - could be absent, e.g. for
-            # the co-added reference image where the background was
-            # already subtracted from the individual frames and no
-            # background image or mini image is available
-            if 'data_bkg' in locals():
-                with fits.open(cat_out, mode='update') as hdulist:
-                    data_ldac = hdulist[2].data
-                    if 'BACKGROUND' in data_ldac.dtype.names:
-                        log.info ('updating initial BACKGROUND determination in '
-                                  'source-extractor catalog with improved values')
-                        x_indices = (data_ldac['X_POS']-0.5).astype(int)
-                        y_indices = (data_ldac['Y_POS']-0.5).astype(int)
-                        background = data_bkg[y_indices, x_indices]
-                        hdulist[2].data['BACKGROUND'] = background
 
 
 
@@ -11053,8 +11025,71 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
 
 ################################################################################
 
-def rename_catcols (cat_in, log=None):
+def update_bkgcol (base, header, log=None):
+    
+    """function to replace BACKGROUND column in the fits catalog with
+       values from the improved background, if available
 
+    """
+
+    fits_cat = '{}_cat.fits'.format(base)
+        
+    # read [data_bkg] from full or mini fits files
+    fits_bkg = '{}_bkg.fits'.format(base)
+    fits_bkg_mini = '{}_bkg_mini.fits'.format(base)
+    if os.path.exists(fits_bkg):
+        # read it from the full background image
+        data_bkg = read_hdulist (fits_bkg, dtype='float32')
+    elif os.path.exists(fits_bkg_mini):
+        # create it from the background mesh
+        data_bkg_mini, header_mini = read_hdulist (
+            fits_bkg_mini, get_header=True, dtype='float32')
+            
+        if 'BKG-SIZE' in header_mini:
+            bkg_size = header_mini['BKG-SIZE']
+        else:
+            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+
+        # [interp_Xchan] determines whether interpolation is allowed
+        # across different channels in [mini2back]
+        if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or
+            get_par(set_zogy.MLBG_chancorr,tel)):
+            interp_Xchan = True
+        else:
+            interp_Xchan = False
+            
+        # determine image size from header
+        data_shape = (header['NAXIS2'], header['NAXIS1']) 
+        data_bkg = mini2back (data_bkg_mini, data_shape,
+                              order_interp=2, bkg_boxsize=bkg_size,
+                              interp_Xchan=interp_Xchan, log=log,
+                              timing=get_par(set_zogy.timing,tel))
+
+
+    # replace the background column in the output catalog in case
+    # 'data_bkg' exists - could be absent, e.g. for the co-added
+    # reference image where the background was already subtracted from
+    # the individual frames and no background image or mini image is
+    # available
+    if 'data_bkg' in locals():
+        with fits.open(fits_cat, mode='update') as hdulist:
+            data = hdulist[-1].data
+            if 'BACKGROUND' in data.dtype.names:
+                if log is not None:
+                    log.info ('updating initial BACKGROUND determination in '
+                              'source-extractor catalog with improved values')
+                x_indices = (data['X_POS']-0.5).astype(int)
+                y_indices = (data['Y_POS']-0.5).astype(int)
+                background = data_bkg[y_indices, x_indices]
+                hdulist[-1].data['BACKGROUND'] = background
+
+    return
+
+
+################################################################################
+
+def rename_catcols (cat_in, hdu_ext=1, log=None):
+    
     """Function to rename particular columns in the LDAC binary fits table
     created by SExtractor.
 
@@ -11106,8 +11141,8 @@ def rename_catcols (cat_in, log=None):
 
     
 
-    # read 2nd extension of input LDAC catalog
-    table = Table.read(cat_in, hdu=2, memmap=True)
+    # read correct extension of input catalog
+    table = Table.read(cat_in, hdu=hdu_ext, memmap=True)
 
     # loop through above dictionary keys
     for col in col_old2new.keys():
@@ -11121,7 +11156,7 @@ def rename_catcols (cat_in, log=None):
             
             # for column 'IMAFLAGS_ISO' preserve a copy of the old
             # column to possibly use in PSFEx to filter sources
-            if col == 'IMAFLAGS_ISO':
+            if False and col == 'IMAFLAGS_ISO':
                 
                 # create column with the old name if it does not
                 # already exist
@@ -11149,13 +11184,12 @@ def rename_catcols (cat_in, log=None):
             update_colname (table, col, col_new, cat_in, log=log)
 
 
-    # insert table into new 2nd extension of input LDAC catalog;
-    # the character_as_bytes determines whether to return bytes
-    # for string columns when accessed from the HDU; saves some
-    # memory and is not relevant as none of the [cat_in] column
-    # datatypes are strings
+    # insert table into correct extension of input catalog; the
+    # character_as_bytes determines whether to return bytes for string
+    # columns when accessed from the HDU; saves some memory and is not
+    # relevant as none of the [cat_in] column datatypes are strings
     with fits.open(cat_in, mode='update') as hdulist:
-        hdulist[2] = fits.table_to_hdu(table, character_as_bytes=True)
+        hdulist[hdu_ext] = fits.table_to_hdu(table, character_as_bytes=True)
 
 
     return
@@ -11197,7 +11231,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
             mask_ok = ((data_ldac['FLAGS']<=1) & 
                        (data_ldac['SNR_WIN']>=s2n) &
-                       (data_ldac['FLAGS_MASK']==0))
+                       (data_ldac['IMAFLAGS_ISO']==0))
 
 
             mem_use ('after mask_ok filter', log=log)
@@ -11205,7 +11239,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             mask_sum = np.sum(mask_ok)
             if log is not None:
                 log.info ('number of PSF stars available with FLAGS<=1, SNR>{} '
-                          'and FLAGS_MASK==0: {}'.format(s2n, mask_sum))
+                          'and IMAFLAGS_ISO==0: {}'.format(s2n, mask_sum))
 
             # to limit the number of PSF stars to a reasonable number
             # in crowded fields, pick a random set of [nlimit] stars
@@ -11224,8 +11258,8 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             
         if get_par(set_zogy.make_plots,tel):
             result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
-                                     data_ldac['X_POS'][mask_ok],
-                                     data_ldac['Y_POS'][mask_ok],
+                                     data_ldac['XWIN_IMAGE'][mask_ok],
+                                     data_ldac['YWIN_IMAGE'][mask_ok],
                                      radius=5., width=2, color='red')
                 
         if get_par(set_zogy.timing,tel):
