@@ -390,7 +390,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # '_ldac' in the name) to a normal binary fits table;
             # Astrometry.net needs the latter, but PSFEx needs the former,
             # so keep both
-            ldac2fits (sexcat, '{}_cat.fits'.format(base), log)
+            ldac2fits (sexcat, '{}_cat.fits'.format(base), log=log)
 
         else:
             log.info('output catalog {} or {} already present and redo flag '
@@ -10250,69 +10250,52 @@ def calc_offsets_alt (ra_sex, dec_sex, ra_ast, dec_ast, log):
     mask_nonzero = ((dra_array != 0) & (ddec_array != 0))
     return dra_array[mask_nonzero], ddec_array[mask_nonzero]
     
-    
+
 ################################################################################
+    
+def ldac2fits_alt (cat_ldac, cat_fits, log=None):
 
-def fits2ldac (header4ext2, data4ext3, fits_ldac_out, doSort=True):
+    """This function converts the LDAC binary FITS table from SExtractor
+    to a common binary FITS table (that can be read by Astrometry.net).
+    It is taking up more memory for a very large LDAC file:
+    
+      memory use [GB]: rss=1.607, maxrss=1.735, vms=12.605 in ldac2fits
 
-    """This function converts the binary FITS table from Astrometry.net to
-    a binary FITS_LDAC table that can be read by PSFex. [header4ext2]
-    is what will be recorded as a single long string in the data part
-    of the 2nd extension of the output table [fits_ldac_out], and
-    [data4ext3] is the data part of an HDU that will define both the
-    header and data parts of extension 3 of [fits_ldac_out].
+    compared to the original ldac2fits function:
+
+      memory use [GB]: rss=0.430, maxrss=1.604, vms=3.811 in ldac2fits
+    
+    so keep using the original one which uses the record array helper
+    function 'drop_fields', but that appears to be a valid numpy
+    utility (see: https://numpy.org/devdocs/user/basics.rec.html).
 
     """
 
-    # convert header to single (very) long string
-    ext2_str = header4ext2.tostring(endcard=False, padding=False)
+    if get_par(set_zogy.timing,tel):
+        t = time.time()
 
-    # if the following line is not added, the very end of the data
-    # part of extension 2 is written to a fits table such that PSFex
-    # runs into a segmentation fault when attempting to read it (took
-    # me ages to find out!).
-    ext2_str += 'END                                                                          END'
+    if log is not None:
+        log.info('executing ldac2fits_alt ...')
 
-    # read into string array
-    ext2_data = np.array([ext2_str])
+    # read 2nd extension of input LDAC catalog
+    table = Table.read(cat_ldac, hdu=2, memmap=True)
 
-    # determine format string for header of extention 2
-    formatstr = '{}A'.format(len(ext2_str))
-    # create table 1
-    col1 = fits.Column(name='Field Header Card', array=ext2_data, format=formatstr)
-    ext2 = fits.BinTableHDU.from_columns([col1])
-    # make sure these keywords are in the header
-    ext2.header['EXTNAME'] = 'LDAC_IMHEAD'
-    ext2.header['TDIM1'] = '(80, {0})'.format(len(ext2_str)/80)
-
-    # simply create extension 3 from [data4ext3]
-    ext3 = fits.BinTableHDU(data4ext3)
-    # extname needs to be as follows
-    ext3.header['EXTNAME'] = 'LDAC_OBJECTS'
-
-    # sort output table by number column if needed
-    if doSort:
-        index_sort = np.argsort(ext3.data['NUMBER'])
-        ext3.data = ext3.data[index_sort]
+    # delete VIGNET column
+    #del table['VIGNET']
+    table.remove_column('VIGNET')
     
-    # create primary HDU
-    prihdr = fits.Header()
-    prihdu = fits.PrimaryHDU(header=prihdr)
-    prihdu.header['EXPTIME'] = header4ext2['EXPTIME']
-    prihdu.header['FILTNAME'] = header4ext2['FILTNAME']
-    # prihdu.header['SEEING'] = header4ext2['SEEING'] #need to calculte and add
-    prihdu.header['BKGSIG'] = header4ext2['SEXBKDEV']
-    prihdu.header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+    # write output fits table
+    table.write (cat_fits, format='fits', overwrite=True)
     
-    # write hdulist to output LDAC fits table
-    hdulist = fits.HDUList([prihdu, ext2, ext3])
-    hdulist.writeto(fits_ldac_out, overwrite=True)
-    hdulist.close()
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='ldac2fits_alt', log=log)
+
+    return
 
     
 ################################################################################
 
-def ldac2fits (cat_ldac, cat_fits, log):
+def ldac2fits (cat_ldac, cat_fits, log=None):
 
     """This function converts the LDAC binary FITS table from SExtractor
     to a common binary FITS table (that can be read by Astrometry.net) """
@@ -10320,35 +10303,12 @@ def ldac2fits (cat_ldac, cat_fits, log):
     if get_par(set_zogy.timing,tel):
         t = time.time()
 
-    log.info('executing ldac2fits ...')
+    if log is not None:
+        log.info('executing ldac2fits ...')
 
     # read input table and write out primary header and 2nd extension
     columns = []
-    with fits.open(cat_ldac) as hdulist:
-
-        if False:
-            # to make the fits tables more compact, convert the columns
-            # with double precision datatypes ('D') to float32 ('E')
-            # except for the RA and DEC columns
-            data = hdulist[2].data
-            cols = hdulist[2].columns
-
-            for icol, key in enumerate(cols.names):
-                format_new = cols.formats[icol]
-                # shouldn't it be 'D' and 'E' instead of '1D' and '1E'
-                # below?
-                if '1D' in cols.formats[icol] and key!='RA' and key!='DEC':
-                    format_new = '1E'
-                    #data[key] = data[key].astype('float32')
-                col = fits.Column(name=key, format=format_new, unit=cols.units[icol],
-                                  array=data[key])
-                columns.append(col)
-
-            hdulist[2] = fits.BinTableHDU.from_columns(columns)
-
-            # overwrite input ldac fits table with double formats
-            # converted to float32
-            #hdulist.writeto(cat_ldac, overwrite=True)
+    with fits.open(cat_ldac, memmap=True) as hdulist:
 
         # delete VIGNET column
         hdulist[2].data = drop_fields(hdulist[2].data, 'VIGNET')
