@@ -369,9 +369,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     fits_mask=fits_mask, npasses=2, tel=tel, set_zogy=set_zogy,
                     nthreads=nthreads)
             except Exception as e:
-                log.info(traceback.format_exc())
-                log.error('exception was raised during [run_sextractor]: {}'
-                          .format(e))
+                #log.exception(traceback.format_exc())
+                log.exception('exception was raised during [run_sextractor]: {}'
+                              .format(e))
             else:
                 SE_processed = True
             finally:
@@ -418,8 +418,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                             ysize, header, imtype, log)
 
             except Exception as e:
-                log.info(traceback.format_exc())
-                log.error('exception was raised during [run_wcs]: {}'.format(e))
+                #log.exception(traceback.format_exc())
+                log.exception('exception was raised during [run_wcs]: {}'
+                              .format(e))
             else:
                 WCS_processed = True
                 # update pixscale_new or pixscale_ref
@@ -747,8 +748,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
         except Exception as e:
-            log.info(traceback.format_exc())
-            log.error('exception was raised during [run_ZOGY]: {}'.format(e))  
+            #log.exception(traceback.format_exc())
+            log.exception('exception was raised during [run_ZOGY]: {}'.format(e))
         else:
             zogy_processed = True
         finally:
@@ -1247,9 +1248,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 ML_model = get_par(set_zogy.ML_model,tel)
                 ML_prob_real = get_ML_prob_real (data_thumbnails, ML_model)
             except Exception as e:
-                log.info(traceback.format_exc())
-                log.error('exception was raised during [get_ML_prob_real]: '
-                          '{}'.format(e))
+                #log.exception(traceback.format_exc())
+                log.exception('exception was raised during [get_ML_prob_real]: '
+                              '{}'.format(e))
             else:
                 ML_processed = True
                 
@@ -3309,9 +3310,9 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                         
                 except Exception as e:
                     if log is not None:
-                        log.info('skipping remapping of thumbnail at x,y: '
-                                 '{:.0f},{:.0f} due to exception: {}'.
-                                 format(xcoords[i_pos], ycoords[i_pos], e))
+                        log.exception('skipping remapping of thumbnail at x,y: '
+                                      '{:.0f},{:.0f} due to exception: {}'.
+                                      format(xcoords[i_pos], ycoords[i_pos], e))
 
     else:
         data_thumbnails = None
@@ -3952,9 +3953,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                         
                 except Exception as e:
                     if log is not None:
-                        log.info('skipping remapping of thumbnail at x,y: '
-                                 '{:.0f},{:.0f} due to exception: {}'.
-                                 format(xcoords[i_pos], ycoords[i_pos], e))
+                        log.exception('skipping remapping of thumbnail at x,y: '
+                                      '{:.0f},{:.0f} due to exception: {}'.
+                                      format(xcoords[i_pos], ycoords[i_pos], e))
 
     else:
         data_thumbnails = None
@@ -4474,10 +4475,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use, log=log)
             except Exception as e:
-                log.warning('problem running [flux_optimal] on object '
-                            'at pixel coordinates: x={}, y={}; returning zero flux '
-                            'and fluxerr'.format(xcoords[i], ycoords[i]))
-                log.info(traceback.format_exc())
+                #log.exception(traceback.format_exc())
+                log.exception('problem running [flux_optimal] on object at pixel '
+                              'coordinates: x={}, y={}; returning zero flux '
+                              'and fluxerr'.format(xcoords[i], ycoords[i]))
+
                 continue
                 
 
@@ -4496,11 +4498,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                                          show=False, max_nfev=300, log=log))
 
                 except Exception as e:
-                    log.info('Warning: problem running [flux_psffit] on object '
-                             'at pixel coordinates: {}, {}; returning zero flux, '
-                             'fluxerr, (x,y) shifts and chi2'
-                             .format(xcoords[i], ycoords[i]))
-                    log.info(traceback.format_exc())
+                    #log.exception(traceback.format_exc())
+                    log.exception('problem running [flux_psffit] on object at '
+                                  'pixel coordinates: {}, {}; returning zero '
+                                  'flux, fluxerr, (x,y) shifts and chi2'
+                                  .format(xcoords[i], ycoords[i]))
                     continue
                 
 
@@ -4519,10 +4521,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     y_moffat[i] += index[0].start
                     
                 except Exception as e:
-                    log.error ('problem running [fit_moffat_single] on object '
-                               'at pixel coordinates: {}, {}; returning zeros'
-                               .format(xcoords[i], ycoords[i]))
-                    log.info(traceback.format_exc())
+                    #log.exception(traceback.format_exc())
+                    log.exception('problem running [fit_moffat_single] on object '
+                                  'at pixel coordinates: {}, {}; returning zeros'
+                                  .format(xcoords[i], ycoords[i]))
                     continue
 
 
@@ -7301,11 +7303,11 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3, log=None):
                                                   check_finite=True)
         except Exception as e:
             if log is not None:
-                log.info('Warning: spline fit in [inter_pix] to region {} with '
-                         'slice {} failed; pixel values not updated'
-                         .format(i, obj_slices[i]))
-                log.info(traceback.format_exc())
-        else:    
+                #log.exception(traceback.format_exc())
+                log.exception('spline fit in [inter_pix] to region {} with '
+                              'slice {} failed; pixel values not updated'
+                              .format(i, obj_slices[i]))
+        else:
             # replace masked entries with interpolated values
             x_fill = x_row[mask_row]
             data_replaced[y_index, x_fill] = fit_spline(x_fill)
@@ -8538,8 +8540,8 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
                                limit_ldac=False, nthreads=nthreads, log=log)
         except Exception as e:
             PSFEx_processed = False
-            log.info(traceback.format_exc())
-            log.error('exception was raised during [run_psfex]: {}'.format(e))  
+            #log.exception(traceback.format_exc())
+            log.exception('exception was raised during [run_psfex]: {}'.format(e))
         else:
             PSFEx_processed = True
         header['PSF-P'] = (PSFEx_processed, 'successfully processed by PSFEx?')
@@ -8773,7 +8775,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             fit_moffat(psf_ima, nx, ny, header, pixscale, base_psf, log,
                        fit_gauss=True)
         except Exception as e:
-            log.info(traceback.format_exc())
+            #log.info(traceback.format_exc())
             log.info('exception was raised during [fit_moffat]: {}'.format(e))
 
 
