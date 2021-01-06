@@ -10332,9 +10332,9 @@ def ldac2fits (cat_ldac, cat_fits, log=None):
 
     # now that normal fits catalog (not LDAC) has been created, rename
     # some of the columns using the function rename_catcols
-    rename_catcols(cat_out, log=log)
+    rename_catcols(cat_fits, log=log)
 
-        
+    
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='ldac2fits', log=log)
 
@@ -10497,7 +10497,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     index = ((data['FLAGS']==0) & (data['FLUX_AUTO']>0.) &
              (data['FLUXERR_AUTO']>0.) &
              (data['FLUX_AUTO']/data['FLUXERR_AUTO']>20.))
-    fwhm = data['FWHM'][index]
+    fwhm = data['FWHM_IMAGE'][index]
     class_star = data['CLASS_STAR'][index]
     flux_auto = data['FLUX_AUTO'][index]
     mag_auto = -2.5*np.log10(flux_auto)
@@ -10547,7 +10547,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
         # to get initial values before discarding flagged objects
         index = (data['FLUX_AUTO']>0.)
-        fwhm = data['FWHM'][index]
+        fwhm = data['FWHM_IMAGE'][index]
         flux_auto = data['FLUX_AUTO'][index]
         mag_auto = -2.5*np.log10(flux_auto)
 
@@ -10593,13 +10593,13 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
             
     # show catalog entries with very low FWHM
     if get_par(set_zogy.make_plots,tel):
-        mask_lowfwhm = (data['FWHM'] < fwhm_median-3*fwhm_std)
+        mask_lowfwhm = (data['FWHM_IMAGE'] < fwhm_median-3*fwhm_std)
         result = prep_ds9regions('{}_lowfwhm_ds9regions.txt'
                                  .format(cat_ldac.replace('.fits','')),
                                  data['XWIN_IMAGE'][mask_lowfwhm],
                                  data['YWIN_IMAGE'][mask_lowfwhm],
                                  radius=5., width=2, color='purple',
-                                 value=data['FWHM'][mask_lowfwhm])
+                                 value=data['FWHM_IMAGE'][mask_lowfwhm])
 
         
     if get_par(set_zogy.timing,tel):
