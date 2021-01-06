@@ -2863,17 +2863,39 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
     # read positive table
     table_trans_pos = Table.read(sexcat_pos)
-    # read off values at indices of X_PEAK and Y_PEAK
-    index_x = table_trans_pos['X_PEAK'] - 1
-    index_y = table_trans_pos['Y_PEAK'] - 1
+    # in case X_PEAK or Y_PEAK are not available, e.g. when the
+    # full-source extraction is done separately from the transient
+    # extraction, take the pixel containing the object center
+    if not ('X_PEAK' in table_trans_pos.colnames and 
+            'Y_PEAK' in table_trans_pos.colnames):
+        index_x = (table_trans_pos['X_POS']-0.5).astype(int)
+        index_y = (table_trans_pos['Y_POS']-0.5).astype(int)
+        # add X_PEAK and Y_PEAK to table
+        table_trans_pos.add_column (index_x+1, name='X_PEAK')
+        table_trans_pos.add_column (index_y+1, name='Y_PEAK')
+    else:
+        # read off values at indices of X_PEAK and Y_PEAK
+        index_x = table_trans_pos['X_PEAK'] - 1
+        index_y = table_trans_pos['Y_PEAK'] - 1
+
     Scorr_peak_pos = data_Scorr_bkgsub[index_y, index_x]
     # add 'SCORR_PEAK' to table
     table_trans_pos.add_column (Scorr_peak_pos, name='SCORR_PEAK')
 
+
     # same for negative
     table_trans_neg = Table.read(sexcat_neg)
-    index_x = table_trans_neg['X_PEAK'] - 1
-    index_y = table_trans_neg['Y_PEAK'] - 1
+    if not ('X_PEAK' in table_trans_neg.colnames and 
+            'Y_PEAK' in table_trans_neg.colnames):
+        index_x = (table_trans_neg['X_POS']-0.5).astype(int)
+        index_y = (table_trans_neg['Y_POS']-0.5).astype(int)
+        # add X_PEAK and Y_PEAK to table
+        table_trans_neg.add_column (index_x+1, name='X_PEAK')
+        table_trans_neg.add_column (index_y+1, name='Y_PEAK')
+    else:
+        index_x = table_trans_neg['X_PEAK'] - 1
+        index_y = table_trans_neg['Y_PEAK'] - 1
+
     Scorr_peak_neg = data_Scorr_bkgsub[index_y, index_x]
     table_trans_neg.add_column (Scorr_peak_neg, name='SCORR_PEAK')
 
@@ -11033,7 +11055,9 @@ def update_bkgcol (base, header, log=None):
     """
 
     fits_cat = '{}_cat.fits'.format(base)
-        
+    log.info ('updating background column of fits table {}'.format(fits_cat))
+
+
     # read [data_bkg] from full or mini fits files
     fits_bkg = '{}_bkg.fits'.format(base)
     fits_bkg_mini = '{}_bkg_mini.fits'.format(base)
