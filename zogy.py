@@ -7167,8 +7167,8 @@ def get_zone_indices (dec_center, fov_half_deg, zone_size=60):
     
 ################################################################################
 
-def get_airmass (ra, dec, obsdate, lat, lon, height, log=None):
-
+def get_airmass (ra, dec, obsdate, lat, lon, height, get_altaz=False, log=None):
+    
     if log is not None:
         log.info('executing get_airmass ...')
 
@@ -7176,8 +7176,11 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, log=None):
     coords = SkyCoord(ra, dec, frame='icrs', unit='deg')
     coords_altaz = coords.transform_to(AltAz(obstime=Time(obsdate), location=location))
 
-    return coords_altaz.secz
-
+    if get_altaz:
+        return coords_altaz.secz, coords_altaz.alt.deg, coords_altaz.az.deg
+    else:
+        return coords_altaz.secz
+    
         
 ################################################################################
 
