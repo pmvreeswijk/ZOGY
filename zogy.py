@@ -8971,33 +8971,33 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, log,
                               .format(label))
 
         
-    header['PSF-EMIN'] = (np.amin(elongation),
-                          'min. elongation of {} fit to subimage PSFs'
-                          .format(label))
-    header['PSF-EMAX'] = (np.amax(elongation),
-                          'max. elongation of {} fit to subimage PSFs'
-                          .format(label))
-    header['PSF-EMED'] = (np.median(elongation),
-                          'median elongation of {} fit to subimage PSFs'
-                          .format(label))
-    header['PSF-ESTD'] = (np.std(elongation),
-                          'sigma (STD) elongation of {} fit to subimage PSFs'
-                          .format(label))
-
+    header['PSF-EMN{}'.format(label[0])] = (np.amin(elongation),
+                                            'min. elongation of {} fit to '
+                                            'subimage PSFs'.format(label))
+    header['PSF-EMX{}'.format(label[0])] = (np.amax(elongation),
+                                            'max. elongation of {} fit to '
+                                            'subimage PSFs'.format(label))
+    header['PSF-EMD{}'.format(label[0])] = (np.median(elongation),
+                                            'median elongation of {} fit to '
+                                            'subimage PSFs'.format(label))
+    header['PSF-EST{}'.format(label[0])] = (np.std(elongation),
+                                            'sigma (STD) elongation of {} fit '
+                                            'to subimage PSFs'.format(label))
+    
     fwhm_ave = (fwhm_max + fwhm_min) / 2
     seeing_ave = pixscale * fwhm_ave
-    header['PSF-FMIN'] = (np.amin(fwhm_ave),
-                          '[pix] min. mean FWHM of {} fits'
-                          .format(label))
-    header['PSF-FMAX'] = (np.amax(fwhm_ave),
-                          '[pix] max. mean FWHM of {} fits'
-                          .format(label))
-    header['PSF-FMED'] = (np.median(fwhm_ave),
-                          '[pix] median mean FWHM of {} fits'
-                          .format(label))
-    header['PSF-FSTD'] = (np.std(fwhm_ave),
-                          '[pix] sigma (STD) mean FWHM of {} fits'
-                          .format(label))
+    header['PSF-FMN{}'.format(label[0])] = (np.amin(fwhm_ave),
+                                            '[pix] min. mean FWHM of {} fits'
+                                            .format(label))
+    header['PSF-FMX{}'.format(label[0])] = (np.amax(fwhm_ave),
+                                            '[pix] max. mean FWHM of {} fits'
+                                            .format(label))
+    header['PSF-FMD{}'.format(label[0])] = (np.median(fwhm_ave),
+                                            '[pix] median mean FWHM of {} fits'
+                                            .format(label))
+    header['PSF-FST{}'.format(label[0])] = (np.std(fwhm_ave),
+                                            '[pix] sigma (STD) mean FWHM of {} '
+                                            'fits'.format(label))
 
 
     if get_par(set_zogy.make_plots,tel):
