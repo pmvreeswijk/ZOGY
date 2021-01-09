@@ -180,18 +180,21 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if log is None:
         log = logging.getLogger()  # create logger
         log.setLevel(logging.INFO)  # set level of logger
-        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')  # set format of logger
+        # set format of logger
+        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         logging.Formatter.converter = time.gmtime  # convert time in logger to UCT
         if new_fits is not None:
-            filehandler = logging.FileHandler(new_fits.replace('.fits', '.log'), 'w+')  # create log file
+            filehandler = logging.FileHandler(new_fits.replace('.fits', '.log'),
+                                              'w+')  # create log file
         elif ref_fits is not None:
-            filehandler = logging.FileHandler(ref_fits.replace('.fits', '.log'), 'w+')  # create log file
+            filehandler = logging.FileHandler(ref_fits.replace('.fits', '.log'),
+                                              'w+')  # create log file
         else:
             filehandler = logging.FileHandler('log', 'w+')  # create log file
         filehandler.setFormatter(formatter)  # add format to log file
         log.addHandler(filehandler)  # link log file to logger
         if get_par(set_zogy.verbose,tel):
-            streamhandler = logging.StreamHandler()  # create print to screen logging
+            streamhandler = logging.StreamHandler()  # create screen logging
             streamhandler.setFormatter(formatter)  # add format to screen logging
             log.addHandler(streamhandler)  # link logger to screen logging
 
@@ -206,8 +209,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             if os.path.isfile(image_fits):
                 ima_bool = True
                 # check that image is not in compressed format
-                with fits.open(image_fits) as hdulist:
-                    header_temp = hdulist[0].header
+                header_temp = read_hdulist (image_fits, get_data=False,
+                                            get_header=True)
                 if header_temp['NAXIS'] != 2:
                     log.critical('input images need to be uncompressed')
                     raise RuntimeError
@@ -1297,13 +1300,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         else:
             
             # images were already created above, just update the headers here
-            with fits.open(fits_D, 'update') as hdulist:
+            with fits.open(fits_D, 'update', memmap=True) as hdulist:
                 hdulist[0].header = header_tmp
-            with fits.open(fits_Scorr, 'update') as hdulist:
+            with fits.open(fits_Scorr, 'update', memmap=True) as hdulist:
                 hdulist[0].header = header_tmp
-            with fits.open(fits_Fpsf, 'update') as hdulist:
+            with fits.open(fits_Fpsf, 'update', memmap=True) as hdulist:
                 hdulist[0].header = header_tmp
-            with fits.open(fits_Fpsferr, 'update') as hdulist:
+            with fits.open(fits_Fpsferr, 'update', memmap=True) as hdulist:
                 hdulist[0].header = header_tmp
             
             mem_use (label='just after updating headers', log=log)
@@ -2266,68 +2269,6 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
 
 ################################################################################
 
-def read_hdulist_old (fits_file, ext_data=None, ext_header=None, dtype=None,
-                  columns=None):
-
-
-    # read data if [ext_data] is defined
-    if ext_data is not None:
-
-        if type(ext_data)==int:
-            # if single extension is provided, read data into fitsrec array
-            with fits.open(fits_file) as hdulist:
-                data = hdulist[ext_data].data
-
-            # convert to [dtype] if it is defined
-            if dtype is not None:
-                data = data.astype(dtype, copy=False)
-
-        else:
-            # if multiple extensions are provided, read data into Table array
-            for n_ext, ext in enumerate(ext_data):
-                with fits.open(fits_file) as hdulist:
-                    data_temp = hdulist[ext].data
-                # convert to table, as otherwise concatenation of
-                # extensions below using [stack_arrays] is slow
-                data_temp = Table(data_temp)
-                # could also read fits extension into Table directly,
-                # but this is about twice as slow as the 2 steps above
-                #data_temp = Table.read(fits_file, hdu=ext)
-                if n_ext==0:
-                    data = data_temp
-                else:
-                    #data = stack_arrays((data, data_temp), asrecarray=True, usemask=False)
-                    # following does not work if data is a fitsrec array and the
-                    # array contains boolean fields, as these are incorrectly converted 
-                    data = np.concatenate([data, data_temp])
-
-
-    # read header if [ext_header] is defined
-    if ext_header is not None:
-        with fits.open(fits_file) as hdulist:
-            header = hdulist[ext_header].header
-            
-    if columns is not None:
-        # only return defined columns
-        # no check is done whether they exist or not
-        return [data[col] for col in columns]
-    else:
-        # return data and header depending on whether [ext_data]
-        # and [ext_header] are defined or not
-        if ext_data is not None:
-            if ext_header is not None:
-                return data, header
-            else:
-                return data
-        else:
-            if ext_header is not None:
-                return header
-            else:
-                return 
-            
-
-################################################################################
-
 def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 exptime=0, apphot_radii=None, data_thumbnails=None,
                 keys_thumbnails=None, size_thumbnails=100, ML_calc_prob=False,
@@ -2346,7 +2287,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     if cat_in is not None:
 
         # read data and header of [cat_in]
-        with fits.open(cat_in) as hdulist:
+        with fits.open(cat_in, memmap=True) as hdulist:
             prihdu = hdulist[0]
             header = hdulist[1].header
             data = hdulist[1].data
@@ -5650,7 +5591,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 log.info('updating header of {}'.format(fits2remap))
                 header2remap['DATEFILE'] = (Time.now().isot,
                                             'UTC date of writing file')
-                with fits.open(fits2remap, 'update') as hdulist:
+                with fits.open(fits2remap, 'update', memmap=True) as hdulist:
                     hdulist[0].header = header2remap
                 # previously overwrote not just header but also the data:
                 #fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
@@ -6394,7 +6335,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     # update header of input fits image with keywords added by PSFEx
     # and photometric calibration
-    with fits.open('{}.fits'.format(base), 'update') as hdulist:
+    with fits.open('{}.fits'.format(base), 'update', memmap=True) as hdulist:
         hdulist[0].header = header
         
         
@@ -6496,7 +6437,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # save fftdata
 
 
-    
     #return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std, fftdata_mask
     return fftdata, psf, psf_orig, fftdata_bkg_std, fftdata_mask
     
@@ -11095,7 +11035,7 @@ def update_bkgcol (base, header, log=None):
     # the individual frames and no background image or mini image is
     # available
     if 'data_bkg' in locals():
-        with fits.open(fits_cat, mode='update') as hdulist:
+        with fits.open(fits_cat, mode='update', memmap=True) as hdulist:
             data = hdulist[-1].data
             if 'BACKGROUND' in data.dtype.names:
                 if log is not None:
@@ -11211,7 +11151,7 @@ def rename_catcols (cat_in, hdu_ext=1, log=None):
     # character_as_bytes determines whether to return bytes for string
     # columns when accessed from the HDU; saves some memory and is not
     # relevant as none of the [cat_in] column datatypes are strings
-    with fits.open(cat_in, mode='update') as hdulist:
+    with fits.open(cat_in, mode='update', memmap=True) as hdulist:
         hdulist[hdu_ext] = fits.table_to_hdu(table, character_as_bytes=True)
 
 
