@@ -26,7 +26,7 @@ import numpy as np
 from numpy.polynomial.polynomial import polyvander2d, polygrid2d
 
 from numpy.lib.recfunctions import append_fields, drop_fields
-from numpy.lib.recfunctions import rename_fields, stack_arrays
+#from numpy.lib.recfunctions import rename_fields, stack_arrays
 import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
@@ -2862,7 +2862,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
 
     # read positive table
-    table_trans_pos = Table.read(sexcat_pos)
+    table_trans_pos = Table.read(sexcat_pos, memmap=True)
     # read off values at indices of X_PEAK and Y_PEAK
     index_x = table_trans_pos['X_PEAK'] - 1
     index_y = table_trans_pos['Y_PEAK'] - 1
@@ -2871,7 +2871,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans_pos.add_column (Scorr_peak_pos, name='SCORR_PEAK')
 
     # same for negative
-    table_trans_neg = Table.read(sexcat_neg)
+    table_trans_neg = Table.read(sexcat_neg, memmap=True)
     index_x = table_trans_neg['X_PEAK'] - 1
     index_y = table_trans_neg['Y_PEAK'] - 1
     Scorr_peak_neg = data_Scorr_bkgsub[index_y, index_x]
@@ -5754,16 +5754,16 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     # first read SExtractor fits table
     sexcat = '{}_cat.fits'.format(base)
-    data_sex = read_hdulist (sexcat)
+    table_sex = Table.read (sexcat)
 
-    
+
     # switch to rerun some parts (source extractor, astrometry.net,
     # psfex) even if those were executed done
     redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
             (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
     
 
-    if ('E_FLUX_OPT' not in data_sex.dtype.names or redo or
+    if ('E_FLUX_OPT' not in table_sex.colnames or redo or
         # also execute this block if PSF-RADP in header is not equal
         # to psf_rad_phot in the settings file
         not ('PSF-RADP' in header and
@@ -5774,11 +5774,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         log.info('deriving optimal fluxes ...')
     
         # read in positions and their errors
-        xwin = data_sex['X_POS']
-        ywin = data_sex['Y_POS']
-        errx2win = data_sex['XVAR_POS']
-        erry2win = data_sex['YVAR_POS']
-        errxywin = data_sex['XYCOV_POS']
+        xwin = table_sex['X_POS']
+        ywin = table_sex['Y_POS']
+        errx2win = table_sex['XVAR_POS']
+        erry2win = table_sex['YVAR_POS']
+        errxywin = table_sex['XYCOV_POS']
 
         
         psfex_bintable = '{}_psf.fits'.format(base)
@@ -5867,11 +5867,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                               'limiting flux'.format(nsigma))
 
         # get airmasses for SExtractor catalog sources
-        ra_sex = data_sex['RA']
-        dec_sex = data_sex['DEC']
-        flags_sex = data_sex['FLAGS']
-        xcoords_sex = data_sex['X_POS']
-        ycoords_sex = data_sex['Y_POS']
+        ra_sex = table_sex['RA']
+        dec_sex = table_sex['DEC']
+        flags_sex = table_sex['FLAGS']
+        xcoords_sex = table_sex['X_POS']
+        ycoords_sex = table_sex['Y_POS']
         
         lat = get_par(set_zogy.obs_lat,tel)
         lon = get_par(set_zogy.obs_lon,tel)
@@ -6252,37 +6252,34 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # if 'E_FLUX_OPT' and 'E_FLUXERR_OPT' columns are already present
         # in catalog, delete them; this could happen in case
         # [set_zogy.redo] is set to True
-        colnames = data_sex.dtype.names
-        if 'E_FLUX_OPT' in colnames:
-            drop_fields(data_sex, ['E_FLUX_OPT', 'E_FLUXERR_OPT'])
+        if 'E_FLUX_OPT' in table_sex.colnames:
+            del table_sex['E_FLUX_OPT', 'E_FLUXERR_OPT']
+
 
         # add optimal flux columns to table
-        data_sex = append_fields(data_sex, ['E_FLUX_OPT', 'E_FLUXERR_OPT'],
-                                 [flux_opt, fluxerr_opt], usemask=False,
-                                 asrecarray=True)
+        table_sex['E_FLUX_OPT'] = flux_opt
+        table_sex['E_FLUXERR_OPT'] = fluxerr_opt
+
 
         # split aperture flux with shape (nrows, napps) into separate
         # columns
         apphot_radii = get_par(set_zogy.apphot_radii,tel)
-        colnames = data_sex.dtype.names
-        for col in colnames:
+        for col in table_sex.colnames:
             if col=='E_FLUX_APER' or col=='E_FLUXERR_APER':
                 # update column names of aperture fluxes to include radii
                 # loop apertures
                 for i_ap in range(len(apphot_radii)):
                     # rename column
                     col_new = '{}_R{}xFWHM'.format(col, apphot_radii[i_ap])
-                    # append it to data
-                    data_sex = append_fields(data_sex, col_new,
-                                             data_sex[col][:,i_ap],
-                                             usemask=False, asrecarray=True)
+                    # append it to table_sex
+                    table_sex[col_new] = table_sex[col][:,i_ap]
 
                 # delete original column
-                data_sex = drop_fields(data_sex, col)
+                del table_sex[col]
 
 
         # convert fluxes to magnitudes and add to catalog
-        colnames = data_sex.dtype.names
+        colnames = table_sex.colnames
         for col in colnames:
             if 'E_FLUX_' in col and 'RADIUS' not in col and 'FLUX_MAX' not in col:
                 col_flux = col
@@ -6290,35 +6287,34 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 col_mag = col.replace('E_FLUX', 'MAG')
                 col_magerr = col.replace('E_FLUX', 'MAGERR')
 
-                mag_tmp, magerr_tmp = apply_zp(data_sex[col_flux], zp, airmass_sex,
+                mag_tmp, magerr_tmp = apply_zp(table_sex[col_flux], zp, airmass_sex,
                                                exptime, filt, log,
-                                               fluxerr=data_sex[col_fluxerr],
+                                               fluxerr=table_sex[col_fluxerr],
                                                zp_std=None)
-
                 if col_mag in colnames:
-                    data_sex = drop_fields(data_sex, [col_mag, col_magerr])
-                
+                    del table_sex[col_mag, col_magerr]
+
                 # add magnitude columns to table
-                data_sex = append_fields(data_sex, [col_mag, col_magerr],
-                                         [mag_tmp, magerr_tmp], usemask=False,
-                                         asrecarray=True)
-                
+                table_sex[col_mag] = mag_tmp
+                table_sex[col_magerr] = magerr_tmp
+
+
             # also convert MU_MAX in the ref catalog from e- to
             # magnitudes (per pix**2); SExtractor calculation is as
             # follows: -2.5 log10 (E_FLUX_MAX (in e-) / pixscale**2), so
             # easiest to use E_FLUX_MAX to convert to magnitude
             if 'MU_MAX' in col:
                 if 'E_FLUX_MAX' in colnames:
-                    flux_max = data_sex['E_FLUX_MAX']
+                    flux_max = table_sex['E_FLUX_MAX']
                 else:
-                    flux_max = 10**(-0.4*data_sex['MU_MAX']) * pixscale**2
+                    flux_max = 10**(-0.4*table_sex['MU_MAX']) * pixscale**2
                 
                 mag_tmp = apply_zp(flux_max, zp, airmass_sex,
                                    exptime, filt, log, zp_std=None)
-                data_sex['MU_MAX'] = mag_tmp
+                table_sex['MU_MAX'] = mag_tmp
 
 
-        log.info ('data_sex column names: {}'.format(data_sex.dtype.names))
+        log.info ('table_sex column names: {}'.format(table_sex.colnames))
                 
                 
         # discard sources with flux S/N below get_par(set_zogy.source_nsigma,tel)
@@ -6348,9 +6344,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         header['NOBJECTS'] = (np.sum(mask_nsigma), 'number of >= {}-sigma '
                               'objects'.format(nsigma))
 
-        # write updated catalog to file
-        fits.writeto(sexcat, data_sex[mask_nsigma], overwrite=True)
-        
+        # write updated fits table to file
+        table_sex = table_sex[mask_nsigma]
+        table_sex.write (sexcat, format='fits', overwrite=True)
+
+
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t2, label='creating binary fits table '
                                'including fluxopt', log=log)
@@ -6460,202 +6458,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
 
 
-    if get_par(set_zogy.make_plots,tel) and 'E_FLUX_AUTO' in data_sex.dtype.names:
-
+    # call function [prep_plots] to make various plots
+    if get_par(set_zogy.make_plots,tel) and 'E_FLUX_AUTO' in table_sex.colnames:
         # in case optimal flux block above was skipped, the SExtractor
         # catalogue with E_FLUX_OPT needs to be read in here to be able
         # to make the plots below
-        try:
-            data_sex['E_FLUX_OPT'][0]
-        except NameError:
-            # read SExtractor fits table
-            data_sex = read_hdulist (sexcat)
-            # and define flux_opt and fluxerr_opt
-            flux_opt = data_sex['E_FLUX_OPT']
-            fluxerr_opt = data_sex['E_FLUXERR_OPT']
-            # and corresponding calibrated magnitudes
-            if os.path.isfile(get_par(set_zogy.cal_cat,tel)) and 'mag_opt' in locals():
-                mag_opt = data_sex['MAG_OPT']
-                magerr_opt = data_sex['MAGERR_OPT']
-            if mypsffit:
-                flux_mypsf = data_sex['E_FLUX_PSF']
-                fluxerr_mypsf = data_sex['E_FLUXERR_PSF']
-                x_psf = data_sex['X_PSF']
-                y_psf = data_sex['Y_PSF']
-            # read a few extra header keywords needed below
-            keywords = ['exptime', 'filter', 'obsdate']
-            exptime, filt, obsdate = read_header(header, keywords, log=log)
-        else:
-            if get_par(set_zogy.verbose,tel):
-                log.info('data_sex array is already defined; no need to read it in')
+        if 'E_FLUX_OPT' not in table_sex.colnames:
+            table_sex = Table.read(sexcat, memmap=True)
 
-        # filter arrays by FLAG
-        index = ((data_sex['E_FLUX_AUTO']>0) & (data_sex['FLAGS']==0))
-        class_star = data_sex['CLASS_STAR'][index]
-        flux_auto = data_sex['E_FLUX_AUTO'][index] * gain
-        fluxerr_auto = data_sex['E_FLUXERR_AUTO'][index] * gain
-        s2n_auto = flux_auto / fluxerr_auto
-        flux_opt = data_sex['E_FLUX_OPT'][index]
-        fluxerr_opt = data_sex['E_FLUXERR_OPT'][index]
-        if os.path.isfile(get_par(set_zogy.cal_cat,tel)) and 'mag_opt' in locals():
-            mag_opt = data_sex['MAG_OPT'][index]
-            magerr_opt = data_sex['MAGERR_OPT'][index]
-        x_win = data_sex['X_POS'][index]
-        y_win = data_sex['Y_POS'][index]
-        fwhm_image = data_sex['FWHM'][index]
-        if mypsffit:
-            flux_mypsf = flux_psf[index]
-            fluxerr_mypsf = fluxerr_psf[index]
-            x_psf = x_psf[index]
-            y_psf = y_psf[index]
-            # write catalog with psffit to output
-            fits.writeto(sexcat.replace('.fits','_psffit.fits'), 
-                         data_sex, overwrite=True)
-            
-        if os.path.isfile(get_par(set_zogy.cal_cat,tel)) and 'mag_opt' in locals():
-            # histogram of all 'good' objects as a function of magnitude
-            bins = np.arange(12, 22, 0.2)
-            plt.hist(np.ravel(mag_opt), bins, color='tab:blue')
-            x1,x2,y1,y2 = plt.axis()
-            title = 'filter: {}, exptime: {:.0f}s'.format(filt, exptime)
-            if 'limmag_5sigma' in locals():
-                limmag = np.float(limmag_5sigma)
-                plt.plot([limmag, limmag], [y1,y2], color='black', linestyle='--')
-                title = '{}, lim. mag (5$\sigma$; dashed line): {:.2f}'.format(title, limmag)
-            plt.title(title)
-            plt.xlabel('{} magnitude'.format(filt))
-            plt.ylabel('number')
-            plt.savefig('{}_magopt.pdf'.format(base))
-            if get_par(set_zogy.show_plots,tel): plt.show()
-            plt.close()
-
-        # compare flux_opt with flux_auto
-        flux_diff = (flux_opt - flux_auto) / flux_auto
-        limits = (1,2*np.amax(s2n_auto),-0.3,0.3)
-        plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                      xlabel='S/N (AUTO)',
-                      ylabel='(E_FLUX_OPT - E_FLUX_AUTO) / E_FLUX_AUTO',
-                      filename='{}_fluxopt_vs_fluxauto.pdf'.format(base),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
-
-        if mypsffit:
-            # compare flux_mypsf with flux_auto
-            flux_diff = (flux_mypsf - flux_auto) / flux_auto
-            plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)',
-                          ylabel='(E_FLUX_MYPSF - E_FLUX_AUTO) / E_FLUX_AUTO', 
-                          filename='{}_fluxmypsf_vs_fluxauto.pdf'.format(base),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
-        
-            # compare flux_opt with flux_mypsf
-            flux_diff = (flux_opt - flux_mypsf) / flux_mypsf
-            plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)',
-                          ylabel='(E_FLUX_OPT - E_FLUX_MYPSF) / E_FLUX_MYPSF',
-                          filename='{}_fluxopt_vs_fluxmypsf.pdf'.format(base),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
-
-            # compare x_win and y_win with x_psf and y_psf
-            dist_win_psf = np.sqrt((x_win-x_psf)**2+(y_win-y_psf)**2)
-            plot_scatter (s2n_auto, dist_win_psf, (1,2*np.amax(s2n_auto),-2.,2.),
-                          class_star, xlabel='S/N (AUTO)',
-                          ylabel='distance XY_WIN vs. XY_MYPSF',
-                          filename='{}_xyposition_win_vs_mypsf_class.pdf'.format(base),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
-            
-            plot_scatter (s2n_auto, dist_win_psf, (1,2*np.amax(s2n_auto),-2.,2.),
-                          fwhm_image, xlabel='S/N (AUTO)',
-                          ylabel='distance XY_WIN vs. XY_MYPSF', 
-                          filename='{}_xyposition_win_vs_mypsf_fwhm.pdf'.format(base),
-                          title='rainbow color coding follows FWHM')
-
-            
-        # compare flux_opt with flux_aper
-        for i in range(len(get_par(set_zogy.apphot_radii,tel))):
-
-            aper = get_par(set_zogy.apphot_radii[i],tel)
-            field = 'E_FLUX_APER'
-            field_err = 'E_FLUXERR_APER'
-            field_format = 'E_FLUX_APER_R{}xFWHM'.format(aper)
-            field_format_err = 'E_FLUXERR_APER_R{}xFWHM'.format(aper)
-
-            if field in data_sex.dtype.names:
-                flux_aper = data_sex[field][index,i] * gain
-                fluxerr_aper = data_sex[field_err][index,i] * gain
-            elif field_format in data_sex.dtype.names:
-                flux_aper = data_sex[field_format][index] * gain
-                fluxerr_aper = data_sex[field_format_err][index] * gain
-                
-            flux_diff = (flux_opt - flux_aper) / flux_aper
-            xlabel = 'S/N (AUTO)'
-            ylabel = '(E_FLUX_OPT - {}) / {}'.format(field_format, field_format)
-
-            plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel=xlabel, ylabel=ylabel,
-                          filename='{}_fluxopt_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
-
-            flux_diff = (flux_auto - flux_aper) / flux_aper
-            ylabel = '(E_FLUX_AUTO - {}) / {}'.format(field_format, field_format)
-            plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel=xlabel, ylabel=ylabel,
-                          filename='{}_fluxauto_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
+        prep_plots (table_sex, header, base, log=log)
 
 
-            if mypsffit:
-                flux_diff = (flux_mypsf - flux_aper) / flux_aper
-                ylabel = '(E_FLUX_MYPSF - {}) / {}'.format(field_format, field_format)
-                plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                              xlabel=xlabel, ylabel=ylabel, 
-                              filename='{}_fluxmypsf_vs_fluxaper_{}xFWHM.pdf'.format(base, aper),
-                              title='rainbow color coding follows CLASS_STAR: '
-                              'from purple (star) to red (galaxy)')
 
-
-        # compare with flux_psf if psffit catalog available
-        sexcat_ldac_psffit = '{}_cat_ldac_psffit.fits'.format(base)
-        if os.path.isfile(sexcat_ldac_psffit):
-            # read SExtractor psffit fits table
-            data_sex = read_hdulist (sexcat_ldac_psffit)
-                
-            flux_sexpsf = data_sex['E_FLUX_PSF'][index] * gain
-            fluxerr_sexpsf = data_sex['E_FLUXERR_PSF'][index] * gain
-            s2n_sexpsf = data_sex['E_FLUX_PSF'][index] / data_sex['E_FLUXERR_PSF'][index]
-            
-            flux_diff = (flux_sexpsf - flux_opt) / flux_opt
-            plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)',
-                          ylabel='(E_FLUX_SEXPSF - E_FLUX_OPT) / E_FLUX_OPT', 
-                          filename='{}_fluxsexpsf_vs_fluxopt.pdf'.format(base),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
-
-            if mypsffit:
-                # and compare 'my' psf with SExtractor psf
-                flux_diff = (flux_sexpsf - flux_mypsf) / flux_mypsf
-                plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                              xlabel='S/N (AUTO)',
-                              ylabel='(E_FLUX_SEXPSF - E_FLUX_MYPSF) / E_FLUX_MYPSF', 
-                              filename='{}_fluxsexpsf_vs_fluxmypsf.pdf'.format(base),
-                              title='rainbow color coding follows CLASS_STAR: '
-                              'from purple (star) to red (galaxy)')
-            
-            # and compare auto with SExtractor psf
-            flux_diff = (flux_sexpsf - flux_auto) / flux_auto
-            plot_scatter (s2n_auto, flux_diff, limits, class_star,
-                          xlabel='S/N (AUTO)', ylabel='(E_FLUX_SEXPSF - E_FLUX_AUTO) / E_FLUX_AUTO', 
-                          filename='{}_fluxsexpsf_vs_fluxauto.pdf'.format(base),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
-
-        
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='prep_optimal_subtraction', log=log)
 
@@ -6688,6 +6502,213 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     #return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std, fftdata_mask
     return fftdata, psf, psf_orig, fftdata_bkg_std, fftdata_mask
     
+
+################################################################################
+
+def prep_plots (table, header, base, log=None):
+    
+    # and define flux_opt and fluxerr_opt
+    flux_opt = table['E_FLUX_OPT']
+    fluxerr_opt = table['E_FLUXERR_OPT']
+    # and corresponding calibrated magnitudes
+    if 'MAG_OPT' in table.colnames:
+        mag_opt = table['MAG_OPT']
+        magerr_opt = table['MAGERR_OPT']
+
+    mypsffit = get_par(set_zogy.psffit,tel)
+    if mypsffit:
+        flux_mypsf = table['E_FLUX_PSF']
+        fluxerr_mypsf = table['E_FLUXERR_PSF']
+        x_psf = table['X_PSF']
+        y_psf = table['Y_PSF']
+
+    # read a few extra header keywords needed below
+    keywords = ['gain', 'exptime', 'filter', 'obsdate']
+    gain, exptime, filt, obsdate = read_header(header, keywords, log=log)
+
+    # filter arrays by FLAG
+    index = ((table['E_FLUX_AUTO']>0) & (table['FLAGS']==0))
+    class_star = table['CLASS_STAR'][index]
+    flux_auto = table['E_FLUX_AUTO'][index] * gain
+    fluxerr_auto = table['E_FLUXERR_AUTO'][index] * gain
+    s2n_auto = flux_auto / fluxerr_auto
+    flux_opt = table['E_FLUX_OPT'][index]
+    fluxerr_opt = table['E_FLUXERR_OPT'][index]
+
+    if 'MAG_OPT' in table.colnames:
+        mag_opt = table['MAG_OPT'][index]
+        magerr_opt = table['MAGERR_OPT'][index]
+
+        x_array = mag_opt
+        xlabel = 'magnitude (OPT)'
+        limits = (np.amin(x_array)-0.1,np.amax(x_array)+0.1,-0.3,0.3)
+
+    else:
+        x_array = s2n_auto
+        xlabel = 'S/N (AUTO)'
+        limits = (1,2*np.amax(x_array),-0.3,0.3)
+
+
+    x_win = table['X_POS'][index]
+    y_win = table['Y_POS'][index]
+    fwhm_image = table['FWHM'][index]
+
+    if mypsffit:
+        flux_mypsf = flux_psf[index]
+        fluxerr_mypsf = fluxerr_psf[index]
+        x_psf = x_psf[index]
+        y_psf = y_psf[index]
+        # write catalog with psffit to output
+        table.write(fits_cat.replace('.fits','_psffit.fits'), format='fits',
+                    overwrite=True)
+            
+    if 'MAG_OPT' in table.colnames:
+        # histogram of all 'good' objects as a function of magnitude
+        bins = np.arange(12, 22, 0.2)
+        plt.hist(np.ravel(mag_opt), bins, color='tab:blue')
+        x1,x2,y1,y2 = plt.axis()
+        title = 'filter: {}, exptime: {:.0f}s'.format(filt, exptime)
+        if 'LIMMAG' in header:
+            limmag = np.float(header['LIMMAG'])
+            plt.plot([limmag, limmag], [y1,y2], color='black', linestyle='--')
+            title = ('{}, lim. mag (5$\sigma$; dashed line): {:.2f}'
+                     .format(title, limmag))
+
+        plt.title(title)
+        plt.xlabel('{} magnitude'.format(filt))
+        plt.ylabel('number')
+        plt.savefig('{}_magopt.pdf'.format(base))
+        if get_par(set_zogy.show_plots,tel): plt.show()
+        plt.close()
+
+    # compare flux_opt with flux_auto
+    dmag = -2.5*np.log(flux_opt/flux_auto)
+    plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                  ylabel='delta {}-band magnitude (OPT - AUTO)'.format(filt),
+                  filename='{}_opt_vs_auto.pdf'.format(base),
+                  title='rainbow color coding follows CLASS_STAR: '
+                  'from purple (star) to red (galaxy)')
+
+    if mypsffit:
+        # compare flux_mypsf with flux_auto
+        dmag = -2.5*np.log(flux_mypsf/flux_auto)
+        plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                      ylabel=('delta {}-band magnitude (MYPSF - AUTO)'
+                              .format(filt)),
+                      filename='{}_mypsf_vs_auto.pdf'.format(base),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+        
+        # compare flux_opt with flux_mypsf
+        dmag = -2.5*np.log(flux_opt/flux_mypsf)
+        plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                      ylabel='delta {}-band magnitude (OPT - MYPSF)'.format(filt),
+                      filename='{}_opt_vs_mypsf.pdf'.format(base),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+
+        # compare x_win and y_win with x_psf and y_psf
+        dist_win_psf = np.sqrt((x_win-x_psf)**2+(y_win-y_psf)**2)
+        plot_scatter (x_array, dist_win_psf, (limits[0],limits[1],-2.,2.),
+                      class_star, xlabel=xlabel,
+                      ylabel='distance XY_WIN vs. XY_MYPSF',
+                      filename=('{}_xyposition_win_vs_mypsf_class.pdf'
+                                .format(base)),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+
+        plot_scatter (x_array, dist_win_psf, (limits[0],limits[1],-2.,2.),
+                      fwhm_image, xlabel=xlabel,
+                      ylabel='distance XY_WIN vs. XY_MYPSF', 
+                      filename=('{}_xyposition_win_vs_mypsf_fwhm.pdf'
+                                .format(base)),
+                      title='rainbow color coding follows FWHM')
+
+            
+    # compare flux_opt with flux_aper
+    for i in range(len(get_par(set_zogy.apphot_radii,tel))):
+
+        aper = get_par(set_zogy.apphot_radii[i],tel)
+        field = 'E_FLUX_APER'
+        field_err = 'E_FLUXERR_APER'
+        field_format = 'E_FLUX_APER_R{}xFWHM'.format(aper)
+        field_format_err = 'E_FLUXERR_APER_R{}xFWHM'.format(aper)
+        
+        if field in table.colnames:
+            flux_aper = table[field][index,i] * gain
+            fluxerr_aper = table[field_err][index,i] * gain
+        elif field_format in table.colnames:
+            flux_aper = table[field_format][index] * gain
+            fluxerr_aper = table[field_format_err][index] * gain
+            
+
+        dmag = -2.5*np.log(flux_opt/flux_aper)
+        ylabel='delta {}-band magnitude (OPT - APER_R{}xFWHM)'.format(filt, aper)
+        plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                      ylabel=ylabel,
+                      filename=('{}_opt_vs_aper_{}xFWHM.pdf'.format(base,aper)),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+
+        dmag = -2.5*np.log(flux_auto/flux_aper)
+        ylabel='delta {}-band magnitude (AUTO - APER_R{}xFWHM)'.format(filt, aper)
+        plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                      ylabel=ylabel,
+                      filename=('{}_auto_vs_aper_{}xFWHM.pdf'.format(base, aper)),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+
+
+        if mypsffit:
+            dmag = -2.5*np.log(flux_mypsf/flux_aper)
+            ylabel=('delta {}-band magnitude (MYPSF - APER_R{}xFWHM)'
+                    .format(filt, aper))
+            plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                          ylabel=ylabel, 
+                          filename=('{}_mypsf_vs_aper_{}xFWHM.pdf'
+                                    .format(base, aper)),
+                          title='rainbow color coding follows CLASS_STAR: '
+                          'from purple (star) to red (galaxy)')
+
+
+    # compare with flux_psf if psffit catalog available
+    sexcat_ldac_psffit = '{}_cat_ldac_psffit.fits'.format(base)
+    if os.path.isfile(sexcat_ldac_psffit):
+        # read SExtractor psffit fits table
+        table = Table.read(sexcat_ldac_psffit, hdu=2, memmap=True)
+
+        flux_sexpsf = table['E_FLUX_PSF'][index] * gain
+        
+        dmag = -2.5*np.log(flux_sexpsf/flux_opt)
+        plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                      ylabel=('delta {}-band magnitude (SEXPSF - OPT)'
+                              .format(filt)),
+                      filename='{}_sexpsf_vs_opt.pdf'.format(base),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+
+        if mypsffit:
+            # and compare 'my' psf with SExtractor psf
+            dmag = -2.5*np.log(flux_sexpsf/flux_mypsf)
+            plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                          ylabel=('delta {}-band magnitude (SEXPSF - MYPSF)'
+                                  .format(filt)),
+                          filename='{}_sexpsf_vs_mypsf.pdf'.format(base),
+                          title='rainbow color coding follows CLASS_STAR: '
+                          'from purple (star) to red (galaxy)')
+
+        # and compare auto with SExtractor psf
+        dmag = -2.5*np.log(flux_sexpsf/flux_auto)
+        plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
+                      ylabel=('delta {}-band magnitude (SEXPSF - AUTO)'
+                              .format(filt)),                      
+                      filename='{}_sexpsf_vs_auto.pdf'.format(base),
+                      title='rainbow color coding follows CLASS_STAR: '
+                      'from purple (star) to red (galaxy)')
+
+        
+    return
+            
 
 ################################################################################
 
@@ -9523,8 +9544,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         # extract the optimal fluxes
         #data_new = read_hdulist(cat_new, get_header=False)
         #data_ref = read_hdulist(cat_ref, get_header=False)
-        table_new = Table.read(cat_new)
-        table_ref = Table.read(cat_ref)
+        table_new = Table.read(cat_new, memmap=True)
+        table_ref = Table.read(cat_ref, memmap=True)
         
         index_new = []
         index_ref = []
