@@ -72,6 +72,7 @@ import matplotlib
 # matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
+from matplotlib.ticker import FormatStrFormatter
 
 # needed for Zafiirah's machine learning package MeerCRAB
 from meerCRAB_code.prediction_phase import realbogus_prediction
@@ -6393,6 +6394,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         fftdata_mask[nsub][index_fft] = data_mask[index_fftdata]
 
 
+
+        
+
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
 
@@ -6464,6 +6468,7 @@ def prep_plots (table, header, base, log=None):
     keywords = ['gain', 'exptime', 'filter', 'obsdate']
     gain, exptime, filt, obsdate = read_header(header, keywords, log=log)
 
+
     # filter arrays by FLAG
     index = ((table['E_FLUX_AUTO']>0) & (table['FLAGS']==0))
     class_star = table['CLASS_STAR'][index]
@@ -6478,13 +6483,13 @@ def prep_plots (table, header, base, log=None):
         magerr_opt = table['MAGERR_OPT'][index]
 
         x_array = mag_opt
-        xlabel = 'magnitude (OPT)'
-        limits = (np.amin(x_array)-0.1,np.amax(x_array)+0.1,-0.3,0.3)
+        xlabel = '{} magnitude (OPT)'.format(filt)
+        limits = (np.amin(x_array)-0.1, np.amax(x_array)+0.1, -0.3, 0.3)
 
     else:
         x_array = s2n_auto
         xlabel = 'S/N (AUTO)'
-        limits = (1,2*np.amax(x_array),-0.3,0.3)
+        limits = (1, 2*np.amax(x_array), -0.3, 0.3)
 
 
     x_win = table['X_POS'][index]
@@ -6513,34 +6518,34 @@ def prep_plots (table, header, base, log=None):
                      .format(title, limmag))
 
         plt.title(title)
-        plt.xlabel('{} magnitude'.format(filt))
+        plt.xlabel(xlabel)
         plt.ylabel('number')
         plt.savefig('{}_magopt.pdf'.format(base))
         if get_par(set_zogy.show_plots,tel): plt.show()
         plt.close()
 
+
     # compare flux_opt with flux_auto
-    dmag = -2.5*np.log(flux_opt/flux_auto)
+    dmag = calc_mag (flux_opt, flux_auto)
     plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
-                  ylabel='delta {}-band magnitude (OPT - AUTO)'.format(filt),
+                  ylabel='delta magnitude (OPT - AUTO)',
                   filename='{}_opt_vs_auto.pdf'.format(base),
                   title='rainbow color coding follows CLASS_STAR: '
                   'from purple (star) to red (galaxy)')
 
     if mypsffit:
         # compare flux_mypsf with flux_auto
-        dmag = -2.5*np.log(flux_mypsf/flux_auto)
+        dmag = calc_mag (flux_mypsf, flux_auto)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
-                      ylabel=('delta {}-band magnitude (MYPSF - AUTO)'
-                              .format(filt)),
+                      ylabel='delta magnitude (MYPSF - AUTO)',
                       filename='{}_mypsf_vs_auto.pdf'.format(base),
                       title='rainbow color coding follows CLASS_STAR: '
                       'from purple (star) to red (galaxy)')
         
         # compare flux_opt with flux_mypsf
-        dmag = -2.5*np.log(flux_opt/flux_mypsf)
+        dmag = calc_mag (flux_opt, flux_mypsf)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
-                      ylabel='delta {}-band magnitude (OPT - MYPSF)'.format(filt),
+                      ylabel='delta magnitude (OPT - MYPSF)',
                       filename='{}_opt_vs_mypsf.pdf'.format(base),
                       title='rainbow color coding follows CLASS_STAR: '
                       'from purple (star) to red (galaxy)')
@@ -6580,16 +6585,16 @@ def prep_plots (table, header, base, log=None):
             fluxerr_aper = table[field_format_err][index] * gain
             
 
-        dmag = -2.5*np.log(flux_opt/flux_aper)
-        ylabel='delta {}-band magnitude (OPT - APER_R{}xFWHM)'.format(filt, aper)
+        dmag = calc_mag (flux_opt, flux_aper)
+        ylabel='delta magnitude (OPT - APER_R{}xFWHM)'.format(aper)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel=ylabel,
                       filename=('{}_opt_vs_aper_{}xFWHM.pdf'.format(base,aper)),
                       title='rainbow color coding follows CLASS_STAR: '
                       'from purple (star) to red (galaxy)')
 
-        dmag = -2.5*np.log(flux_auto/flux_aper)
-        ylabel='delta {}-band magnitude (AUTO - APER_R{}xFWHM)'.format(filt, aper)
+        dmag = calc_mag (flux_auto, flux_aper)
+        ylabel='delta magnitude (AUTO - APER_R{}xFWHM)'.format(aper)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel=ylabel,
                       filename=('{}_auto_vs_aper_{}xFWHM.pdf'.format(base, aper)),
@@ -6598,9 +6603,8 @@ def prep_plots (table, header, base, log=None):
 
 
         if mypsffit:
-            dmag = -2.5*np.log(flux_mypsf/flux_aper)
-            ylabel=('delta {}-band magnitude (MYPSF - APER_R{}xFWHM)'
-                    .format(filt, aper))
+            dmag = calc_mag (flux_mypsf, flux_aper)
+            ylabel='delta magnitude (MYPSF - APER_R{}xFWHM)'.format(aper)
             plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                           ylabel=ylabel, 
                           filename=('{}_mypsf_vs_aper_{}xFWHM.pdf'
@@ -6617,37 +6621,45 @@ def prep_plots (table, header, base, log=None):
 
         flux_sexpsf = table['E_FLUX_PSF'][index] * gain
         
-        dmag = -2.5*np.log(flux_sexpsf/flux_opt)
+        dmag = calc_mag (flux_sexpsf, flux_opt)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
-                      ylabel=('delta {}-band magnitude (SEXPSF - OPT)'
-                              .format(filt)),
+                      ylabel='delta {}-band magnitude (SEXPSF - OPT)',
                       filename='{}_sexpsf_vs_opt.pdf'.format(base),
                       title='rainbow color coding follows CLASS_STAR: '
                       'from purple (star) to red (galaxy)')
 
         if mypsffit:
             # and compare 'my' psf with SExtractor psf
-            dmag = -2.5*np.log(flux_sexpsf/flux_mypsf)
+            dmag = calc_mag (flux_sexpsf, flux_mypsf)
             plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
-                          ylabel=('delta {}-band magnitude (SEXPSF - MYPSF)'
-                                  .format(filt)),
+                          ylabel='delta {}-band magnitude (SEXPSF - MYPSF)',
                           filename='{}_sexpsf_vs_mypsf.pdf'.format(base),
                           title='rainbow color coding follows CLASS_STAR: '
                           'from purple (star) to red (galaxy)')
 
         # and compare auto with SExtractor psf
-        dmag = -2.5*np.log(flux_sexpsf/flux_auto)
+        dmag = calc_mag (flux_sexpsf, flux_auto)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
-                      ylabel=('delta {}-band magnitude (SEXPSF - AUTO)'
-                              .format(filt)),                      
+                      ylabel='delta {}-band magnitude (SEXPSF - AUTO)',
                       filename='{}_sexpsf_vs_auto.pdf'.format(base),
                       title='rainbow color coding follows CLASS_STAR: '
                       'from purple (star) to red (galaxy)')
 
         
     return
-            
 
+
+################################################################################
+
+def calc_mag (flux1, flux2):
+
+    mask_ok = ((flux2 != 0) & (flux1>0) & (flux2>0))
+    dmag = np.zeros_like (flux1)
+    dmag[mask_ok] = -2.5*np.log10(flux1[mask_ok]/flux2[mask_ok])
+
+    return dmag
+
+   
 ################################################################################
 
 def save_npy_fits (data, filename=None, header=None):
@@ -8342,21 +8354,30 @@ def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
                   title=None, filename=None, simple=False, xscale='log',
                   yscale='linear'):
 
-    plt.axis(limits)
-    plt.scatter(x, y, c=corder, cmap=cmap, alpha=0.5, label=legendlabel,
-                edgecolors='black')
-    plt.xscale(xscale)
-    plt.yscale(yscale)
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, c=corder, cmap=cmap, alpha=0.5, label=legendlabel,
+               edgecolors='black')
+    ax.axis(limits)
+    ax.set_xscale(xscale)
+    ax.set_yscale(yscale)
+
+    ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+    
     if legendlabel is not None:
-        plt.legend(numpoints=1, fontsize='medium')
+        ax.legend(numpoints=1, fontsize='medium')
+
     if xlabel is not None:
-        plt.xlabel(xlabel)
+        ax.set_xlabel(xlabel)
+
     if ylabel is not None:
-        plt.ylabel(ylabel)
+        ax.set_ylabel(ylabel)
+
     if title is not None:
-        plt.title(title)
+        ax.set_title(title)
+
     if filename is not None:
-        plt.savefig(filename)
+        fig.savefig(filename)
+
     if get_par(set_zogy.show_plots,tel): plt.show()
     plt.close()
 
