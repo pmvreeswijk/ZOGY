@@ -1048,7 +1048,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         x_stat = (np.random.rand(nstat)*(xsize_new-2*edge)).astype(int) + edge
         y_stat = (np.random.rand(nstat)*(ysize_new-2*edge)).astype(int) + edge
         mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
-            data_Scorr_full[y_stat,x_stat].astype('float64'))
+            data_Scorr_full[y_stat,x_stat])
 
         if get_par(set_zogy.verbose,tel):
             log.info('Scorr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
@@ -1064,7 +1064,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # compute statistics on Fpsferr image
         mean_Fpsferr, median_Fpsferr, std_Fpsferr = sigma_clipped_stats (
-            data_Fpsferr_full[y_stat,x_stat].astype('float64'))
+            data_Fpsferr_full[y_stat,x_stat])
 
         if get_par(set_zogy.verbose,tel):
             log.info('Fpsferr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
@@ -1682,10 +1682,8 @@ def extract_fakestars (table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
                 table_fake['E_FLUX_IN'])
     fluxdiff_err = table_fake['E_FLUXERR_OUT'] / table_fake['E_FLUX_IN']
     
-    fd_mean, fd_median, fd_std = sigma_clipped_stats(
-        fluxdiff.astype('float64'))
-    fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(
-        fluxdiff_err.astype('float64'))
+    fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff)
+    fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err)
 
     # write to ascii file
     filename = '{}_fakestars.dat'.format(base_new)
@@ -2808,7 +2806,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     #print ('mean: {}, median: {}, std: {}'
     #       .format(mean, median, std))
     mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
-        data_Scorr_bkgsub[y_stat,x_stat].astype('float64'))
+        data_Scorr_bkgsub[y_stat,x_stat])
     log.info ('mean_Scorr: {:.3f}, median_Scorr: {:.3f}, std_Scorr: {:.3f}'
               .format(mean_Scorr, median_Scorr, std_Scorr))
 
@@ -4420,7 +4418,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         elif bkg_var == 'calc_from_data':
             D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
             D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
-                D_sub_masked.astype('float64'), mask_value=0)
+                D_sub_masked, mask_value=0)
             bkg_var_sub = D_sub_std**2
 
             # if none of the above, write error message to log
@@ -5828,7 +5826,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma,
                 imtype=imtype, log=log)
             limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
-                limflux_array.astype('float64'), mask_value=0)
+                limflux_array, mask_value=0)
             if get_par(set_zogy.verbose,tel):
                 log.info('{}-sigma limiting flux; mean: {}, std: {}, median: {}'
                          .format(nsigma, limflux_mean, limflux_std, limflux_median))
@@ -6860,8 +6858,7 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
         nmax = get_par(set_zogy.phot_ncal_max,tel)
         if np.sum(zp_array != 0) >= 5:
 
-            __, zp_median, zp_std = sigma_clipped_stats (
-                zp_array[0:nmax].astype('float64'))
+            __, zp_median, zp_std = sigma_clipped_stats (zp_array[0:nmax])
 
             # make histrogram plot if needed
             if get_par(set_zogy.make_plots,tel):
@@ -7410,11 +7407,11 @@ def get_back_orig (data, header, objmask, imtype, log, clip=True, fits_mask=None
     if boxsize > 300:
         index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
         __, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped[:,:,index_stat].astype('float64'),
+            data_masked_reshaped[:,:,index_stat],
             sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
     else:
         __, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped.astype('float64'),
+            data_masked_reshaped,
             sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
 
 
@@ -7604,14 +7601,14 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
         if bkg_boxsize > 300:
             index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
             __, mini_median, mini_std = sigma_clipped_stats (
-                data_masked_reshaped[:,:,index_stat].astype('float64'),
+                data_masked_reshaped[:,:,index_stat],
                 sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
             if log is not None:
                 log.warning ('subset of pixels used for statistics')
         
         else:
             __, mini_median, mini_std = sigma_clipped_stats (
-                data_masked_reshaped.astype('float64'),
+                data_masked_reshaped,
                 sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
             
 
@@ -9612,16 +9609,14 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
     # calculate full-frame average standard deviation and median
     fratio_mean_full, fratio_median_full, fratio_std_full = sigma_clipped_stats(
-        fratio_match.astype('float64'), mask_value=0)
+        fratio_match, mask_value=0)
     if get_par(set_zogy.verbose,tel):
         log.info('fratio_mean_full: {:.3f}'.format(fratio_mean_full))
         log.info('fratio_median_full: {:.3f}'.format(fratio_median_full))
         log.info('fratio_std_full: {:.3f}'.format(fratio_std_full))
 
-    dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match.astype('float64'),
-                                                     mask_value=0)
-    dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match.astype('float64'),
-                                                     mask_value=0)
+    dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
+    dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
     dx_full = np.sqrt(dx_mean**2 + dx_std**2)
     dy_full = np.sqrt(dy_mean**2 + dy_std**2)
     if get_par(set_zogy.verbose,tel):
@@ -9689,17 +9684,17 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             if get_par(set_zogy.fratio_local,tel):
                 # determine local fratios
                 fratio_mean, fratio_median, fratio_std = sigma_clipped_stats(
-                    fratio_match[mask_sub].astype('float64'), mask_value=0)
+                    fratio_match[mask_sub], mask_value=0)
                 fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
                                              fratio_std_full, log)
-                    
+
             # and the same for dx and dy
             if get_par(set_zogy.dxdy_local,tel):
                 # determine local values
                 dx_mean, dx_median, dx_std = sigma_clipped_stats(
-                    dx_match[mask_sub].astype('float64'), mask_value=0)
+                    dx_match[mask_sub], mask_value=0)
                 dy_mean, dy_median, dy_std = sigma_clipped_stats(
-                    dy_match[mask_sub].astype('float64'), mask_value=0)
+                    dy_match[mask_sub], mask_value=0)
                 dx = np.sqrt(dx_mean**2 + dx_std**2)
                 dy = np.sqrt(dy_mean**2 + dy_std**2)
 
@@ -10122,9 +10117,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
 
         # calculate means, stds and medians
         dra_mean, dra_median, dra_std = sigma_clipped_stats(
-            dra_array.astype('float64'), sigma=5, mask_value=0)
+            dra_array, sigma=5, mask_value=0)
         ddec_mean, ddec_median, ddec_std = sigma_clipped_stats(
-            ddec_array.astype('float64'), sigma=5, mask_value=0)
+            ddec_array, sigma=5, mask_value=0)
         
         log.info('dra_mean [arcsec]: {:.3f}, dra_std: {:.3f}, dra_median: {:.3f}'
                  .format(dra_mean, dra_std, dra_median))
@@ -10547,8 +10542,8 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
                  'determination')
         
     # determine mean, median and standard deviation through sigma clipping
-    fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(
-        fwhm_select.astype('float64'), mask_value=0)
+    fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select,
+                                                           mask_value=0)
 
     if get_par(set_zogy.verbose,tel):
         log.info('catalog: {}'.format(cat_ldac))
@@ -10557,7 +10552,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     if get_elong:
         # determine mean, median and standard deviation through sigma clipping
         elong_mean, elong_median, elong_std = sigma_clipped_stats(
-            elong_select.astype('float64'), mask_value=0)
+            elong_select, mask_value=0)
 
         if get_par(set_zogy.verbose,tel):
             log.info('elong_mean: {:.3f}, elong_median: {:.3f}, elong_std: {:.3f}'
