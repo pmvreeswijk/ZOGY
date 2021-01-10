@@ -6132,9 +6132,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                           'of subimages available')
                     header['PC-NSUB'] = (n_zps, 'number of subimages used for '
                                          'ZP statistics')
-                    header['PC-MZPD'] = (max_diff, '[mag] max. zeropoint '
+                    header['PC-MZPD'] = (max_diff, '[mag] max. ZP '
                                          'difference between subimages')
-                    header['PC-MZPS'] = (max_std, '[mag] max. zeropoint sigma '
+                    header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma '
                                          '(STD) of subimages')
 
                     
@@ -8927,55 +8927,55 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, log,
         
     # update original image header with some keywords
     header['PSF-PMIN'] = (np.amin(psfpeak),
-                          '[sum(P)=1] min. peak value of subimage PSFs')
+                          '[sum(P)=1] min. peak value subimage PSFs')
     header['PSF-PMAX'] = (np.amax(psfpeak),
-                          '[sum(P)=1] max. peak value of subimage PSFs')
+                          '[sum(P)=1] max. peak value subimage PSFs')
     header['PSF-PMED'] = (np.median(psfpeak),
-                          '[sum(P)=1] median peak value of subimage PSFs')
+                          '[sum(P)=1] median peak value subimage PSFs')
     header['PSF-PSTD'] = (np.std(psfpeak),
-                          '[sum(P)=1] sigma (STD) peak value of subimage PSFs')    
+                          '[sum(P)=1] sigma (STD) peak subimage PSFs')    
         
     if not fit_gauss:
         header['PSF-BMIN'] = (np.amin(beta),
-                              '[pix] min. beta of {} fit to subimage PSFs'
+                              '[pix] min. beta {} fit subimage PSFs'
                               .format(label))
         header['PSF-BMAX'] = (np.amax(beta),
-                              '[pix] max. beta of {} fit to subimage PSFs'
+                              '[pix] max. beta {} fit subimage PSFs'
                               .format(label))
         header['PSF-BMED'] = (np.median(beta),
-                              '[pix] median beta of {} fit to subimage PSFs'
+                              '[pix] median beta {} fit subimage PSFs'
                               .format(label))
         header['PSF-BSTD'] = (np.amax(beta),
-                              '[pix] sigma (STD) beta of {} fit to subimage PSFs'
+                              '[pix] sigma (STD) beta {} fit subimage PSFs'
                               .format(label))
 
         
     header['PSF-EMN{}'.format(label[0])] = (np.amin(elongation),
-                                            'min. elongation of {} fit to '
+                                            'min. elongation {} fit '
                                             'subimage PSFs'.format(label))
     header['PSF-EMX{}'.format(label[0])] = (np.amax(elongation),
-                                            'max. elongation of {} fit to '
+                                            'max. elongation {} fit '
                                             'subimage PSFs'.format(label))
     header['PSF-EMD{}'.format(label[0])] = (np.median(elongation),
-                                            'median elongation of {} fit to '
+                                            'median elongation {} fit '
                                             'subimage PSFs'.format(label))
     header['PSF-EST{}'.format(label[0])] = (np.std(elongation),
-                                            'sigma (STD) elongation of {} fit '
-                                            'to subimage PSFs'.format(label))
+                                            'sigma (STD) elongation {} fit '
+                                            'subimage PSFs'.format(label))
     
     fwhm_ave = (fwhm_max + fwhm_min) / 2
     seeing_ave = pixscale * fwhm_ave
     header['PSF-FMN{}'.format(label[0])] = (np.amin(fwhm_ave),
-                                            '[pix] min. mean FWHM of {} fits'
+                                            '[pix] min. mean FWHM {} fits'
                                             .format(label))
     header['PSF-FMX{}'.format(label[0])] = (np.amax(fwhm_ave),
-                                            '[pix] max. mean FWHM of {} fits'
+                                            '[pix] max. mean FWHM {} fits'
                                             .format(label))
     header['PSF-FMD{}'.format(label[0])] = (np.median(fwhm_ave),
-                                            '[pix] median mean FWHM of {} fits'
+                                            '[pix] median mean FWHM {} fits'
                                             .format(label))
     header['PSF-FST{}'.format(label[0])] = (np.std(fwhm_ave),
-                                            '[pix] sigma (STD) mean FWHM of {} '
+                                            '[pix] sigma (STD) mean FWHM {} '
                                             'fits'.format(label))
 
 
