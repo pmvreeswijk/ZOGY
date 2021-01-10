@@ -6482,7 +6482,7 @@ def prep_plots (table, header, base, log=None):
         mag_opt = table['MAG_OPT'][index]
         magerr_opt = table['MAGERR_OPT'][index]
 
-        x_array = mag_opt
+        x_array = np.asarray(mag_opt)
         xlabel = '{} magnitude (OPT)'.format(filt)
         limits = (np.amin(x_array)-0.1, np.amax(x_array)+0.1, -0.3, 0.3)
 
