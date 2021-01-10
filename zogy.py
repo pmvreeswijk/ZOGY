@@ -72,7 +72,7 @@ import matplotlib
 # matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
-from matplotlib.ticker import FormatStrFormatter
+#from matplotlib.ticker import FormatStrFormatter
 
 # needed for Zafiirah's machine learning package MeerCRAB
 from meerCRAB_code.prediction_phase import realbogus_prediction
@@ -8361,7 +8361,7 @@ def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
     ax.set_xscale(xscale)
     ax.set_yscale(yscale)
 
-    ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+    #ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
     
     if legendlabel is not None:
         ax.legend(numpoints=1, fontsize='medium')
@@ -8757,16 +8757,16 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     # [fit_moffat] function. N.B.: in case the ref image has a
     # different orientation than the new image, the Moffat/Gauss fits
     # are done in the orientation of the new frame!
-    if get_par(set_zogy.make_plots,tel):
-        try:
-            base_psf = '{}_psf'.format(base)
-            fit_moffat(psf_ima, nx, ny, header, pixscale, base_psf, log,
-                       fit_gauss=False)
-            fit_moffat(psf_ima, nx, ny, header, pixscale, base_psf, log,
-                       fit_gauss=True)
-        except Exception as e:
-            #log.info(traceback.format_exc())
-            log.info('exception was raised during [fit_moffat]: {}'.format(e))
+    #if get_par(set_zogy.make_plots,tel):
+    try:
+        base_psf = '{}_psf'.format(base)
+        fit_moffat(psf_ima, nx, ny, header, pixscale, base_psf, log,
+                   fit_gauss=False)
+        fit_moffat(psf_ima, nx, ny, header, pixscale, base_psf, log,
+                   fit_gauss=True)
+    except Exception as e:
+        #log.info(traceback.format_exc())
+        log.info('exception was raised during [fit_moffat]: {}'.format(e))
 
 
     if get_par(set_zogy.timing,tel):
