@@ -513,6 +513,45 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 return header_new, header_trans
             
 
+    # check that new and ref image have at least some overlap; if not,
+    # then leave
+    if new and ref:
+
+        # ref image center
+        wcs_ref = WCS(header_ref)
+        x_ref = xsize_ref/2.+0.5
+        y_ref = ysize_ref/2.+0.5
+        ra_ref, dec_ref = wcs_ref.all_pix2world(x_ref, y_ref, 1)
+
+        # new image center
+        wcs_new = WCS(header_new)
+        x_new = xsize_new/2.+0.5
+        y_new = ysize_new/2.+0.5
+        ra_new, dec_new = wcs_new.all_pix2world(x_ref, y_ref, 1)
+
+        # offset in degrees
+        offset = haversine (ra_ref, dec_ref, ra_new, dec_new)
+
+        # convert the reference RA and DEC center to pixel coordinates
+        # in the new frame
+        x_ref2new, y_ref2new = wcs_new.all_world2pix(ra_ref, dec_ref, 1)
+
+        dx = np.abs(x_new - x_ref2new)
+        dy = np.abs(y_new - y_ref2new)
+
+        if dx > 0.8*xsize_new or dy > 0.8*ysize_new:
+            
+            log.error ('offset between new image {} and ref image {} is {:.1f} '
+                       'deg; the overlap between them is too small to continue'
+                       .format(new_fits, ref_fits, offset))
+
+            # use header keyword 'ERROR' to indicate the problem
+            header_new['ERROR'] = (True, 'no overlap between new and ref image')
+
+            return header_new, header_trans
+
+
+
     # determine cutouts
     if new:
         xsize = xsize_new
@@ -4173,9 +4212,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         fwhm_use = fwhm_new
         # initial fwhm used for flux limits and Moffat/Gauss fits below
         fwhm_fit_init = fwhm_new
+
     elif imtype=='ref':
         fwhm_use = fwhm_ref
         fwhm_fit_init = fwhm_ref
+
     elif imtype is None:
         fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
         fwhm_fit_init = (fwhm_new + fwhm_ref) / 2.
@@ -4184,6 +4225,13 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # make sure [psf_size] is not larger than [psf_size_config] *
     # [psf_samp], which will happen if FWHM is very large
     psf_size = int(min(psf_size, psf_size_config * psf_samp))
+    # it should also not be larger than the vignet size; for the PSF
+    # fits to the D image, that would lead to an exception because the
+    # psf_imas used to build the P_D below would not have the same
+    # size
+    size_vignet = get_par(set_zogy.size_vignet,tel)
+    psf_size = int(min(psf_size, size_vignet))
+
     # force it to be odd
     if psf_size % 2 == 0:
         psf_size -= 1
@@ -4282,7 +4330,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                                        header_out=header_new,
                                        tel=tel, log=log)
 
-            
+
             # setting image standard deviations and flux ratios to
             # unity; if values present in headers, use those instead
             sn, sr, fn, fr = 1, 1, 1, 1
@@ -8625,16 +8673,16 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
 
 
     if 'fwhm_new' in globals():
-        log.info ('fwhm_new (pix): {:.2f}'.format(fwhm_new))
+        log.info ('fwhm_new [pix]: {:.2f}'.format(fwhm_new))
 
     if 'fwhm_ref' in globals():
-        log.info ('fwhm_ref (pix): {:.2f}'.format(fwhm_ref))
+        log.info ('fwhm_ref [pix]: {:.2f}'.format(fwhm_ref))
         
-    log.info ('fwhm_use (pix): {:.2f}'.format(fwhm_use))
+    log.info ('fwhm_use [pix]: {:.2f}'.format(fwhm_use))
 
     log.info ('psf_size used in [get_psf]: {} pix for imtype: {}'
               .format(psf_size, imtype))
-    log.info ('psf_samp used in [get_psf]: {:.2f} for imtype: {}'
+    log.info ('psf_samp used in [get_psf]: {:.2f} pix for imtype: {}'
               .format(psf_samp, imtype))
 
     # [psf_ima] is the corresponding cube of PSF subimages
@@ -10508,8 +10556,8 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
     if get_par(set_zogy.verbose,tel):
         log.info('catalog: {}'.format(cat_ldac))
-        log.info('fwhm_mean: {:.3f}, fwhm_median: {:.3f}, fwhm_std: {:.3f}'.
-                 format(fwhm_mean, fwhm_median, fwhm_std))
+        log.info('fwhm_mean: {:.2f} pix, fwhm_median: {:.2f} pix, fwhm_std: '
+                 '{:.2f} pix'.format(fwhm_mean, fwhm_median, fwhm_std))
     if get_elong:
         # determine mean, median and standard deviation through sigma clipping
         elong_mean, elong_median, elong_std = sigma_clipped_stats(
@@ -11385,7 +11433,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
 def get_samp_PSF_config_size (imtype, log=None):
 
     """function to determine [psf_samp] and [psf_config_size] to be used
-       in run_psfex
+       in [get_psf] and [run_psfex]
 
     """
 
