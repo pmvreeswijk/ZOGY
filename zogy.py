@@ -523,24 +523,34 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         y_ref = ysize_ref/2.+0.5
         ra_ref, dec_ref = wcs_ref.all_pix2world(x_ref, y_ref, 1)
 
+        #log.info ('ra_ref: {}, dec_ref: {}'.format(ra_ref, dec_ref))
+        
         # new image center
         wcs_new = WCS(header_new)
         x_new = xsize_new/2.+0.5
         y_new = ysize_new/2.+0.5
-        ra_new, dec_new = wcs_new.all_pix2world(x_ref, y_ref, 1)
+        ra_new, dec_new = wcs_new.all_pix2world(x_new, y_new, 1)
+
+        #log.info ('ra_new: {}, dec_new: {}'.format(ra_new, dec_new))
 
         # offset in degrees
         offset = haversine (ra_ref, dec_ref, ra_new, dec_new)
 
+        #log.info ('offset: {} deg'.format(offset))
+        
         # convert the reference RA and DEC center to pixel coordinates
         # in the new frame
         x_ref2new, y_ref2new = wcs_new.all_world2pix(ra_ref, dec_ref, 1)
 
+        #log.info ('x_ref2new: {}, y_ref2new: {}'.format(x_ref2new, y_ref2new))
+        
         dx = np.abs(x_new - x_ref2new)
         dy = np.abs(y_new - y_ref2new)
+        
+        #log.info ('dx: {}, dy: {}'.format(dx, dy))
+        
+        if dx > 0.9*xsize_new or dy > 0.9*ysize_new:
 
-        if dx > 0.8*xsize_new or dy > 0.8*ysize_new:
-            
             log.error ('offset between new image {} and ref image {} is {:.1f} '
                        'deg; the overlap between them is too small to continue'
                        .format(new_fits, ref_fits, offset))
@@ -3030,7 +3040,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
             mask_keep &= mask_finite
             log.warning ('column {} contains {} infinite or NaN values for image '
                          '{}; discarding the corresponding row(s)'
-                         .format(col, nbad, new_fits))
+                         .format(col, nbad, fits_new))
     # filter
     table_trans = table_trans[mask_keep]
 
@@ -3092,7 +3102,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
             mask_keep &= mask_finite
             log.warning ('column {} contains {} infinite or NaN values for image '
                          '{}; discarding the corresponding row(s)'
-                         .format(col, nbad, new_fits))
+                         .format(col, nbad, fits_new))
     # filter
     # switch off for the moment; CHECK!!!
     if False:
