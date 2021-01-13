@@ -517,43 +517,36 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # then leave
     if new and ref:
 
-        # ref image center
-        wcs_ref = WCS(header_ref)
-        x_ref = xsize_ref/2.+0.5
-        y_ref = ysize_ref/2.+0.5
-        ra_ref, dec_ref = wcs_ref.all_pix2world(x_ref, y_ref, 1)
-
-        #log.info ('ra_ref: {}, dec_ref: {}'.format(ra_ref, dec_ref))
-        
-        # new image center
+        # pixel positions of the 4 corners - with a margin of [dpix]
+        # pixels - in the new image
+        dpix = int((xsize_ref + ysize_ref) / 2. / 4.)
+        xy_new = [(dpix,dpix), (xsize_new-dpix,dpix),
+                  (dpix,ysize_new-dpix), (xsize_new-dpix, ysize_new-dpix)]
+        x_new, y_new = zip(*xy_new)
+        # convert these to ra, dec
         wcs_new = WCS(header_new)
-        x_new = xsize_new/2.+0.5
-        y_new = ysize_new/2.+0.5
         ra_new, dec_new = wcs_new.all_pix2world(x_new, y_new, 1)
-
-        #log.info ('ra_new: {}, dec_new: {}'.format(ra_new, dec_new))
-
-        # offset in degrees
-        offset = haversine (ra_ref, dec_ref, ra_new, dec_new)
-
-        #log.info ('offset: {} deg'.format(offset))
         
-        # convert the reference RA and DEC center to pixel coordinates
-        # in the new frame
-        x_ref2new, y_ref2new = wcs_new.all_world2pix(ra_ref, dec_ref, 1)
+        # convert these to pixel positions in the ref image
+        wcs_ref = WCS(header_ref)
+        x_ref, y_ref = wcs_ref.all_world2pix(ra_new, dec_new, 1)
 
-        #log.info ('x_ref2new: {}, y_ref2new: {}'.format(x_ref2new, y_ref2new))
-        
-        dx = np.abs(x_new - x_ref2new)
-        dy = np.abs(y_new - y_ref2new)
-        
-        #log.info ('dx: {}, dy: {}'.format(dx, dy))
-        
-        if dx > 0.9*xsize_new or dy > 0.9*ysize_new:
-
-            log.error ('offset between new image {} and ref image {} is {:.1f} '
-                       'deg; the overlap between them is too small to continue'
-                       .format(new_fits, ref_fits, offset))
+        # check whether any of the new image "corners" are on the ref
+        # image
+        mask_on = np.zeros(4, dtype=bool)
+        for i in range(len(x_ref)):
+            if (x_ref[i] >= 0 and x_ref[i] <= xsize_ref and
+                y_ref[i] >= 0 and y_ref[i] <= ysize_ref):
+                mask_on[i] = True
+                log.info ('corner 1 on ref image: {}'.format(mask_on[i]))
+                
+        # if none of the corners are within the ref image, then there
+        # is no or too little overlap
+        if not np.any(mask_on):
+            
+            log.error ('overlap between new image {} and ref image {} is less '
+                       'than {} pixels in the reference frame; bailing out'
+                       .format(new_fits, ref_fits, dpix))
 
             # use header keyword 'ERROR' to indicate the problem
             header_new['ERROR'] = (True, 'no overlap between new and ref image')
@@ -3032,15 +3025,17 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # filter out transient candidates with high chi2 and non-finite values
     chi2_max = get_par(set_zogy.chi2_max,tel)
     mask_keep = (table_trans['CHI2_PSF_D'] <= chi2_max)
+
+    row_numbers = np.arange(len(table_trans))+1
     # discard rows where fit values are infinite or NaN
     for col in colnames:
         mask_finite = np.isfinite(table_trans[col])
         nbad = np.sum(~mask_finite)
         if nbad > 0:
             mask_keep &= mask_finite
-            log.warning ('column {} contains {} infinite or NaN values for image '
-                         '{}; discarding the corresponding row(s)'
-                         .format(col, nbad, fits_new))
+            log.warning ('column {} contains {} infinite or NaN value(s) for image '
+                         '{}; discarding the corresponding row(s): {}'
+                         .format(col, nbad, fits_new, row_numbers[~mask_finite]))
     # filter
     table_trans = table_trans[mask_keep]
 
@@ -4965,9 +4960,11 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100,
         # adding the model flux would be too much
         
         # residual
-        resid = (D - sky - model) / D_err
+        mask_nonzero = (D_err != 0)
+        resid = (D - sky - model)
+        resid[mask_nonzero] /= D_err[mask_nonzero]
 
-        
+
         # return raveled (flattened) array
         if mask_use is not None:
             return resid[mask_use].ravel()
