@@ -36,7 +36,7 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 # add optional fake stars for testing purposes
 nfakestars = 0           # number of fake stars to be added to each subimage; first star
                          # is at the center, the rest (if any) is randomly distributed
-fakestar_s2n = 10        # required signal-to-noise ratio of the fake stars
+fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
 
 
 #===============================================================================
