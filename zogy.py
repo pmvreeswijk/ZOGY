@@ -548,9 +548,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                        'than {} pixels in the reference frame; bailing out'
                        .format(new_fits, ref_fits, dpix))
 
-            # use header keyword 'ERROR' to indicate the problem
-            header_new['ERROR'] = (True, 'no overlap between new and ref image')
-
             return header_new, header_trans
 
 
@@ -1257,7 +1254,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                    '[sigma] input transient detection threshold')
         lflux = float(get_par(set_zogy.transient_nsigma,tel)) * median_Fpsferr
         header_trans['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient '
-                                  '{}-sigma limit. flux'.format(
+                                  '{}-sigma lim. flux'.format(
                                       get_par(set_zogy.transient_nsigma,tel)))
         header_trans['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients '
                                    '(pre-vetting)'.format(
@@ -1279,7 +1276,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             airmass = header_new['AIRMASSC']
             [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log)
             header_trans['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
-                                     'limiting mag'.format(
+                                     'lim. mag'.format(
                                          get_par(set_zogy.transient_nsigma,tel)))
 
 
