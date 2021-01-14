@@ -5876,11 +5876,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # use WCS solution in input [header] to get RA, DEC of central pixel
         wcs = WCS(header)
         ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
-        log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
-        header['RA-CNTR'] = (float(ra_center), 
-                             'RA (ICRS) at image center (astrometry.net)')
-        header['DEC-CNTR'] = (float(dec_center), 
-                              'DEC (ICRS) at image center (astrometry.net)')
+
+        # RA-CNTR and DEC-CNTR are added to header in run_wcs
+        #log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+        #header['RA-CNTR'] = (float(ra_center), 
+        #                     'RA (ICRS) at image center (astrometry.net)')
+        #header['DEC-CNTR'] = (float(dec_center), 
+        #                      'DEC (ICRS) at image center (astrometry.net)')
         
         # determine airmass at image center
         airmass_center = get_airmass(ra_center, dec_center, obsdate,
@@ -10164,6 +10166,16 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
         log.info('Warning: calibration catalog {} not found!'
                  .format(get_par(set_zogy.cal_cat,tel)))
         data_cal = None
+
+        
+    # add RA-CNTR and DEC-CNTR to header
+    wcs = WCS(header)
+    ra_center, dec_center = wcs.all_pix2world(width/2+0.5, height/2+0.5, 1)
+    log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+    header['RA-CNTR'] = (float(ra_center), 
+                         'RA (ICRS) at image center (astrometry.net)')
+    header['DEC-CNTR'] = (float(dec_center), 
+                          'DEC (ICRS) at image center (astrometry.net)')
 
 
     # write data_cal with selection of calibration stars in this field
