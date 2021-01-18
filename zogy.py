@@ -6021,7 +6021,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                      .format(ncalstars))
             header['PC-FNCAL'] = (ncalstars, 'number of photcal stars after '
                                   'filter cut')
-            
+
             # pick only main sequence stars
             if False:
                 if 'spectype' in data_cal.dtype.names:
@@ -6063,9 +6063,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                      'stars used')
                 
                 # for MeerLICHT and BlackGEM only
-                if ncal_used >= 30 and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+                ncal_min_chan = 50
+                if (len(zp_array) >= ncal_min_chan and
+                    tel in ['ML1', 'BG2', 'BG3', 'BG4']):
 
-                    # calculate zeropoint for each channel
+                    # calculate zeropoint for each channel - not
+                    # restricted anymore to brightest maximum number
+                    # defined by get_par(set_zogy.phot_ncal_max,tel)
+                    # which is used in the single-value ZP above
                     zp_chan, zp_std_chan, ncal_chan = calc_zp (
                         x_array, y_array, zp_array, filt, imtype,
                         zp_type='channels')
@@ -6191,7 +6196,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                     header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma '
                                          '(STD) of subimages')
 
-                    
+                elif tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+                    # if less than [ncal_min_chan] stars are
+                    # available, set following header values to 'None'
+                    # because they are required to be present in the
+                    # header by the DataBase
+                    header['PC-MZPD'] = ('None', '[mag] max. ZP '
+                                         'difference between subimages')
+                    header['PC-MZPS'] = ('None', '[mag] max. ZP sigma '
+                                         '(STD) of subimages')
+
+
 
             # end of block: if ncalstars > 0
             header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_max,tel),
