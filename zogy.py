@@ -538,8 +538,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             if (x_ref[i] >= 0 and x_ref[i] <= xsize_ref and
                 y_ref[i] >= 0 and y_ref[i] <= ysize_ref):
                 mask_on[i] = True
-                log.info ('corner 1 on ref image: {}'.format(mask_on[i]))
-                
+                log.info ('corner {} on ref image: {}'.format(i, mask_on[i]))
+
         # if none of the corners are within the ref image, then there
         # is no or too little overlap
         if not np.any(mask_on):
@@ -6005,14 +6005,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 if np.sum(mask_cal_filt) >= get_par(set_zogy.phot_ncal_min,tel):
                     data_cal = data_cal[mask_cal_filt]
                 else:
-                    log.info('Warning: less than {} calibration stars with '
-                             'default filter requirements'
-                             .format(get_par(set_zogy.phot_ncal_min,tel)))
+                    log.warning('less than {} calibration stars with '
+                                'default filter requirements'
+                                .format(get_par(set_zogy.phot_ncal_min,tel)))
                     log.info('filter: {}, requirements (any one of these): {}'
                              .format(filt, filt_req[filt]))
                     log.info('dropping this specific requirement and hoping '
                              'for the best')
-                    
+
 
             # This is the number of photometric calibration stars
             # after the chi2 and filter requirements cut.
@@ -9546,6 +9546,13 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     dx_match = np.asarray(dx_match)
     dy_match = np.asarray(dy_match)
     fratio_match = np.asarray(fratio_match)
+
+    # correct for the ratio in ref/new exposure times; this method
+    # uses FLUX_AUTO (see PHOTFLUX_KEY parameter in psfex.config),
+    # saved in NORM_PSF column of PSFEx output file (.._red_psfex.cat)
+    # which has not been converted to e-/s
+    fratio_match *= header_ref['EXPTIME'] / header_new['EXPTIME']
+
     
     log.info ('median(fratio_match) using E_FLUX_AUTO: {}'
               .format(np.median(fratio_match)))
@@ -9589,23 +9596,22 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             'E_FLUX_OPT' in table_ref.colnames):
 
             # final catalog fluxes have been saved in e-/s, while the
-            # corresponding header EXPTIME indicates the image EXPTIME;
-            # the intermediate catalogs are still in e-; solution:
-            # check the column unit
+            # corresponding header EXPTIME indicates the image
+            # EXPTIME; the intermediate catalogs are still in e-;
+            # solution: check the column unit, and if in e-/s, convert
+            # it back to e- to determine fratio
+            flux_new_tmp = np.copy(table_new['E_FLUX_OPT'])
+            flux_ref_tmp = np.copy(table_ref['E_FLUX_OPT'])
+            
             if '/s' in str(table_new['E_FLUX_OPT'].unit):
-                exptime_new = 1.
-            else:
-                exptime_new = header_new['EXPTIME']
+                flux_new_tmp *= header_new['EXPTIME']
 
             if '/s' in str(table_ref['E_FLUX_OPT'].unit):
-                exptime_ref = 1.
-            else:
-                exptime_ref = header_ref['EXPTIME']
+                flux_ref_tmp *= header_ref['EXPTIME']
 
             if len(index_new) > 0 and len(index_ref) > 0:
-                fratio_match = ((exptime_ref/exptime_new) * 
-                                (table_new['E_FLUX_OPT'][np.asarray(index_new)] /
-                                 table_ref['E_FLUX_OPT'][np.asarray(index_ref)]))
+                fratio_match = (flux_new_tmp[np.asarray(index_new)] /
+                                flux_ref_tmp[np.asarray(index_ref)])
 
         else:
             log.warning ('E_FLUX_OPT not available in catalogs to calculate '
@@ -10563,9 +10569,9 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
             
     # print warning if few stars are selected
     if len(fwhm_select) < 10:
-        log.info('WARNING: fewer than 10 objects are selected for FWHM '
-                 'determination')
-        
+        log.warning('only {} objects selected for FWHM determination'
+                    .format(len(fwhm_select)))
+
     # determine mean, median and standard deviation through sigma clipping
     fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select,
                                                            mask_value=0)
@@ -10858,6 +10864,13 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
             # background has been subtracted in the first pass
             cmd_dict['-BACK_TYPE'] = 'MANUAL'
 
+            # remove saving of CHECKIMAGES, which would overwrite full
+            # bkg and bkg_std images
+            if '-CHECKIMAGE_TYPE' in cmd_dict.keys():
+                del cmd_dict['-CHECKIMAGE_TYPE']
+            if '-CHECKIMAGE_NAME' in cmd_dict.keys():
+                del cmd_dict['-CHECKIMAGE_NAME']
+
             if apply_weight:
                 cmd_dict['-WEIGHT_TYPE'] = 'MAP_RMS'
                 cmd_dict['-WEIGHT_IMAGE'] = fits_bkg_std
@@ -11078,9 +11091,8 @@ def update_bkgcol (base, header, log=None):
 
     """
 
+    # fits table to update
     fits_cat = '{}_cat.fits'.format(base)
-    log.info ('updating background column of fits table {}'.format(fits_cat))
-
 
     # read [data_bkg] from full or mini fits files
     fits_bkg = '{}_bkg.fits'.format(base)
@@ -11088,11 +11100,14 @@ def update_bkgcol (base, header, log=None):
     if os.path.exists(fits_bkg):
         # read it from the full background image
         data_bkg = read_hdulist (fits_bkg, dtype='float32')
+        if log is not None:
+            log.info ('reading full background image')
+
     elif os.path.exists(fits_bkg_mini):
         # create it from the background mesh
         data_bkg_mini, header_mini = read_hdulist (
             fits_bkg_mini, get_header=True, dtype='float32')
-            
+        
         if 'BKG-SIZE' in header_mini:
             bkg_size = header_mini['BKG-SIZE']
         else:
@@ -11123,13 +11138,20 @@ def update_bkgcol (base, header, log=None):
         with fits.open(fits_cat, mode='update', memmap=True) as hdulist:
             data = hdulist[-1].data
             if 'BACKGROUND' in data.dtype.names:
-                if log is not None:
-                    log.info ('updating initial BACKGROUND determination in '
-                              'source-extractor catalog with improved values')
                 x_indices = (data['X_POS']-0.5).astype(int)
                 y_indices = (data['Y_POS']-0.5).astype(int)
-                background = data_bkg[y_indices, x_indices]
-                hdulist[-1].data['BACKGROUND'] = background
+                #background = data_bkg[y_indices, x_indices]
+                #hdulist[-1].data['BACKGROUND'] = background
+                data['BACKGROUND'] = data_bkg[y_indices, x_indices]
+
+                if log is not None:
+                    log.info ('updating initial BACKGROUND determination in '
+                              'source-extractor catalog {} with improved values'
+                              .format(fits_cat))
+                    if not np.any(data_bkg):
+                        log.warning ('all new BACKGROUND values are zero for '
+                                     'catalog {}'.format(fits_cat))
+
 
     return
 
