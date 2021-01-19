@@ -6381,6 +6381,44 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         data_limmag = apply_zp( (get_par(set_zogy.source_nsigma,tel) * data_err),
                                 zp, airm, exptime, filt, log).astype('float32')
 
+
+        # this is the limiting magnitude per pixel, need to correct
+        # for the number of pixels that were used in the flux
+        # measurement, which is the volume below the PSF divided by
+        # the PSF peak value; do this per subimage so the subimage
+        # PSFs can be used. It would be better to convolve the image
+        # with the normalized PSF, but this should be a good
+        # approximation in the flatter parts of the image.
+        area = np.zeros(nsubs)
+        for i in range(nsubs):
+            # effective aperture: volume below PSF / peak of PSF =
+            # 1. / peak PSF since volume below PSF was normalized
+            psf_max = np.amax(psf_orig[i])
+            if psf_max != 0:
+                area = 1/psf_max
+
+        # set zero values to median
+        mask_zero = (area==0)
+        area[mask_zero] = np.median(area)
+        
+        # reshape
+        ysize, xsize = data_limmag.shape
+        subsize = get_par(set_zogy.subimage_size,tel)
+        nx = int(xsize / subsize)
+        ny = int(ysize / subsize)
+        area = area.reshape((nx, ny)).transpose()
+
+        # interpolate and grow to size of data_limmag
+        data_area = ndimage.zoom(area, subsize, order=2, mode='nearest')
+        
+        # finally multiply data_limmag with data_area
+        data_limmag *= data_area
+
+        log.info ('limmag image per pixel corrected for median effective '
+                  'aperture area of {:.2f} pixels, inferred from ratio of '
+                  'subimage PSF_volume over PSF_peak'.format(np.median(area)))
+
+
         # try to write scaled uint8 or int16 limiting magnitude image
         limmag_range = abs(np.amax(data_limmag)-np.amin(data_limmag))
 
@@ -7257,7 +7295,8 @@ def fixpix (data, log, satlevel=60000., data_mask=None, base=None,
     
     if imtype=='ref':
         struct = np.ones((3,3), dtype=bool)
-        mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct, iterations=2)
+        mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct,
+                                                iterations=2)
         
     # fix saturated and saturated-connected pixels with function
     # [inter_pix] that interpolates these pixels with a spline fit
