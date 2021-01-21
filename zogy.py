@@ -990,11 +990,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
                 data_new_full[index_subcut] = data_new[nsub][index_extract]
                 data_ref_full[index_subcut] = data_ref[nsub][index_extract]
-                data_new_mask_full[index_subcut] = data_new_mask[nsub][index_extract]
-                data_ref_mask_full[index_subcut] = data_ref_mask[nsub][index_extract]
+                data_new_mask_full[index_subcut] = (
+                    data_new_mask[nsub][index_extract])
+                data_ref_mask_full[index_subcut] = (
+                    data_ref_mask[nsub][index_extract])
 
-                data_new_bkg_std_full[index_subcut] = data_new_bkg_std[nsub][index_extract]
-                data_ref_bkg_std_full[index_subcut] = data_ref_bkg_std[nsub][index_extract]
+                data_new_bkg_std_full[index_subcut] = (
+                    data_new_bkg_std[nsub][index_extract])
+                data_ref_bkg_std_full[index_subcut] = (
+                    data_ref_bkg_std[nsub][index_extract])
 
 
                 if get_par(set_zogy.display,tel) and show_sub(nsub):
@@ -1292,7 +1296,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # get_ML_prob_real
         ML_prob_real = None
         if (get_par(set_zogy.ML_calc_prob,tel) and
-            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+            tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
+            data_thumbnails is not None):
 
             try:
                 ML_processed = False
@@ -1419,7 +1424,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
 
-        if get_par(set_zogy.save_thumbnails,tel):   
+        if get_par(set_zogy.save_thumbnails,tel) and data_thumbnails is not None:
             keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
                                'THUMBNAIL_D', 'THUMBNAIL_SCORR']
             size_thumbnails = get_par(set_zogy.size_thumbnails,tel)
@@ -2732,8 +2737,8 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     
 
     # combine new and remapped ref mask
-    data_new_mask = read_hdulist (fits_new_mask)
-    data_ref_mask = read_hdulist (fits_ref_mask)
+    data_new_mask = read_hdulist (fits_new_mask, dtype='uint8')
+    data_ref_mask = read_hdulist (fits_ref_mask, dtype='uint8')
     data_newref_mask = (data_new_mask | data_ref_mask)
     fits_newref_mask = '{}_mask_newref.fits'.format(base)
     fits.writeto (fits_newref_mask, data_newref_mask, overwrite=True)
@@ -2741,7 +2746,8 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
 
     # read Scorr image and its header
-    data_Scorr, header = read_hdulist (fits_Scorr, get_header=True)
+    data_Scorr, header = read_hdulist (fits_Scorr, get_header=True,
+                                       dtype='float32')
 
 
     # read a few header keywords 
@@ -2764,8 +2770,8 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # read background-subtracted output image (created by source
     # extractor) from 'initial' run above
     fits_Scorr_bkgsub = '{}_Scorr_bkgsub.fits'.format(base)
-    data_Scorr_bkgsub = read_hdulist (fits_Scorr_bkgsub)
-
+    data_Scorr_bkgsub = read_hdulist (fits_Scorr_bkgsub, dtype='float32')
+    
 
     # overwrite original Scorr image with the background-subtracted
     # Scorr image, while keeping a copy
@@ -2823,7 +2829,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     fits.writeto (fits_Scorr_bkgsub_neg, -data_Scorr_bkgsub, header,
                   overwrite=True)
     
-    data_D = read_hdulist(fits_D)
+    data_D = read_hdulist(fits_D, dtype='float32')
     fits_D_neg = '{}_D_neg.fits'.format(base)
     fits.writeto (fits_D_neg, -data_D, overwrite=True)
     
@@ -2837,7 +2843,6 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                             nthreads=nthreads, Scorr_mode='neg',
                             #image_analysis=fits_D_neg, std_Scorr=std_Scorr)
                             std_Scorr=std_Scorr)
-
 
 
     # read positive table
@@ -2860,6 +2865,9 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans = vstack([table_trans_pos, table_trans_neg])
     log.info ('total number of transients (pos+neg): {}'
               .format(len(table_trans)))
+
+
+    del data_Scorr_bkgsub
 
 
     # Filter on significance
@@ -2961,10 +2969,10 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     #data_D_var = data_new + new_bkg_std**2 +
     #            (data_ref + ref_bkg_std**2) * fratio**2
     # using full background STD images
-    data_new = read_hdulist(fits_new)
-    data_ref = read_hdulist(fits_ref)
-    data_new_bkg_std = read_hdulist(fits_new_bkg_std)
-    data_ref_bkg_std = read_hdulist(fits_ref_bkg_std)
+    data_new = read_hdulist(fits_new, dtype='float32')
+    data_ref = read_hdulist(fits_ref, dtype='float32')
+    data_new_bkg_std = read_hdulist(fits_new_bkg_std, dtype='float32')
+    data_ref_bkg_std = read_hdulist(fits_ref_bkg_std, dtype='float32')
     data_D_var = ((np.abs(data_new) + data_new_bkg_std**2) +
                   (np.abs(data_ref) + data_ref_bkg_std**2) * fratio**2)
     del data_new_bkg_std, data_ref_bkg_std
@@ -3178,8 +3186,8 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # image but not in the new image, are first converted to positive
     # fluxes. That it was a negative flux object is still clear from
     # the sign of Scorr_peak.
-    data_Fpsf = read_hdulist (fits_Fpsf)
-    data_Fpsferr = read_hdulist (fits_Fpsferr)
+    data_Fpsf = read_hdulist (fits_Fpsf, dtype='float32')
+    data_Fpsferr = read_hdulist (fits_Fpsferr, dtype='float32')
     # read off fluxes and errors at X_PEAK and Y_PEAK indices
     flux_peak = data_Fpsf[table_trans['Y_PEAK']-1, table_trans['X_PEAK']-1]
     fluxerr_peak = data_Fpsferr[table_trans['Y_PEAK']-1, table_trans['X_PEAK']-1]
@@ -3236,10 +3244,12 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
 
     # extract the thumbnail images corresponding to the transients in
     # case either thumbnail data is being saved or MeerCRAB
-    # probabilities need to be calculated for ML/BG
-    if (get_par(set_zogy.save_thumbnails,tel) or
-        (get_par(set_zogy.ML_calc_prob,tel) and
-         tel in ['ML1', 'BG2', 'BG3', 'BG4'])):
+    # probabilities need to be calculated for ML/BG, and the
+    # transient table size is not unreasonably large
+    if (len(table_trans) < 20000 and
+        (get_par(set_zogy.save_thumbnails,tel) or
+         (get_par(set_zogy.ML_calc_prob,tel) and
+          tel in ['ML1', 'BG2', 'BG3', 'BG4']))):
 
         data_full_list = [data_new, data_ref, data_D, data_Scorr]
         keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
@@ -3256,7 +3266,8 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     
         # initialise output thumbnail columns
         data_thumbnails = np.zeros((n_thumbnails, ncoords,
-                                    size_thumbnails, size_thumbnails))
+                                    size_thumbnails, size_thumbnails),
+                                   dtype='float32')
     
         # size of full input images; assuming they have identical shapes
         ysize, xsize = data_full_list[0].shape
@@ -6395,7 +6406,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # 1. / peak PSF since volume below PSF was normalized
             psf_max = np.amax(psf_orig[i])
             if psf_max != 0:
-                area = 1/psf_max
+                area[i] = 1./psf_max
 
         # set zero values to median
         mask_zero = (area==0)
