@@ -575,50 +575,33 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # psf and background images
     if new:
-        data_new, psf_new, psf_orig_new, data_new_bkg_std, data_new_mask = (
+        data_new, psf_new, psf_orig_new, data_new_bkg_std = (
             prep_optimal_subtraction('{}.fits'.format(base_new), nsubs, 'new',
                                      fwhm_new, header_new,
                                      fits_mask=new_fits_mask,
                                      nthreads=nthreads, log=log))
 
-        if get_par(set_zogy.low_RAM,tel):
-            # in low_RAM mode, data_new, psf_new, data_new_bkg_std and
-            # data_new_mask are actually strings pointing to the
-            # filenames in which the data arrays were saved; read them
-            # back into numpy arrays using memory mapping
-            data_new = np.load(data_new, mmap_mode='c')
-            psf_new = np.load(psf_new, mmap_mode='c')
-            data_new_bkg_std = np.load(data_new_bkg_std, mmap_mode='c')
-            # not needed:
-            #data_new_mask = np.load(data_new_mask, mmap_mode='c')
-            log.info ('data_new.shape: {}'.format(data_new.shape))
-            log.info ('psf_new.shape: {}'.format(psf_new.shape))
-            log.info ('data_new_bkg_std.shape: {}'.format(data_new_bkg_std.shape))
-
+        # data_new, psf_new and data_new_bkg_std are actually strings
+        # pointing to the name of the (last) subimage file(s) in which
+        # the subimage data arrays were saved; [load_npy_fits] with
+        # input parameter nsub will read the separate files properly
 
 
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with ref,
     # psf and background images; if new and ref are provided, then
     # these images will be remapped to the new frame
     if ref:
-        data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std, data_ref_mask = (
+        data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std = (
             prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs, 'ref',
                                      fwhm_ref, header_ref,
                                      fits_mask=ref_fits_mask, remap=remap,
                                      nthreads=nthreads, log=log))
             
-        if get_par(set_zogy.low_RAM,tel):
-            # in low_RAM mode, data_ref, psf_ref, data_ref_bkg_std and
-            # data_ref_mask are actually strings pointing to the
-            # filenames in which the data arrays were saved; read them
-            # back into numpy arrays using memory mapping
-            data_ref = np.load(data_ref, mmap_mode='c')
-            psf_ref = np.load(psf_ref, mmap_mode='c')
-            data_ref_bkg_std = np.load(data_ref_bkg_std, mmap_mode='c')
-            # not needed:
-            #data_ref_mask = np.load(data_ref_mask, mmap_mode='c')
+        # data_ref, psf_ref and data_ref_bkg_std are actually strings
+        # pointing to the name of the (last) subimage file(s) in which
+        # the subimage data arrays were saved; [load_npy_fits] with
+        # input parameter nsub will read the separate files properly
 
-        
         if remap:
             # for now set the value header below to True by hand;
             # should be checked properly, e.g. by try-except the
@@ -631,7 +614,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
             version = str(result.stdout.read()).split()[2]
             header_trans['SWARP-V'] = (version, 'SWarp version used')
-                
+
 
     if new and ref:
         # get x, y and fratios from matching PSFex stars across entire
@@ -729,11 +712,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # add the fake stars to the new subimages
             nfake_sub = get_par(set_zogy.nfakestars,tel)
             for nsub in range(nsubs):
+                
+                data_new_sub = load_npy_fits (data_new, nsub)
+                data_new_bkg_std_sub = load_npy_fits (data_new_bkg_std, nsub)
+                
                 index_fake = tuple([slice(nsub * nfake_sub, (nsub+1) * nfake_sub)])
                 fakestar_xcoord[index_fake], fakestar_ycoord[index_fake], \
                     fakestar_flux_in[index_fake] = add_fakestars (
-                        psf_orig_new[nsub], data_new[nsub],
-                        data_new_bkg_std[nsub], fwhm_new, log)
+                        psf_orig_new[nsub], data_new_sub,
+                        data_new_bkg_std_sub, fwhm_new, log)
 
                 
             # create table_fake
@@ -761,6 +748,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
                 # run ZOGY
 
+                # load subimages
+                data_new_sub = load_npy_fits (data_new, nsub)
+                psf_new_sub = load_npy_fits (psf_new, nsub)
+                data_new_bkg_std_sub = load_npy_fits (data_new_bkg_std, nsub)
+
+                data_ref_sub = load_npy_fits (data_ref, nsub)
+                psf_ref_sub = load_npy_fits (psf_ref, nsub)
+                data_ref_bkg_std_sub = load_npy_fits (data_ref_bkg_std, nsub)
+                                
                 # if use_FFTW=True: proces the first subimage (could
                 # be any subimage) twice to avoid it showing vertical
                 # bands (e.g. see
@@ -773,29 +769,18 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     niter = 2
                 else:
                     niter = 1
-                    
+
                 for i in range(niter):
-                    result_sub = run_ZOGY (nsub, data_ref[nsub], data_new[nsub],
-                                           psf_ref[nsub], psf_new[nsub],
-                                           data_ref_bkg_std[nsub],
-                                           data_new_bkg_std[nsub],
+                    result_sub = run_ZOGY (nsub, data_ref_sub, data_new_sub,
+                                           psf_ref_sub, psf_new_sub,
+                                           data_ref_bkg_std_sub,
+                                           data_new_bkg_std_sub,
                                            fratio_subs[nsub],
                                            dx_subs[nsub], dy_subs[nsub],
                                            use_FFTW=use_FFTW, nthreads=nthreads,
                                            log=log)
 
                 results_zogy.append(result_sub)
-
-
-            if get_par(set_zogy.low_RAM,tel):
-                # these arrays can be deleted if subimages are not
-                # being displayed
-                del data_ref
-                del psf_ref, psf_new
-                del data_ref_bkg_std, data_new_bkg_std
-                # keep data_new if fake stars have been added
-                if get_par(set_zogy.nfakestars,tel)==0:
-                    del data_new
 
 
         except Exception as e:
@@ -834,249 +819,82 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         index_extract = tuple([slice(y1,y2), slice(x1,x2)])
         
 
-        if get_par(set_zogy.low_RAM,tel):
-
-            log.info ('creating full D, S, Scorr, Fpsf and Fpsferr images from '
-                      'subimages and writing them to disk')
+        log.info ('creating full D, S, Scorr, Fpsf and Fpsferr images from '
+                  'subimages and writing them to disk')
             
-            header_tmp = header_new + header_trans
+        header_tmp = header_new + header_trans
 
-            # assemble and write full output images, one by one using
-            # function [create_full]
-            names_zogy = ['{}_D.fits'.format(base_newref),
-                          '{}_S.fits'.format(base_newref),
-                          '{}_Scorr.fits'.format(base_newref),
-                          '{}_Fpsf.fits'.format(base_newref),
-                          '{}_Fpsferr.fits'.format(base_newref)]
+        # assemble and write full output images, one by one using
+        # function [create_full]
+        names_zogy = ['{}_D.fits'.format(base_newref),
+                      '{}_S.fits'.format(base_newref),
+                      '{}_Scorr.fits'.format(base_newref),
+                      '{}_Fpsf.fits'.format(base_newref),
+                      '{}_Fpsferr.fits'.format(base_newref)]
 
-            for i_name, name in enumerate(names_zogy):
-                sublist = [l[i_name] for l in results_zogy]
-                create_full (name, header_tmp, (ysize_new, xsize_new),
-                             'float32', nsubs, cuts_ima, index_extract,
-                             sublist=sublist)
+        for i_name, name in enumerate(names_zogy):
+            # zogy files can be a mix of fits and numpy files so
+            # [create_full] needs list of all images instead of
+            # using single name to be used with [load_npy_fits]
+            sublist = [l[i_name] for l in results_zogy]
+            create_full (name, header_tmp, (ysize_new, xsize_new),
+                         'float32', nsubs, cuts_ima, index_extract,
+                         sublist=sublist)
 
                 
-            # if fake stars were added to the new image, also save the
-            # data_new cube to a full image
+        # if fake stars were added to the new image, also create
+        # full image from data_new subimage files
+        if get_par(set_zogy.nfakestars,tel)>0:
+            log.info ('creating new image including fake stars '
+                      'from subimages and writing it to disk')
+            # [data_new] subimages are assumed to all have the
+            # same extension
+            ext = data_new.split('.')[-1]
+            sublist = ['{}_sub{}.{}'.format(data_new.split('_sub')[0], i, ext)
+                       for i in range(nsubs)]
+            create_full ('{}_new.fits'.format(base_newref),
+                         header_tmp, (ysize_new, xsize_new),
+                         'float32', nsubs, cuts_ima, index_extract,
+                         sublist=sublist)
+
+
+        mem_use (label='after creating full images', log=log)
+
+        
+        if get_par(set_zogy.display,tel):
+
+            log.info ('displaying numerous subimages')
+
+            dir_newref = '/'.join(base_newref.split('/')[:-1])
+            base_remap = '{}/{}'.format(dir_newref, base_ref.split('/')[-1])
+            names_disp_list = ['{}.fits'.format(base_newref),
+                               '{}_remap.fits'.format(base_remap),
+                               '{}_bkg_std.fits'.format(base_newref),
+                               '{}_bkg_std_remap.fits'.format(base_remap)]
+            dtype_list = ['float32'] * 4
+
             if get_par(set_zogy.nfakestars,tel)>0:
-
-                log.info ('creating new image including fake stars '
-                          'from subimages and writing it to disk')
-
-                create_full ('{}_new.fits'.format(base_newref),
-                             header_tmp, (ysize_new, xsize_new),
-                             'float32', nsubs, cuts_ima, index_extract,
-                             data=data_new)
-
-
-            mem_use (label='after creating full images', log=log)
-
-
-            if get_par(set_zogy.display,tel):
-
-                log.info ('displaying numerous subimages')
-
-                dir_newref = '/'.join(base_newref.split('/')[:-1])
-                base_remap = '{}/{}'.format(dir_newref, base_ref.split('/')[-1])
-                names_disp_list = ['{}.fits'.format(base_newref),
-                                   '{}_remap.fits'.format(base_remap),
-                                   '{}_bkg_std.fits'.format(base_newref),
-                                   '{}_bkg_std_remap.fits'.format(base_remap)]
-                dtype_list = ['float32'] * 4
-
-                if get_par(set_zogy.nfakestars,tel)>0:
-                    names_disp_list[0] = '{}_new.fits'.format(base_newref)
+                names_disp_list[0] = '{}_new.fits'.format(base_newref)
                     
-                if new_fits_mask is not None:
-                    names_disp_list.append(new_fits_mask)
-                    dtype_list.append('uint8')
+            if new_fits_mask is not None:
+                names_disp_list.append(new_fits_mask)
+                dtype_list.append('uint8')
 
-                if ref_fits_mask is not None:
-                    fits_tmp = ref_fits_mask.replace('.fits', '_remap.fits')
-                    names_disp_list.append('{}/{}'.format(dir_newref,
-                                                          fits_tmp.split('/')[-1]))
-                    dtype_list.append('uint8')
-
-                for i_name, name in enumerate(names_disp_list):
-                    create_subs (name, dir_newref, nsubs, cuts_ima,
-                                 dtype_list[i_name], index_extract)
-
-                # display
-                names_full = [names_disp_list[0:2], names_zogy,
-                              names_disp_list[2:]]
-                names_full = list(itertools.chain.from_iterable(names_full))
-                display_subs(base_new, base_ref, nsubs, names_full)
-
-
-        else:
-            
-            # first initialize full output images
-            data_D_full = np.zeros((ysize_new, xsize_new), dtype='float32')
-            #data_S_full = np.zeros_like(data_D_full)
-            data_Scorr_full = np.zeros_like(data_D_full)
-            data_Fpsf_full = np.zeros_like(data_D_full)
-            data_Fpsferr_full = np.zeros_like(data_D_full)
-            
-            data_new_full = np.zeros_like(data_D_full)
-            data_ref_full = np.zeros_like(data_D_full)
-            
-            data_new_bkg_std_full = np.zeros_like(data_D_full)
-            data_ref_bkg_std_full = np.zeros_like(data_D_full)
-            
-            data_new_mask_full = np.zeros_like(data_D_full, dtype='uint8')
-            data_ref_mask_full = np.zeros_like(data_D_full, dtype='uint8')
-
-
-            #objgraph.show_most_common_types()
-
-            for nsub in range(nsubs):
-
-                # using results from pool:
-                data_D, data_S, data_Scorr, data_Fpsf, data_Fpsferr = (
-                    results_zogy[nsub])
-            
-                # if one or more fake stars were added to the subimages,
-                # compare the input flux with the PSF flux determined by
-                # run_ZOGY.
-                if get_par(set_zogy.nfakestars,tel)>0:
-                    index_fake = tuple([slice(
-                        nsub*get_par(set_zogy.nfakestars,tel),
-                        (nsub+1)*get_par(set_zogy.nfakestars,tel))])
-                    # fake stars pixel coordinates (X and Y) were
-                    # given offset between -0.5 and +0.5; convert
-                    # these back to integer indices
-                    x_fake = table_fake['X'][index_fake]-1
-                    y_fake = table_fake['Y'][index_fake]-1
-                    table_fake['E_FLUX_OUT'][index_fake] = data_Fpsf[y_fake,
-                                                                     x_fake]
-                    table_fake['E_FLUXERR_OUT'][index_fake] = data_Fpsferr[y_fake,
-                                                                           x_fake]
-                    # and S/N from Scorr
-                    table_fake['S2N_OUT'][index_fake] = data_Scorr[y_fake, x_fake]
-
-                    # x,y coords are in the fft frame; infer the x,y pixel
-                    # coordinates in the full image by using [subcutfft],
-                    # which defines the pixel indices [y1 y2 x1 x2]
-                    # identifying the corners of the fft subimage in the
-                    # entire input/output image coordinate frame; used various
-                    # times below
-                    subcutfft = cuts_ima_fft[nsub]
-                    table_fake['X'][index_fake] += subcutfft[2]
-                    table_fake['Y'][index_fake] += subcutfft[0]
-                    # for x- and y-coordinates in the left column or
-                    # bottom row of fft subimages, need to subtract
-                    # the border
-                    size_border = get_par(set_zogy.subimage_border,tel)
-                    size_fft = (get_par(set_zogy.subimage_size,tel) +
-                                2*size_border)
-                    mask_X = (table_fake['X'] <= size_fft)
-                    table_fake['X'][mask_X] -= size_border
-                    mask_Y = (table_fake['Y'] <= size_fft)
-                    table_fake['Y'][mask_Y] -= size_border
-
-                    
-
-                # put sub images without the borders into output frames
-                subcut = cuts_ima[nsub]
-                index_subcut = tuple([slice(subcut[0],subcut[1]),
-                                      slice(subcut[2],subcut[3])])
+            if ref_fits_mask is not None:
+                fits_tmp = ref_fits_mask.replace('.fits', '_remap.fits')
+                names_disp_list.append('{}/{}'.format(dir_newref,
+                                                      fits_tmp.split('/')[-1]))
+                dtype_list.append('uint8')
                 
-            
-                data_D_full[index_subcut] = data_D[index_extract] #/ gain_new
-                #data_S_full[index_subcut] = data_S[index_extract]
-                data_Scorr_full[index_subcut] = data_Scorr[index_extract]
-                data_Fpsf_full[index_subcut] = data_Fpsf[index_extract]
-                data_Fpsferr_full[index_subcut] = data_Fpsferr[index_extract]
+            for i_name, name in enumerate(names_disp_list):
+                create_subs (name, dir_newref, nsubs, cuts_ima,
+                             dtype_list[i_name], index_extract)
+                
+            # display
+            names_full = [names_disp_list[0:2], names_zogy, names_disp_list[2:]]
+            names_full = list(itertools.chain.from_iterable(names_full))
+            display_subs(base_new, base_ref, nsubs, names_full)
 
-                data_new_full[index_subcut] = data_new[nsub][index_extract]
-                data_ref_full[index_subcut] = data_ref[nsub][index_extract]
-                data_new_mask_full[index_subcut] = (
-                    data_new_mask[nsub][index_extract])
-                data_ref_mask_full[index_subcut] = (
-                    data_ref_mask[nsub][index_extract])
-
-                data_new_bkg_std_full[index_subcut] = (
-                    data_new_bkg_std[nsub][index_extract])
-                data_ref_bkg_std_full[index_subcut] = (
-                    data_ref_bkg_std[nsub][index_extract])
-
-
-                if get_par(set_zogy.display,tel) and show_sub(nsub):
-
-                    # in display mode for particular subimages, write
-                    # the separate subimages to fits
-                    subend = 'sub{}.fits'.format(nsub)
-
-                    # just for displaying purpose:
-                    im_D = '{}_D_{}'.format(base_newref, subend)
-                    fits.writeto(im_D, data_D.astype('float32'), overwrite=True)
-                    im_S = '{}_S_{}'.format(base_newref, subend)
-                    fits.writeto(im_S, data_S.astype('float32'), overwrite=True)
-                    im_Scorr = '{}_Scorr_{}'.format(base_newref, subend)
-                    fits.writeto(im_Scorr, data_Scorr.astype('float32'),
-                                 overwrite=True)
-                    
-                    # write new and ref subimages to fits
-                    im_new = '{}_{}'.format(base_new, subend)
-                    im_ref = '{}_{}'.format(base_ref, subend)
-                    fits.writeto(im_new, data_new[nsub].astype('float32'),
-                                 overwrite=True)
-                    fits.writeto(im_ref, data_ref[nsub].astype('float32'),
-                                 overwrite=True)
-
-                    # background images
-                    #fits.writeto('{}_bkg_{}'.format(base_new, subend),
-                    #             data_new_bkg[nsub].astype('float32'), overwrite=True)
-                    #fits.writeto('{}_bkg_{}'.format(base_ref, subend),
-                    #             data_ref_bkg[nsub].astype('float32'), overwrite=True)
-                    im_new_bkg_std = '{}_std_{}'.format(base_new, subend)
-                    fits.writeto(im_new_bkg_std,
-                                 data_new_bkg_std[nsub].astype('float32'),
-                                 overwrite=True)
-                    im_ref_bkg_std = '{}_std_{}'.format(base_ref, subend)
-                    fits.writeto(im_ref_bkg_std,
-                                 data_ref_bkg_std[nsub].astype('float32'),
-                                 overwrite=True)
-
-                    # masks
-                    im_new_mask = '{}_mask_{}'.format(base_new, subend)
-                    fits.writeto(im_new_mask,
-                                 data_new_mask[nsub].astype('uint8'),
-                                 overwrite=True)
-                    im_ref_mask = '{}_mask_{}'.format(base_ref, subend)
-                    fits.writeto(im_ref_mask,
-                                 data_ref_mask[nsub].astype('uint8'),
-                                 overwrite=True)
-            
-                    # and display
-                    im_VSn = '{}_VSn_{}'.format(base_newref, subend)
-                    im_VSr = '{}_VSr_{}'.format(base_newref, subend)
-                    im_VSn_ast = '{}_VSn_ast_{}'.format(base_newref, subend)
-                    im_VSr_ast = '{}_VSr_ast_{}'.format(base_newref, subend)
-                    im_Sn = '{}_Sn_{}'.format(base_newref, subend)
-                    im_Sr = '{}_Sr_{}'.format(base_newref, subend)
-                    im_kn = '{}_kn_{}'.format(base_newref, subend)
-                    im_kr = '{}_kr_{}'.format(base_newref, subend)
-                    im_Pn_hat = '{}_Pn_hat_{}'.format(base_newref, subend)
-                    im_Pr_hat = '{}_Pr_hat_{}'.format(base_newref, subend)
-                    im_PD = '{}_PD_{}'.format(base_newref, subend)
-                    
-                    cmd = ['ds9','-zscale','-frame','lock','image',
-                           im_new, im_ref, im_D, im_S, im_Scorr,
-                           im_new_bkg_std, im_ref_bkg_std, im_new_mask, im_ref_mask,
-                           im_VSn, im_VSr, im_VSn_ast, im_VSr_ast,
-                           im_Sn, im_Sr, im_kn, im_kr, im_Pn_hat, im_Pr_hat,
-                           '{}_psf_ima_config_{}'.format(base_newref, subend),
-                           '{}_psf_ima_config_{}'.format(base_ref, subend),
-                           '{}_psf_ima_{}'.format(base_newref, subend),
-                           '{}_psf_ima_{}'.format(base_ref, subend),
-                           '{}_psf_ima_center_{}'.format(base_newref, subend),
-                           '{}_psf_ima_center_{}'.format(base_ref, subend),
-                           '{}_psf_ima_shift_{}'.format(base_newref, subend),
-                           '{}_psf_ima_shift_{}'.format(base_ref, subend),
-                           im_PD]
-
-                    result = subprocess.call(cmd)
 
                     
 
@@ -1176,82 +994,39 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         mem_use (label='just before get_trans', log=log)
         
-        if get_par(set_zogy.low_RAM,tel):
+        table_trans, data_thumbnails = get_trans_alt (
+            fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
+            fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
+            header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
+            nthreads=nthreads, log=log)
 
-            table_trans, data_thumbnails = get_trans_alt (
-                fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
-                fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
-                header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
-                nthreads=nthreads, log=log)
-
-            # number of transients in table to add to header below
-            ntrans = len(table_trans)
+        # number of transients in table to add to header below
+        ntrans = len(table_trans)
             
-            # if one or more fake stars were added to the subimages,
-            # compare the input flux with the PSF flux determined by
-            # run_ZOGY and at what S/N it is present in the transient
-            # catalog
-            if get_par(set_zogy.nfakestars,tel)>0:
+        # if one or more fake stars were added to the subimages,
+        # compare the input flux with the PSF flux determined by
+        # run_ZOGY and at what S/N it is present in the transient
+        # catalog
+        if get_par(set_zogy.nfakestars,tel)>0:
 
-                # read in background-subtracted and (possibly)
-                # normalized Scorr image
-                data_Scorr_full = read_hdulist('{}_Scorr_bkgsub.fits'
-                                               .format(base_newref))
-
-                if 'data_Fpsf_full' not in locals():
-                    data_Fpsf_full = read_hdulist('{}_Fpsf.fits'
-                                                  .format(base_newref))
-                    
-                log.info ('extracting fake stars from data')
-                extract_fakestars (
-                    table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
-                    index_extract, data_Fpsf_full, data_Fpsferr_full,
-                    data_Scorr_full, pixscale_new, log=log)
-
-
-        else:
-
-            # for the moment, read in these images here; will hopefully
-            # not be necessary for most of them with improved transient
-            # extraction function
-            if 'data_new_full' not in locals():
-                data_new_full = read_hdulist(fits_new)
-
-            if 'data_ref_full' not in locals():
-                data_ref_full = read_hdulist(fits_ref)
-
-            if 'data_new_bkg_std_full' not in locals():
-                data_new_bkg_std_full = read_hdulist(fits_new_bkg_std)
-                
-            if 'data_ref_bkg_std_full' not in locals():
-                data_ref_bkg_std_full = read_hdulist(fits_ref_bkg_std)
-
-            if 'data_D_full' not in locals():
-                data_D_full = read_hdulist(fits_D)
+            # read in background-subtracted and (possibly)
+            # normalized Scorr image
+            data_Scorr_full = read_hdulist('{}_Scorr_bkgsub.fits'
+                                           .format(base_newref))
 
             if 'data_Fpsf_full' not in locals():
-                data_Fpsf_full = read_hdulist(fits_Fpsf)
-
-            if 'data_new_mask_full' not in locals():
-                data_new_mask_full = read_hdulist(fits_new_mask)
-
-            if 'data_ref_mask_full' not in locals():
-                data_ref_mask_full = read_hdulist(fits_ref_mask)
-
-            # find transients using function [get_trans], which
-            # applies threshold cuts directly on Scorr for the transient
-            # detection, rather than running SExtractor (see below)
-            ntrans, data_thumbnails = get_trans (
-                data_new_full, data_ref_full,
-                data_D_full, data_Scorr_full,
-                data_Fpsf_full, data_Fpsferr_full,
-                data_new_mask_full, data_ref_mask_full,
-                data_new_bkg_std_full, data_ref_bkg_std_full,
-                header_new, header_ref, header_trans,
-                fits_new_psf, fits_ref_psf, fits_new_cat, fits_ref_cat, log)
+                data_Fpsf_full = read_hdulist('{}_Fpsf.fits'
+                                              .format(base_newref))
+                    
+            log.info ('extracting fake stars from data')
+            extract_fakestars (
+                table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
+                index_extract, data_Fpsf_full, data_Fpsferr_full,
+                data_Scorr_full, pixscale_new, log=log)
 
 
         mem_use (label='just after get_trans', log=log)
+
         
         # add header keyword(s):
         header_trans['T-NSIGMA'] = (get_par(set_zogy.transient_nsigma,tel),
@@ -1331,32 +1106,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         fits_Fpsf = '{}_Fpsf.fits'.format(base_newref)
         fits_Fpsferr = '{}_Fpsferr.fits'.format(base_newref)
 
-        if not get_par(set_zogy.low_RAM,tel):
-
-            fits.writeto(fits_D, data_D_full, header_tmp, overwrite=True)
-            fits.writeto(fits_Scorr, data_Scorr_full, header_tmp, overwrite=True)
-            fits.writeto(fits_Fpsf, data_Fpsf_full, header_tmp, overwrite=True)
-            fits.writeto(fits_Fpsferr, data_Fpsferr_full, header_tmp,
-                         overwrite=True)
-
-            del data_D_full, data_Scorr_full, data_Fpsf_full, data_Fpsferr_full
+        # images were already created above, just update the headers here
+        with fits.open(fits_D, 'update', memmap=True) as hdulist:
+            hdulist[0].header = header_tmp
+        with fits.open(fits_Scorr, 'update', memmap=True) as hdulist:
+            hdulist[0].header = header_tmp
+        with fits.open(fits_Fpsf, 'update', memmap=True) as hdulist:
+            hdulist[0].header = header_tmp
+        with fits.open(fits_Fpsferr, 'update', memmap=True) as hdulist:
+            hdulist[0].header = header_tmp
             
-            mem_use (label='just after writing D, Scorr, Fpsf, Fpsferr images',
-                     log=log)
-
-        else:
-            
-            # images were already created above, just update the headers here
-            with fits.open(fits_D, 'update', memmap=True) as hdulist:
-                hdulist[0].header = header_tmp
-            with fits.open(fits_Scorr, 'update', memmap=True) as hdulist:
-                hdulist[0].header = header_tmp
-            with fits.open(fits_Fpsf, 'update', memmap=True) as hdulist:
-                hdulist[0].header = header_tmp
-            with fits.open(fits_Fpsferr, 'update', memmap=True) as hdulist:
-                hdulist[0].header = header_tmp
-            
-            mem_use (label='just after updating headers', log=log)
+        mem_use (label='just after updating headers', log=log)
 
 
         # try to write scaled uint8 or int16 limiting magnitude image
@@ -1381,21 +1141,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_fits, label='writing D, Scorr, Fpsf and '
                                'Fpsferr fits images', log=log)
-        
-        if not get_par(set_zogy.low_RAM,tel) and get_par(set_zogy.display,tel):
-            header_new['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto('new.fits', data_new_full, header_new, overwrite=True)
-            header_ref['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
-            header_new['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto('new_mask.fits', data_new_mask_full, header_new,
-                         overwrite=True)
-            header_ref['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref,
-                         overwrite=True)
 
-            del data_new_full, data_new_mask_full
-            del data_ref_full, data_ref_mask_full
 
 
     mem_use (label='just before formatting catalogs', log=log)
@@ -1573,7 +1319,7 @@ def create_subs (name_full, dir_sub, nsubs, cuts_ima, dtype_sub, index_extract,
     if 'fits' in ext:
         data_full = read_hdulist(name_full)
     else:
-        data_full = np.load(name_full, mmap_mode='r')
+        data_full = np.load(name_full)
 
     size_fft = (get_par(set_zogy.subimage_size,tel) +
                 2*get_par(set_zogy.subimage_border,tel))
@@ -1632,7 +1378,7 @@ def create_full (name_full, header_full, shape_full, dtype_full, nsubs, cuts_ima
             if 'fits' in ext:
                 data_sub = read_hdulist(sublist[nsub])
             else:
-                data_sub = np.load(sublist[nsub], mmap_mode='r')
+                data_sub = np.load(sublist[nsub], mmap_mode='c')
 
 
         # paste subimage into data_full
@@ -1787,8 +1533,8 @@ def extract_fakestars (table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
         plt.savefig('{}_fakestar_S2N_ZOGYoutput.pdf'.format(base_newref))
         if get_par(set_zogy.show_plots,tel): plt.show()
         plt.close()
-        
-            
+
+
     return
 
 
@@ -4260,23 +4006,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
               .format(psf_size, imtype))
 
     
-    use_PSF_subimage = False
-    if imtype != 'ref' and use_PSF_subimage:
-        
-        # try to speed up flux determination by reading in psf_ima
-        # numpy file created in [get_psf] which contains the PSF
-        # images at the centers of the subimages; should not be done
-        # for the ref image flux determination as the psf_ima cube is
-        # constrained to the same size in pixels as the new image for
-        # the moment
-        psf_ima_cube = np.load('{}_psf_ima.npy'.format(base_new),
-                               mmap_mode='c')
-        # using [coords2sub] create array indicating subimage
-        # index corresponding to the pixel coordinates
-        index_subs = coords2sub (xcoords, ycoords, D.shape)
-        
-    
-
     # loop coordinates
     for i in range(ncoords):
         
@@ -4289,23 +4018,13 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         xshift = xcoords[i]-np.round(xcoords[i])
         yshift = ycoords[i]-np.round(ycoords[i])
 
-
-        if use_PSF_subimage:
-            
-            # point to subimage PSF
-            psf_ima = psf_ima_cube[index_subs[i]]
-
-            # shift
-            psf_ima = ndimage.shift(psf_ima, (yshift, xshift), order=2)
-
-        else:
-            # using function [get_psf_ima], construct the PSF image with
-            # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
-            # image is at the original pixel scale
-            psf_ima, __ = get_psf_ima (
-                data_psf, xcoords[i], ycoords[i], psf_size,
-                psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-                xshift=xshift, yshift=yshift, imtype=imtype, log=log)
+        # using function [get_psf_ima], construct the PSF image with
+        # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
+        # image is at the original pixel scale
+        psf_ima, __ = get_psf_ima (
+            data_psf, xcoords[i], ycoords[i], psf_size,
+            psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
+            xshift=xshift, yshift=yshift, imtype=imtype, log=log)
 
 
         if i % 10000 == 0:
@@ -6503,24 +6222,32 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         t2 = time.time()
 
 
-    # otherwise initialize them as numpy data arrays
-    fftdata = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
-    fftdata_bkg_std = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='float32')
-    fftdata_mask = np.zeros((nsubs, ysize_fft, xsize_fft), dtype='uint8')
-
+    # save fftdata and fftdata_bkg_std to numpy files, one for each
+    # subimage, and let the variable names point to the filenames from
+    # which they will be read in again later on
     for nsub in range(nsubs):
+            
+        # initialize subimage numpy fft data arrays
+        fftdata_sub = np.zeros((ysize_fft, xsize_fft), dtype='float32')
+        fftdata_bkg_std_sub = np.zeros((ysize_fft, xsize_fft),
+                                       dtype='float32')
+            
+        # fill the subimage fft data arrays
         fftcut = cuts_fft[nsub]
         index_fft = tuple([slice(fftcut[0],fftcut[1]),
                            slice(fftcut[2],fftcut[3])])
         subcutfft = cuts_ima_fft[nsub]
         index_fftdata = tuple([slice(subcutfft[0],subcutfft[1]),
                                slice(subcutfft[2],subcutfft[3])])
-        fftdata[nsub][index_fft] = data[index_fftdata]
-        fftdata_bkg_std[nsub][index_fft] = data_bkg_std[index_fftdata]
-        fftdata_mask[nsub][index_fft] = data_mask[index_fftdata]
-
-
-
+        fftdata_sub[index_fft] = data[index_fftdata]
+        fftdata_bkg_std_sub[index_fft] = data_bkg_std[index_fftdata]
+        
+        # save the subimage fft data arrays
+        fftdata = save_npy_fits (fftdata_sub, '{}_fftdata_sub{}.npy'
+                                 .format(base, nsub))
+        fftdata_bkg_std = save_npy_fits (fftdata_bkg_std_sub,
+                                         '{}_fftdata_bkg_std_sub{}.npy'
+                                         .format(base, nsub))
         
 
     if get_par(set_zogy.timing,tel):
@@ -6543,18 +6270,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         log_timing_memory (t0=t, label='prep_optimal_subtraction', log=log)
 
 
-    if get_par(set_zogy.low_RAM,tel):
-        # in low_RAM mode, save fftdata, fftdata_bkg_std and
-        # fftdata_mask to numpy files, and let the variable names
-        # point to the filenames from which they will be read in again
-        # later on
-        fftdata = save_npy_fits (
-            fftdata, filename='{}_fftdata.npy'.format(base))
-        fftdata_bkg_std = save_npy_fits (
-            fftdata_bkg_std, filename='{}_fftdata_bkg_std.npy'.format(base))
-        fftdata_mask = save_npy_fits (
-            fftdata_mask, filename='{}_fftdata_mask.npy'.format(base))
-
 
         #if get_par(set_zogy.verbose,tel):
     #    log.info('fftdata.dtype {}'.format(fftdata.dtype))
@@ -6567,9 +6282,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # save fftdata
 
 
-    #return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std, fftdata_mask
-    return fftdata, psf, psf_orig, fftdata_bkg_std, fftdata_mask
-    
+    #return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
+    return fftdata, psf, psf_orig, fftdata_bkg_std
+
 
 ################################################################################
 
@@ -6788,7 +6503,33 @@ def calc_mag (flux1, flux2):
    
 ################################################################################
 
-def save_npy_fits (data, filename=None, header=None):
+def load_npy_fits (filename, nsub=None):
+
+    # determine file extension
+    ext = filename.split('.')[-1]
+
+    if nsub is not None:
+        if 'sub' in filename:
+            # name may already include sub number; if so, replace it
+            # with [nsub]
+            filename = '{}_sub{}.{}'.format(filename.split('_sub')[0], nsub, ext)
+        else:
+            # otherwise add _sub and [nsub] just before the extension
+            filename = '{}_sub{}.{}'.format(filename.split('.')[0], nsub, ext)
+
+    # load numpy or fits file
+    if 'fits' in ext:
+        data = read_hdulist(filename)
+    else:
+        data = np.load(filename, mmap_mode='c')
+        
+
+    return data
+
+
+################################################################################
+
+def save_npy_fits (data, filename, header=None):
 
     """function to save [data] to a file. Depending on the extension, it
     is saved as a numpy (.npy) or fits (.fits) file. If filename is
@@ -6807,9 +6548,22 @@ def save_npy_fits (data, filename=None, header=None):
         # save [data] as fits file
         fits.writeto (filename, data, header, overwrite=True)
     else:
-        # save [data] as numpy file
+        # save [data] as numpy file in numpy folder
+        dir_numpy = get_par(set_zogy.dir_numpy,tel)
+        if dir_numpy is not None and len(dir_numpy) > 0:
+
+            path, name = os.path.split(filename)
+            dir_numpy = '{}/{}'.format(path, dir_numpy)
+            # make folder if it does not exist yet
+            if not os.path.isdir(dir_numpy):
+                os.mkdir(dir_numpy)
+
+            # update filename
+            filename = '{}/{}'.format(dir_numpy, name)
+            
+        # save numpy file
         np.save(filename, data)
-        
+
     # return filename
     return filename
 
@@ -8773,10 +8527,6 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     # save memory
     # psf_ima_center = np.zeros((nsubs,ysize_fft,xsize_fft))
     
-    # [psf_ima_shift] is [psf_ima_center] shifted - this is
-    # the input PSF image needed in the [run_ZOGY] function
-    psf_ima_shift = np.zeros((nsubs,ysize_fft,xsize_fft)).astype('float32')
-
         
     # if [run_psfex] was executed successfully (see above), then add a
     # number of header keywords
@@ -8849,12 +8599,19 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
         # perform fft shift, i.e. psf_ima_center is split into 4
         # quadrants which are flipped so that PSF center ends up on
         # the 4 corners of psf_ima_shift[nsub]
-        psf_ima_shift[nsub] = fft.fftshift(psf_ima_center)
+        psf_ima_shift_sub = fft.fftshift(psf_ima_center)
+
+        # save psf_ima_shift_sub to a .npy file using function
+        # [save_npy_fits] and let [psf_ima_shift] point to this
+        # filename string
+        psf_ima_shift = save_npy_fits (psf_ima_shift_sub,
+                                       '{}_psf_ima_shift_sub{}.npy'
+                                       .format(base, nsub))
 
 
         if (get_par(set_zogy.display,tel) and show_sub(nsub) and
             'base_newref' in globals()):
-
+            
             fits.writeto('{}_psf_ima_config_sub{}.fits'.format(base, nsub),
                          psf_ima_config_sub.astype('float32'), overwrite=True)
             fits.writeto('{}_psf_ima_sub{}.fits'.format(base, nsub),
@@ -8864,20 +8621,6 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             fits.writeto('{}_psf_ima_shift_sub{}.fits'.format(base, nsub),
                          psf_ima_shift[nsub].astype('float32'), overwrite=True)
 
-
-
-    if get_par(set_zogy.low_RAM,tel):
-        # in low_RAM mode, save psf_ima_shift_sub to a .npy file
-        # using function [save_npy_fits] and let [psf_ima_shift]
-        # point to this filename string
-        psf_ima_shift = save_npy_fits (
-            psf_ima_shift, filename='{}_psf_ima_shift.npy'.format(base))
-
-        if False:
-            # same for [psf_ima] cube, which can be used in the
-            # optimal photometry measurements
-            __ = save_npy_fits(psf_ima, filename='{}_psf_ima.npy'.format(base)) 
-        
         
     # now that PSFEx is done, fit elliptical Moffat and Gauss
     # functions to centers of subimages across the frame using the
@@ -11908,23 +11651,22 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
     alpha_std[mask] = np.sqrt(V_S[mask]) / F_S
 
 
-    if get_par(set_zogy.low_RAM,tel):
-        # in low_RAM mode, save numpy arrays to file; the array
-        # variables will point to the filenames instead
-        base = base_newref
-        if get_par(set_zogy.display,tel) and show_sub(nsub):
-            # save as fits so it can be used to display
-            subend = 'sub{}.fits'.format(nsub)
-        else:
-            # save as numpy file
-            subend = 'sub{}.npy'.format(nsub)
+    # save numpy arrays to file; the array variables will point to the
+    # filenames instead
+    base = base_newref
+    if get_par(set_zogy.display,tel) and show_sub(nsub):
+        # save as fits so it can be used to display
+        subend = 'sub{}.fits'.format(nsub)
+    else:
+        # save as numpy file
+        subend = 'sub{}.npy'.format(nsub)
 
-        D = save_npy_fits (D, filename='{}_D_{}'.format(base, subend))
-        S = save_npy_fits (S, filename='{}_S_{}'.format(base, subend))
-        Scorr = save_npy_fits (Scorr, filename='{}_Scorr_{}'.format(base, subend))
-        alpha = save_npy_fits (alpha, filename='{}_Fpsf_{}'.format(base, subend))
-        alpha_std = save_npy_fits (alpha_std, filename='{}_Fpsferr_{}'
-                                   .format(base, subend))
+    D = save_npy_fits (D, '{}_D_{}'.format(base, subend))
+    S = save_npy_fits (S, '{}_S_{}'.format(base, subend))
+    Scorr = save_npy_fits (Scorr, '{}_Scorr_{}'.format(base, subend))
+    alpha = save_npy_fits (alpha, '{}_Fpsf_{}'.format(base, subend))
+    alpha_std = save_npy_fits (alpha_std, '{}_Fpsferr_{}'
+                               .format(base, subend))
 
 
     if get_par(set_zogy.timing,tel) and log is not None:

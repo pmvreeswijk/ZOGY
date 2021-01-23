@@ -227,8 +227,8 @@ swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
               'saturated-connected': 8, 'satellite trail': 16, 'edge': 32}
 
-# switch to lower RAM memory consumption by increasing the disk I/O
-low_RAM = True
+# subfolder to save the many temporary numpy binary files
+dir_numpy = 'NumpyFiles'
 
 # switch on/off different functions
 redo_new = False         # execute SExtractor, astrometry.net, PSFEx, optimal flux
