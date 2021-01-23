@@ -1296,8 +1296,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # get_ML_prob_real
         ML_prob_real = None
         if (get_par(set_zogy.ML_calc_prob,tel) and
-            tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-            data_thumbnails is not None):
+            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
 
             try:
                 ML_processed = False
@@ -1337,8 +1336,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             fits.writeto(fits_D, data_D_full, header_tmp, overwrite=True)
             fits.writeto(fits_Scorr, data_Scorr_full, header_tmp, overwrite=True)
             fits.writeto(fits_Fpsf, data_Fpsf_full, header_tmp, overwrite=True)
-            fits.writeto(fits_Fpsferr, data_Fpsferr_full, header_tmp, overwrite=True)
+            fits.writeto(fits_Fpsferr, data_Fpsferr_full, header_tmp,
+                         overwrite=True)
 
+            del data_D_full, data_Scorr_full, data_Fpsf_full, data_Fpsferr_full
+            
             mem_use (label='just after writing D, Scorr, Fpsf, Fpsferr images',
                      log=log)
 
@@ -1374,7 +1376,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         else:
             fits.writeto(fits_limmag, data_limmag, header_tmp, overwrite=True)
 
-
+        del data_limmag
+            
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_fits, label='writing D, Scorr, Fpsf and '
                                'Fpsferr fits images', log=log)
@@ -1385,11 +1388,16 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             header_ref['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
             fits.writeto('ref.fits', data_ref_full, header_ref, overwrite=True)
             header_new['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto('new_mask.fits', data_new_mask_full, header_new, overwrite=True)
+            fits.writeto('new_mask.fits', data_new_mask_full, header_new,
+                         overwrite=True)
             header_ref['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref, overwrite=True)
+            fits.writeto('ref_mask.fits', data_ref_mask_full, header_ref,
+                         overwrite=True)
 
-                                
+            del data_new_full, data_new_mask_full
+            del data_ref_full, data_ref_mask_full
+
+
     mem_use (label='just before formatting catalogs', log=log)
 
     # using the function [format_cat], write the new, ref and
@@ -1427,15 +1435,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if get_par(set_zogy.save_thumbnails,tel) and data_thumbnails is not None:
             keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
                                'THUMBNAIL_D', 'THUMBNAIL_SCORR']
-            size_thumbnails = get_par(set_zogy.size_thumbnails,tel)
             
         else:
             # setting keys_thumbnails to None is needed to avoid
             # adding thumbnails; if keys_thumbnails is defined and
             # data_thumbnails is None, then an empty catalog would be
-            # created!
+            # created
             keys_thumbnails = None
-            size_thumbnails = None
             data_thumbnails = None
             
 
@@ -1448,7 +1454,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              apphot_radii=get_par(set_zogy.apphot_radii,tel),
                              data_thumbnails=data_thumbnails,
                              keys_thumbnails=keys_thumbnails,
-                             size_thumbnails=size_thumbnails,
+                             size_thumbnails=get_par(set_zogy.size_thumbnails,
+                                                     tel),
                              ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
                              ML_prob_real=ML_prob_real,
                              nfakestars=get_par(set_zogy.nfakestars,tel),
@@ -3246,11 +3253,10 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     # case either thumbnail data is being saved or MeerCRAB
     # probabilities need to be calculated for ML/BG, and the
     # transient table size is not unreasonably large
-    if (len(table_trans) < 20000 and
-        (get_par(set_zogy.save_thumbnails,tel) or
-         (get_par(set_zogy.ML_calc_prob,tel) and
-          tel in ['ML1', 'BG2', 'BG3', 'BG4']))):
-
+    if (get_par(set_zogy.save_thumbnails,tel) or
+        (get_par(set_zogy.ML_calc_prob,tel) and
+         tel in ['ML1', 'BG2', 'BG3', 'BG4'])):
+        
         data_full_list = [data_new, data_ref, data_D, data_Scorr]
         keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
                            'THUMBNAIL_D', 'THUMBNAIL_SCORR']
@@ -3268,7 +3274,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
         data_thumbnails = np.zeros((n_thumbnails, ncoords,
                                     size_thumbnails, size_thumbnails),
                                    dtype='float32')
-    
+
         # size of full input images; assuming they have identical shapes
         ysize, xsize = data_full_list[0].shape
     
@@ -3910,8 +3916,9 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
     
         # initialise output thumbnail columns
         data_thumbnails = np.zeros((n_thumbnails, ncoords,
-                                    size_thumbnails, size_thumbnails))
-    
+                                    size_thumbnails, size_thumbnails),
+                                   dtype='float32')
+
         # size of full input images; assuming they have identical shapes
         ysize, xsize = data_full_list[0].shape
     
