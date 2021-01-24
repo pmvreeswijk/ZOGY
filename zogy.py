@@ -6194,8 +6194,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # set zero values to median
         mask_zero = (area==0)
-        area[mask_zero] = np.median(area)
-        
+        if np.all(mask_zero):
+            area[:] = 1.
+        else:
+            area[mask_zero] = np.median(area)
+
         # reshape
         ysize, xsize = data_limmag.shape
         subsize = get_par(set_zogy.subimage_size,tel)
