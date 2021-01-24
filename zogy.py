@@ -586,32 +586,47 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # psf and background images
     if new:
-        data_new, psf_new, psf_orig_new, data_new_bkg_std = (
-            prep_optimal_subtraction('{}.fits'.format(base_new), nsubs, 'new',
-                                     fwhm_new, header_new,
-                                     fits_mask=new_fits_mask,
-                                     nthreads=nthreads, log=log))
+        try:
+            # data_new, psf_new and data_new_bkg_std (same goes for
+            # corresponding ref arrays below) are actually strings
+            # pointing to the name of the (last) subimage file(s) in
+            # which the subimage data arrays were saved;
+            # [load_npy_fits] with input parameter nsub will read the
+            # separate files properly
+            data_new, psf_new, psf_orig_new, data_new_bkg_std = (
+                prep_optimal_subtraction('{}.fits'.format(base_new), nsubs,
+                                         'new', fwhm_new, header_new,
+                                         fits_mask=new_fits_mask,
+                                         nthreads=nthreads, log=log))
 
-        # data_new, psf_new and data_new_bkg_std are actually strings
-        # pointing to the name of the (last) subimage file(s) in which
-        # the subimage data arrays were saved; [load_npy_fits] with
-        # input parameter nsub will read the separate files properly
+        except Exception as e:
+            log.exception('exception was raised during [prep_optimal_extraction]'
+                          ' of new image {}: {}'.format(base_new, e))
+            if not ref:
+                return header_new
+            else:
+                return header_new, header_trans
 
 
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with ref,
     # psf and background images; if new and ref are provided, then
     # these images will be remapped to the new frame
     if ref:
-        data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std = (
-            prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs, 'ref',
-                                     fwhm_ref, header_ref,
-                                     fits_mask=ref_fits_mask, remap=remap,
-                                     nthreads=nthreads, log=log))
+        try:
+            data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std = (
+                prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs,
+                                         'ref', fwhm_ref, header_ref,
+                                         fits_mask=ref_fits_mask, remap=remap,
+                                         nthreads=nthreads, log=log))
             
-        # data_ref, psf_ref and data_ref_bkg_std are actually strings
-        # pointing to the name of the (last) subimage file(s) in which
-        # the subimage data arrays were saved; [load_npy_fits] with
-        # input parameter nsub will read the separate files properly
+        except Exception as e:
+            log.exception('exception was raised during [prep_optimal_extraction]'
+                          ' of reference image {}: {}'.format(base_ref, e))
+            if not new:
+                return header_ref
+            else:
+                return header_new, header_trans
+
 
         if remap:
             # for now set the value header below to True by hand;
