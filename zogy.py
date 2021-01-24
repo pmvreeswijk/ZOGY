@@ -359,10 +359,21 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
 
         log.info ('redo switch in [sex_wcs]: {}'.format(redo))
-        
+
+        if os.path.isfile(sexcat):
+            header_cat_ldac = read_hdulist (sexcat, get_data=False, get_header=True)
+            size_cat_ldac = header_cat_ldac['NAXIS2']
+
+        fits_cat = '{}_cat.fits'.format(base)
+        if os.path.isfile(fits_cat):
+            header_cat = read_hdulist (fits_cat, get_data=False, get_header=True)
+            size_cat = header_cat['NAXIS2']        
+
         # run SExtractor on full image
-        if (not (os.path.isfile(sexcat) or
-                 os.path.isfile('{}_cat.fits'.format(base))) or redo):
+        if (not ((os.path.isfile(sexcat) and size_cat_ldac > 0) or
+                 (os.path.isfile(fits_cat) and size_cat > 0))
+            or redo):
+
             try:
                 SE_processed = False
                 result = run_sextractor(
