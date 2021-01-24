@@ -620,7 +620,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # get x, y and fratios from matching PSFex stars across entire
         # frame the "_subs" output arrays are the values to be used for
         # the subimages below in the function [run_ZOGY]
-        x_fratio, y_fratio, fratio, dx, dy, fratio_subs, dx_subs, dy_subs = (
+        ok, x_fratio, y_fratio, fratio, dx, dy, fratio_subs, dx_subs, dy_subs = (
             get_fratio_dxdy ('{}_cat.fits'.format(base_new),
                              '{}_cat.fits'.format(base_ref),
                              '{}_psfex.cat'.format(base_new),
@@ -629,7 +629,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              nsubs, cuts_ima, log, header_trans, pixscale_new,
                              use_optflux=get_par(set_zogy.fratio_optflux,tel)))
 
+        if not ok:
+            # leave because of too few matching stars in new and ref
+            # to determine fratio, dx and dy
+            return header_new, header_trans
 
+        
         if False:
             # compare this with the flux ratio inferred from the zeropoint
             # difference between new and ref:
@@ -994,7 +999,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         mem_use (label='just before get_trans', log=log)
         
-        table_trans, data_thumbnails = get_trans_alt (
+        table_trans, dict_thumbnails = get_trans (
             fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
             header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
@@ -1076,7 +1081,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             try:
                 ML_processed = False
                 ML_model = get_par(set_zogy.ML_model,tel)
-                ML_prob_real = get_ML_prob_real (data_thumbnails, ML_model)
+                ML_prob_real = get_ML_prob_real (dict_thumbnails, ML_model)
             except Exception as e:
                 #log.exception(traceback.format_exc())
                 log.exception('exception was raised during [get_ML_prob_real]: '
@@ -1178,18 +1183,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
 
-        if get_par(set_zogy.save_thumbnails,tel) and data_thumbnails is not None:
-            keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
-                               'THUMBNAIL_D', 'THUMBNAIL_SCORR']
-            
-        else:
-            # setting keys_thumbnails to None is needed to avoid
-            # adding thumbnails; if keys_thumbnails is defined and
-            # data_thumbnails is None, then an empty catalog would be
-            # created
-            keys_thumbnails = None
-            data_thumbnails = None
-            
 
         # need to take care of objects closer than 32/2 pixels to
         # the full image edge in creation of thumbnails - results
@@ -1198,13 +1191,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              header_toadd=(header_new+header_trans),
                              exptime=exptime_new,
                              apphot_radii=get_par(set_zogy.apphot_radii,tel),
-                             data_thumbnails=data_thumbnails,
-                             keys_thumbnails=keys_thumbnails,
+                             dict_thumbnails=dict_thumbnails,
+                             save_thumbnails=get_par(set_zogy.save_thumbnails,
+                                                     tel),
                              size_thumbnails=get_par(set_zogy.size_thumbnails,
                                                      tel),
                              ML_calc_prob=get_par(set_zogy.ML_calc_prob,tel),
                              ML_prob_real=ML_prob_real,
-                             nfakestars=get_par(set_zogy.nfakestars,tel),
+                             nfakestars= get_par(set_zogy.nfakestars,tel),
                              tel=tel, log=log)
 
         # test: calculate old ML_prob_real on the fits catalog
@@ -1472,7 +1466,7 @@ def extract_fakestars (table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
             table_fake['S2N_OUT'][i_fake] = table_trans['SCORR_PEAK'][i_trans]
             
             
-    # overwrite output fits catalog created in [get_trans_alt]
+    # overwrite output fits catalog created in [get_trans]
     table_trans.write('{}.transcat'.format(base_newref), format='fits',
                       overwrite=True)
 
@@ -1560,21 +1554,18 @@ def show_sub (nsub):
 
 ################################################################################
 
-def get_ML_prob_real (data_thumbnails, model, use_30x30=True,
+def get_ML_prob_real (dict_thumbnails, model, use_30x30=True,
                       factor_norm=255.):
-    
+
     """function based on Zafiirah's Jupyter notebook (see
     https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
     function [realbogus_prediction] to calculate the probability that
-    a transient candidate is real, using the image thumbnails in
-    [data_thumbnails] in combination with the trained model
+    a transient candidate is real, using the thumbnail files recorded
+    in [dict_thumbnails] in combination with the trained model
     [model]. Most models require the central 30x30 pixels to be used
     rather than the full (100x100) thumbnails. The normalisation
     factor 255 is the one applied by Zafiirah to the thumbnails during
     the ML training.
-
-    data_thumbnails is a numpy array with shape: (4, nrows or ncoords, 100, 100) 
-    where 100 is determined by set_zogy.size_thumbnails
 
     """
 
@@ -1586,25 +1577,37 @@ def get_ML_prob_real (data_thumbnails, model, use_30x30=True,
     model_path, model_name = os.path.split(model)
     # model_path input into [realbogus_prediction] requires trailing /
     model_path += '/'
-    
+
 
     # thumbnail images are 100x100 pixels, need to extract the central
     # 30x30 pixels for most of Zafiirah's models
     if use_30x30:
-        index = (slice(None,None), slice(None, None), slice(35,65), slice(35,65))
+        index = (slice(None, None), slice(35,65), slice(35,65))
     else:
-        index = (slice(None,None), slice(None,None), slice(None,None),
-                 slice(None,None))
+        index = (slice(None,None), slice(None,None), slice(None,None))
 
 
-    # reshape input data into an array with shape (nrows in table, 30
-    # or 100, 30 or 100, 3 or 4)
-    if 'NRDS' in model_name:
-        # all 4 thumbnails are used
-        data_stack = np.copy(np.moveaxis(data_thumbnails[index], 0,-1))
-    else:
-        # 3 thumbnails are used:
-        data_stack = np.copy(np.moveaxis(data_thumbnails[index][0:3], 0,-1))
+    # initially list with data to be stacked after the loop
+    list_2stack = []
+
+
+    # loop [dict_thumbnails] and read corresponding numpy files
+    for key in dict_thumbnails.keys():
+
+        # data_thumbnail will initially have shape (nrows, 100, 100),
+        # potentially reduced to (nrows, 30, 30) using [index]
+        data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')[index]
+
+        # append to list to be stacked, except for the 'SCORR'
+        # thumbnail in case modelname does not contain 'NRDS'
+        if not ('NRDS' not in model_name and '_SCORR' in key):
+            list_2stack.append(data_thumbnail)
+
+
+    # stack data_thumbnail along last axis; shape expected in
+    # [realbogus_prediction] is (nrows, 30 or 100, 30 or 100, 3 or 4)
+    # where last dimension depends on whether Scorr is included or not
+    data_stack = np.stack(list_2stack, axis=-1)
 
 
     # normalise
@@ -1613,15 +1616,15 @@ def get_ML_prob_real (data_thumbnails, model, use_30x30=True,
 
     # generate some transient ID (not important but required)
     #id_trans = np.arange(len(table))
-    id_trans = np.arange(data_thumbnails.shape[1])
+    id_trans = np.arange(data_stack.shape[0])
 
 
     # threshold (not important but required)
     prob_thresh = 0.5
     ML_real_prob, __ = realbogus_prediction(model_name, data_stack, id_trans,
                                             prob_thresh, model_path=model_path)
-    
-    
+
+
     return ML_real_prob
 
 
@@ -2068,8 +2071,8 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
 ################################################################################
 
 def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
-                exptime=0, apphot_radii=None, data_thumbnails=None,
-                keys_thumbnails=None, size_thumbnails=100, ML_calc_prob=False,
+                exptime=0, apphot_radii=None, dict_thumbnails=None,
+                save_thumbnails=False, size_thumbnails=100, ML_calc_prob=False,
                 ML_prob_real=None, nfakestars=0, tel=None, log=None):
 
 
@@ -2081,6 +2084,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
        entries.
 
     """
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing format_cat ...')
+        mem_use (label='at start of format_cat', log=log)
+
 
     if cat_in is not None:
 
@@ -2365,24 +2374,32 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 columns.append(get_col (key, key_new))
                 
 
+    if log is not None:
+        mem_use (label='after column definition in format_cat', log=log)
+
+                
     # add [thumbnails]
-    if keys_thumbnails is not None:
+    if save_thumbnails:
 
         dim_str = '({},{})'.format(size_thumbnails, size_thumbnails)
         
-        for i_tn, key in enumerate(keys_thumbnails):
+        for i_tn, key in enumerate(dict_thumbnails.keys()):
 
-            if data_thumbnails is not None:
+            if dict_thumbnails[key] is not None:
+
+                # read data_thumbnail from input [dict_thumbnails]
+                data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')
+            
                 # add column to table including the data
                 col = fits.Column(name=key, format=formats[key][0],
                                   unit=formats[key][1],
-                                  array=data_thumbnails[i_tn], dim=dim_str)
+                                  array=data_thumbnail, dim=dim_str)
             else:
                 # add column but without the data (i.e. a dummy cat
                 # where fits table fields still need to be defined)
                 col = fits.Column(name=key, format=formats[key][0],
                                   unit=formats[key][1], dim=dim_str)
-            
+
             # append column
             columns.append(col)
 
@@ -2391,8 +2408,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
 
 
-    #if get_par(set_zogy.timing,tel) and log is not None:
-    #    log_timing_memory (t0=t, label='format_cat', log=log)
+    if log is not None and get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='format_cat', log=log)
+
 
     hdu = fits.BinTableHDU.from_columns(columns)
     header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
@@ -2450,10 +2468,10 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 
 ################################################################################
 
-def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
-                   fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
-                   header_new, header_ref, header_trans,
-                   fits_new_psf, fits_ref_psf, nthreads=1, log=None):
+def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
+               fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
+               header_new, header_ref, header_trans,
+               fits_new_psf, fits_ref_psf, nthreads=1, log=None):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
@@ -2541,7 +2559,7 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     nstat = int(0.1 * (xsize*ysize))
     x_stat = (np.random.rand(nstat)*(xsize-2*edge)).astype(int) + edge
     y_stat = (np.random.rand(nstat)*(ysize-2*edge)).astype(int) + edge
-    log.info ('calculating Scorr statistics in [get_trans_alt]')
+    log.info ('calculating Scorr statistics in [get_trans]')
     #mean, median, std = sigma_clipped_stats (data_Scorr)
     #print ('mean: {}, median: {}, std: {}'
     #       .format(mean, median, std))
@@ -2994,18 +3012,17 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
     table_trans.write('{}.transcat'.format(base_newref), format='fits',
                       overwrite=True)
 
-
+    # define keys of thumbnails
+    keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
+                       'THUMBNAIL_D', 'THUMBNAIL_SCORR']
+    
     # extract the thumbnail images corresponding to the transients in
     # case either thumbnail data is being saved or MeerCRAB
-    # probabilities need to be calculated for ML/BG, and the
-    # transient table size is not unreasonably large
+    # probabilities need to be calculated for ML/BG
     if (get_par(set_zogy.save_thumbnails,tel) or
         (get_par(set_zogy.ML_calc_prob,tel) and
          tel in ['ML1', 'BG2', 'BG3', 'BG4'])):
         
-        data_full_list = [data_new, data_ref, data_D, data_Scorr]
-        keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
-                           'THUMBNAIL_D', 'THUMBNAIL_SCORR']
         n_thumbnails = len(keys_thumbnails)
     
         # coordinates to loop
@@ -3016,29 +3033,35 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
         # thumbnail size
         size_thumbnails = get_par(set_zogy.size_thumbnails,tel)
     
-        # initialise output thumbnail columns
-        data_thumbnails = np.zeros((n_thumbnails, ncoords,
-                                    size_thumbnails, size_thumbnails),
-                                   dtype='float32')
+        # initialize dictionary with keys [keys_thumbnails] and values
+        # the numpy filenames where data_thumbnail is saved
+        dict_thumbnails = {}
 
-        # size of full input images; assuming they have identical shapes
-        ysize, xsize = data_full_list[0].shape
-    
-        # loop x,y coordinates
-        for i_pos in range(ncoords):
+        # list of full data images to use in loop
+        data_full = [data_new, data_ref, data_D, data_Scorr]
         
-            # get index around x,y position using function [get_index_around_xy]
-            index_full, index_tn = (get_index_around_xy(
-                ysize, xsize, ycoords[i_pos], xcoords[i_pos], size_thumbnails))
+        # size of full input images; assuming they have identical shapes
+        ysize, xsize = data_new.shape
 
-            # loop thumbnails and record pixels from full image to
-            # data_thumbnails
-            for i_tn, key in enumerate(keys_thumbnails):
+        # loop thumbnails
+        for i_tn, key in enumerate(keys_thumbnails):
+
+            # initialise output thumbnail column
+            data_thumbnail = np.zeros((ncoords, size_thumbnails, size_thumbnails),
+                                      dtype='float32')
+
+            # loop x,y coordinates
+            for i_pos in range(ncoords):
                 
+                # get index around x,y position using function
+                # [get_index_around_xy]
+                index_full, index_tn = (
+                    get_index_around_xy(ysize, xsize, ycoords[i_pos],
+                                        xcoords[i_pos], size_thumbnails))
+            
                 try:
-                    
-                    data_thumbnails[i_tn][i_pos][index_tn] = (
-                        data_full_list[i_tn][index_full])
+                        
+                    data_thumbnail[i_pos][index_tn] = data_full[i_tn][index_full]
                     
                     # if [orient_thumbnails] is switched on,
                     # orient the thumbnails in North-up, East left
@@ -3055,34 +3078,41 @@ def get_trans_alt (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsfe
                         #data_thumbnails[i_tn, i_pos] = orient_data (
                         #    data_thumbnails[i_tn, i_pos], header_new,
                         #    MLBG_rot90_flip=True, tel=tel, log=log)
-                        data_thumbnails[i_tn][i_pos] = orient_data (
-                            data_thumbnails[i_tn][i_pos], header_new,
+                        data_thumbnail[i_pos] = orient_data (
+                            data_thumbnail[i_pos], header_new,
                             MLBG_rot90_flip=True, tel=tel, log=log)
 
                         
                 except Exception as e:
                     if log is not None:
-                        log.exception('skipping remapping of thumbnail at x,y: '
-                                      '{:.0f},{:.0f} due to exception: {}'.
-                                      format(xcoords[i_pos], ycoords[i_pos], e))
+                        log.exception('skipping remapping of {} at x,y: '
+                                      '{:.0f},{:.0f} due to exception: {}'
+                                      .format(key, xcoords[i_pos],
+                                              ycoords[i_pos], e))
+                        
+            # save thumbnail as numpy file and record key and name in
+            # dictionary
+            dict_thumbnails[key] = save_npy_fits (data_thumbnail, '{}_{}.npy'
+                                                  .format(base, key))
 
     else:
-        data_thumbnails = None
-                        
-                        
+        for key in keys_thumbnails:
+            dict_thumbnails[key] = None
+
+
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_trans_alt', log=log)
+        log_timing_memory (t0=t, label='get_trans', log=log)
         
-    return table_trans, data_thumbnails
+    return table_trans, dict_thumbnails
 
 
 ################################################################################
 
-def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
-               data_new_mask, data_ref_mask, data_new_bkg_std, data_ref_bkg_std,
-               header_new, header_ref, header_trans,
-               psfex_bintable_new, psfex_bintable_ref,
-               fits_cat_new, fits_cat_ref, log):
+def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
+                   data_Fpsferr, data_new_mask, data_ref_mask, data_new_bkg_std,
+                   data_ref_bkg_std, header_new, header_ref, header_trans,
+                   psfex_bintable_new, psfex_bintable_ref,
+                   fits_cat_new, fits_cat_ref, log):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
@@ -3715,7 +3745,7 @@ def get_trans (data_new, data_ref, data_D, data_Scorr, data_Fpsf, data_Fpsferr,
                         
                         
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_trans', log=log)
+        log_timing_memory (t0=t, label='get_trans_old', log=log)
         
     return ntrans, data_thumbnails
 
@@ -5307,6 +5337,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # subtract the background
         data_wcs -= data_bkg
+        del data_bkg
         # edge pixels will now be negative, best to ensure that they
         # are set to zero
         value_edge = get_par(set_zogy.mask_value['edge'],tel)
@@ -6118,6 +6149,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         data_limmag = apply_zp( (get_par(set_zogy.source_nsigma,tel) * data_err),
                                 zp, airm, exptime, filt, log).astype('float32')
 
+        del data_wcs_copy, data_err
 
         # this is the limiting magnitude per pixel, need to correct
         # for the number of pixels that were used in the flux
@@ -6173,6 +6205,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         else:
             fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
 
+        del data_limmag, data_area
+            
     else:
         log.warning ('PC-ZP or AIRMASSC not present in header of {}; limiting '
                      'magnitude image is therefore not made'.format(input_fits))
@@ -6191,9 +6225,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # not be taken into account
     if remap:
         data = data_ref_remap
-        #data_bkg = data_ref_bkg_remap
         data_bkg_std = data_ref_bkg_std_remap
         data_mask = data_ref_remap_mask
+        del data_wcs
     else:
         data = data_wcs
 
@@ -6222,16 +6256,20 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         t2 = time.time()
 
 
+    # initialize subimage numpy fft data arrays
+    fftdata_sub = np.zeros((ysize_fft, xsize_fft), dtype='float32')
+    fftdata_bkg_std_sub = np.zeros((ysize_fft, xsize_fft),
+                                   dtype='float32')
+
     # save fftdata and fftdata_bkg_std to numpy files, one for each
     # subimage, and let the variable names point to the filenames from
     # which they will be read in again later on
     for nsub in range(nsubs):
-            
-        # initialize subimage numpy fft data arrays
-        fftdata_sub = np.zeros((ysize_fft, xsize_fft), dtype='float32')
-        fftdata_bkg_std_sub = np.zeros((ysize_fft, xsize_fft),
-                                       dtype='float32')
-            
+
+        # initialize to zero
+        fftdata_sub[:] = 0
+        fftdata_bkg_std_sub[:] = 0
+        
         # fill the subimage fft data arrays
         fftcut = cuts_fft[nsub]
         index_fft = tuple([slice(fftcut[0],fftcut[1]),
@@ -6248,7 +6286,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         fftdata_bkg_std = save_npy_fits (fftdata_bkg_std_sub,
                                          '{}_fftdata_bkg_std_sub{}.npy'
                                          .format(base, nsub))
-        
+
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t2, label='filling fftdata cubes', log=log)
@@ -6270,19 +6308,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         log_timing_memory (t0=t, label='prep_optimal_subtraction', log=log)
 
 
-
-        #if get_par(set_zogy.verbose,tel):
-    #    log.info('fftdata.dtype {}'.format(fftdata.dtype))
-    #    log.info('psf.dtype {}'.format(psf.dtype))
-    #    log.info('psf_orig.dtype {}'.format(psf_orig.dtype))
-    #    log.info('fftdata_bkg.dtype {}'.format(fftdata_bkg.dtype))
-    #    log.info('fftdata_bkg_std.dtype {}'.format(fftdata_bkg_std.dtype))
-
-    
-    # save fftdata
-
-
-    #return fftdata, psf, psf_orig, fftdata_bkg, fftdata_bkg_std
     return fftdata, psf, psf_orig, fftdata_bkg_std
 
 
@@ -6561,8 +6586,14 @@ def save_npy_fits (data, filename, header=None):
             # update filename
             filename = '{}/{}'.format(dir_numpy, name)
             
+
+        # if file already exists, remove it
+        if os.path.isfile(filename):
+            os.remove(filename)
+
         # save numpy file
         np.save(filename, data)
+
 
     # return filename
     return filename
@@ -9355,6 +9386,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         log.info('fraction of PSF stars that match: {}'
                  .format(float(nmatch)/len(x_new)))
 
+
     x_new_match = np.asarray(x_new_match)
     y_new_match = np.asarray(y_new_match)
     x_ref_match = np.asarray(x_ref_match)
@@ -9444,23 +9476,46 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     dx_subs = np.zeros(nsubs)
     dy_subs = np.zeros(nsubs)
 
-    # calculate full-frame average standard deviation and median
-    fratio_mean_full, fratio_median_full, fratio_std_full = sigma_clipped_stats(
-        fratio_match, mask_value=0)
+
+    # calculations below require a bare minimum of matches, otherwise
+    # sigma_clipped_stats will return NaNs, which will cause an
+    # exception as header values cannot contain NaNs
+    nmatch_min = 15
+    if nmatch > nmatch_min:
+        
+        success = True
+        
+        # calculate full-frame average standard deviation and median
+        fratio_mean_full, fratio_median_full, fratio_std_full = (
+            sigma_clipped_stats(fratio_match, mask_value=0))
+        
+        dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
+        dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
+        dx_full = np.sqrt(dx_mean**2 + dx_std**2)
+        dy_full = np.sqrt(dy_mean**2 + dy_std**2)
+
+    else:
+
+        success = False
+
+        # set the values arbitrarily high
+        fratio_mean_full, fratio_median_full, fratio_std_full = 100, 100, 100
+        dx_mean, dx_median, dx_std = 100, 100, 100
+        dy_mean, dy_median, dy_std = 100, 100, 100
+        dx_full, dy_full = 100, 100
+        
+        
     if get_par(set_zogy.verbose,tel):
         log.info('fratio_mean_full: {:.3f}'.format(fratio_mean_full))
         log.info('fratio_median_full: {:.3f}'.format(fratio_median_full))
         log.info('fratio_std_full: {:.3f}'.format(fratio_std_full))
 
-    dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
-    dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
-    dx_full = np.sqrt(dx_mean**2 + dx_std**2)
-    dy_full = np.sqrt(dy_mean**2 + dy_std**2)
     if get_par(set_zogy.verbose,tel):
         log.info('median dx: {:.3f} +- {:.3f} pixels'.format(dx_median, dx_std))
         log.info('median dy: {:.3f} +- {:.3f} pixels'.format(dy_median, dy_std))
         log.info('full-frame dx: {:.3f}, dy: {:.3f}'.format(dx_full, dy_full))
 
+        
     # add header keyword(s):
     header['Z-DXYLOC'] = (get_par(set_zogy.dxdy_local,tel),
                           'star position offsets determined per subimage?')
@@ -9494,7 +9549,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         
     # loop subimages
     for nsub in range(nsubs):
-        
+
         # [subcut] defines the pixel indices [y1 y2 x1 x2] identifying
         # the corners of the subimage in the entire input/output image
         # coordinate frame; used various times below
@@ -9548,7 +9603,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_fratio_dxdy', log=log)
 
-    return x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
+    return success, x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
         fratio_subs, dx_subs, dy_subs
 
 
