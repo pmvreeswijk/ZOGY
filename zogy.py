@@ -299,23 +299,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # add header keyword(s):
         header['Z-V'] = (__version__, 'ZOGY version used')
-        if np.isfinite(fwhm) and np.isfinite(fwhm_std):
-            seeing = fwhm * pixscale
-            seeing_std = fwhm_std * pixscale
-        else:
-            fwhm = 'None'
-            fwhm_std = 'None'
-            seeing = 'None'
-            seeing_std = 'None'
+        seeing = fwhm * pixscale
+        seeing_std = fwhm_std * pixscale
 
         header['S-FWHM'] = (fwhm, '[pix] Sextractor FWHM estimate')
         header['S-FWSTD'] = (fwhm_std, '[pix] sigma (STD) FWHM estimate')
         header['S-SEEING'] = (seeing, '[arcsec] SExtractor seeing estimate')
         header['S-SEESTD'] = (seeing_std, '[arcsec] sigma (STD) SExtractor seeing')
-
-        if not (np.isfinite(elong) and np.isfinite(elong_std)):
-            elong = 'None'
-            elong_std = 'None'            
             
         header['S-ELONG'] = (elong, 'SExtractor ELONGATION (A/B) estimate')
         header['S-ELOSTD'] = (elong_std, 'sigma (STD) SExtractor ELONGATION (A/B)')
@@ -327,20 +317,21 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new:
         sexcat_new = '{}_ldac.fits'.format(base_new)
         keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
-        if np.all([k in header_new and isinstance(header_new[k], numbers.Number)
-                   for k in keys_temp]):
+        # read values from header if available and nonzero
+        if np.all([k in header_new and header_new[k] > 0 for k in keys_temp]):
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = [
                 header_new[k] for k in keys_temp]
         else:
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
                 base_new, sexcat_new, pixscale_new, 'new', header_new, log)
 
+
     # same for the reference image
     if ref:
         sexcat_ref = '{}_ldac.fits'.format(base_ref)
         keys_temp = ['S-FWHM', 'S-FWSTD', 'S-ELONG', 'S-ELOSTD']
-        if np.all([k in header_ref and isinstance(header_ref[k], numbers.Number)
-                   for k in keys_temp]):
+        # read values from header if available and nonzero
+        if np.all([k in header_ref and header_ref[k] > 0 for k in keys_temp]):
             fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = [
                 header_ref[k] for k in keys_temp]
         else:
@@ -348,13 +339,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 base_ref, sexcat_ref, pixscale_ref, 'ref', header_ref, log)
 
 
+            
     # function to run SExtractor on full image, followed by Astrometry.net
     # to find the WCS solution, applied below to new and/or ref image
     def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet, imtype,
                  fits_mask, ra, dec, xsize, ysize, header, log):
 
         # switch to rerun some parts (source extractor,
-        # astrometry.net, psfex) even if those were executed done
+        # astrometry.net, psfex) even if those were executed before
         redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
                 (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
 
@@ -367,7 +359,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         fits_cat = '{}_cat.fits'.format(base)
         if os.path.isfile(fits_cat):
             header_cat = read_hdulist (fits_cat, get_data=False, get_header=True)
-            size_cat = header_cat['NAXIS2']        
+            size_cat = header_cat['NAXIS2']
 
         # run SExtractor on full image
         if (not ((os.path.isfile(sexcat) and size_cat_ldac > 0) or
@@ -487,7 +479,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     if new:
         # now run above function [sex_wcs] on new image
-        if isinstance(fwhm_new, numbers.Number):
+        if fwhm_new > 0:
             success = sex_wcs(
                 base_new, sexcat_new, get_par(set_zogy.sex_par,tel), pixscale_new,
                 fwhm_new, True, 'new', new_fits_mask, ra_new, dec_new, xsize_new,
@@ -497,7 +489,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         if not success:
             # leave because either FWHM estimate from initial
-            # SExtractor is 'None', or an exception occurred during
+            # SExtractor is zero, or an exception occurred during
             # [run_sextractor] or [run_wcs] inside [sex_wcs]
             if not ref:
                 return header_new
@@ -506,7 +498,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             
     if ref:
         # and reference image
-        if isinstance(fwhm_ref, numbers.Number):
+        if fwhm_ref > 0:
             success = sex_wcs(
                 base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel),
                 pixscale_ref, fwhm_ref, True, 'ref', ref_fits_mask, ra_ref,
@@ -516,7 +508,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             
         if not success:
             # leave because either FWHM estimate from initial
-            # SExtractor is 'None', or an exception occurred during
+            # SExtractor is zero, or an exception occurred during
             # [run_sextractor] or [run_wcs] inside [sex_wcs]
             if not new:
                 return header_ref            
@@ -586,7 +578,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with new,
     # psf and background images
     if new:
-        try:
+
+        try: 
             # data_new, psf_new and data_new_bkg_std (same goes for
             # corresponding ref arrays below) are actually strings
             # pointing to the name of the (last) subimage file(s) in
@@ -598,7 +591,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                          'new', fwhm_new, header_new,
                                          fits_mask=new_fits_mask,
                                          nthreads=nthreads, log=log))
-
         except Exception as e:
             log.exception('exception was raised during [prep_optimal_extraction]'
                           ' of new image {}: {}'.format(base_new, e))
@@ -612,6 +604,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # psf and background images; if new and ref are provided, then
     # these images will be remapped to the new frame
     if ref:
+
         try:
             data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std = (
                 prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs,
@@ -1164,6 +1157,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             hdu = fits.PrimaryHDU(data_limmag, header_tmp)
             hdu.scale(data_type, 'minmax')
             hdu.writeto(fits_limmag, overwrite=True)
+            del hdu
         else:
             fits.writeto(fits_limmag, data_limmag, header_tmp, overwrite=True)
 
@@ -1188,7 +1182,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_new = '{}_cat.fits'.format(base_new)
         cat_new_out = cat_new
         header_new_cat = read_hdulist(cat_new, get_data=False, get_header=True)
-        if 'FORMAT-P' not in header_new_cat:
+        if not ('FORMAT-P' in header_new_cat and header_new_cat['FORMAT-P']):
             result = format_cat (cat_new, cat_new_out, cat_type='new',
                                  header_toadd=header_new, exptime=exptime_new,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
@@ -1199,7 +1193,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_ref = '{}_cat.fits'.format(base_ref)
         cat_ref_out = cat_ref
         header_ref_cat = read_hdulist(cat_ref, get_data=False, get_header=True)
-        if 'FORMAT-P' not in header_ref_cat:
+        if not ('FORMAT-P' in header_ref_cat and header_ref_cat['FORMAT-P']):
             result = format_cat (cat_ref, cat_ref_out, cat_type='ref',
                                  header_toadd=header_ref, exptime=exptime_ref,
                                  apphot_radii=get_par(set_zogy.apphot_radii,tel),
@@ -1208,7 +1202,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new and ref:
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
-
 
         # need to take care of objects closer than 32/2 pixels to
         # the full image edge in creation of thumbnails - results
@@ -2135,6 +2128,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         header = header_toadd
 
 
+
     # this [formats] dictionary contains the output format, the output
     # column unit (and the desired format - commented out)
     thumbnail_fmt = '{}E'.format(size_thumbnails**2)
@@ -2403,6 +2397,378 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     if log is not None:
         mem_use (label='after column definition in format_cat', log=log)
 
+
+    # add [thumbnails] column definition without the data
+    if save_thumbnails:
+
+        dim_str = '({},{})'.format(size_thumbnails, size_thumbnails)
+        for i_tn, key in enumerate(dict_thumbnails.keys()):
+            
+            # add column but without the data for the moment
+            col = fits.Column(name=key, format=formats[key][0],
+                              unit=formats[key][1], dim=dim_str)
+            # append column
+            columns.append(col)
+
+
+    # create hdu from columns
+    hdu = fits.BinTableHDU.from_columns(columns, character_as_bytes=True)
+    if log is not None:
+        mem_use (label='after hdu creation in format_cat', log=log)
+
+
+    # add data to thumbnail columns
+    if save_thumbnails:
+        
+        for i_tn, key in enumerate(dict_thumbnails.keys()):
+
+            if dict_thumbnails[key] is not None:
+                
+                # read data_thumbnail from input [dict_thumbnails]
+                hdu.data[key] = np.load(dict_thumbnails[key], mmap_mode='c')
+                
+                if log is not None:
+                    mem_use (label='after adding column {} to hdu.data in '
+                             'format_cat'.format(key), log=log)
+
+
+    if False:
+        # update column units in header
+        for ic, col in enumerate(hdu.data.dtype.names):
+            unit_str = [formats[k][1] for k in formats.keys()
+                        if k.split('_')[0:2]==col.split('_')[0:2]][0]
+            if len(unit_str) > 0:
+                hdu.header.set('TUNIT{}'.format(ic+1), value=unit_str,
+                               after='TFORM{}'.format(ic+1))
+
+
+    # add header keyword indicating catalog was successfully formatted
+    header['FORMAT-P'] = (True, 'successfully formatted catalog')
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+
+    # update header and save hdu to fits
+    hdu.header += header
+    hdu.writeto(cat_out, overwrite=True)
+    del hdu
+
+
+    if log is not None and get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='format_cat', log=log)
+
+    
+    return
+
+
+################################################################################
+
+def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
+                    exptime=0, apphot_radii=None, dict_thumbnails=None,
+                    save_thumbnails=False, size_thumbnails=100,
+                    ML_calc_prob=False, ML_prob_real=None, nfakestars=0,
+                    tel=None, log=None):
+
+
+    """Function that formats binary fits table [cat_in] according to
+       MeerLICHT/BlackGEM specifications for [cat_type] 'new', 'ref'
+       or 'trans', and saves the resulting binary fits table
+       [cat_out]. If [cat_in] is None, the output fits table will
+       contain the same column definitions but without any data
+       entries.
+
+    """
+
+    if log is not None:
+        if get_par(set_zogy.timing,tel): t = time.time()
+        log.info('executing format_cat ...')
+        mem_use (label='at start of format_cat', log=log)
+
+
+    if cat_in is not None:
+
+        # read data and header of [cat_in]
+        with fits.open(cat_in, memmap=True) as hdulist:
+            prihdu = hdulist[0]
+            header = hdulist[1].header
+            data = hdulist[1].data
+
+        if header_toadd is not None:
+            header += header_toadd
+
+    else:
+
+        # if no [cat_in] is provided, just define the header using
+        # [header_toadd]
+        header = header_toadd
+
+
+    # this [formats] dictionary contains the output format, the output
+    # column unit (and the desired format - commented out)
+    thumbnail_fmt = '{}E'.format(size_thumbnails**2)
+    formats = {
+        'NUMBER':         ['J', ''     ], #, 'uint16'],
+        'X_POS':          ['E', 'pix'  ], #, 'flt32' ],
+        'Y_POS':          ['E', 'pix'  ], #, 'flt32' ],
+        'XVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
+        'YVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
+        'XYCOV_POS':      ['E', 'pix^2'], #, 'flt16' ],
+        'X_POS_SCORR':    ['E', 'pix'  ], #, 'flt32' ],
+        'Y_POS_SCORR':    ['E', 'pix'  ], #, 'flt32' ],
+        'XVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
+        'YVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
+        'XYCOV_POS_SCORR':['E', 'pix^2'], #, 'flt16' ],
+        'CXX':            ['E', 'pix^(-2)'], #, 'flt16' ],
+        'CYY':            ['E', 'pix^(-2)'], #, 'flt16' ],
+        'CXY':            ['E', 'pix^(-2)'], #, 'flt16' ],
+        'A':              ['E', 'pix'  ], #, 'flt16' ],
+        'B':              ['E', 'pix'  ], #, 'flt16' ],
+        'THETA':          ['E', 'deg'  ], #, 'flt16' ],
+        'ELONGATION':     ['E', ''     ], #, 'flt16' ],
+        'ELONG_SCORR':    ['E', ''     ], #, 'flt16' ],
+        'RA':             ['D', 'deg'  ], #, 'flt64' ],
+        'DEC':            ['D', 'deg'  ], #, 'flt64' ],
+        'RA_SCORR':       ['D', 'deg'  ], #, 'flt64' ],
+        'DEC_SCORR':      ['D', 'deg'  ], #, 'flt64' ],
+        'FLAGS':          ['I', ''     ], #, 'uint8' ],
+        'FLAGS_MASK':     ['I', ''     ], #, 'uint8' ],
+        'FLAGS_SCORR':    ['I', ''     ], #, 'uint8' ],
+        'FLAGS_MASK_SCORR': ['I', ''     ], #, 'uint8' ],
+        'FWHM':           ['E', 'pix'  ], #, 'flt16' ],
+        'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
+        'E_FLUX_APER':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_APER': ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_APER':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_APER':    ['E', 'mag'  ], #, 'flt16' ],
+        'BACKGROUND':     ['E', 'e-'   ], #, 'flt16' ],
+        #'E_FLUX_MAX':     ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_AUTO':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_AUTO': ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_AUTO':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_AUTO':    ['E', 'mag'  ], #, 'flt16' ],
+        'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
+        'E_FLUX_ISO':     ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_ISO':  ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_ISO':        ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_ISO':     ['E', 'mag'  ], #, 'flt16' ],
+        'ISOAREA':        ['I', 'pix^2'], #, 'flt16' ],
+        'MU_MAX':         ['E', 'mag/pix^2'], #, 'flt16' ],
+        'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
+        'E_FLUX_PETRO':   ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_PETRO':['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_PETRO':      ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_PETRO':   ['E', 'mag'  ], #, 'flt16' ],
+        'PETRO_RADIUS':   ['E', 'pix'  ], #, 'flt16' ],
+        'E_FLUX_OPT':     ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_OPT':  ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_OPT':        ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_OPT':     ['E', 'mag'  ], #, 'flt16' ],
+        # transient:
+        'X_PEAK':         ['I', 'pix'  ], #, 'flt32' ],
+        'Y_PEAK':         ['I', 'pix'  ], #, 'flt32' ],
+        'RA_PEAK':        ['D', 'deg'  ], #, 'flt64' ],
+        'DEC_PEAK':       ['D', 'deg'  ], #, 'flt64' ],
+        'SCORR_PEAK':     ['E', ''     ], #, 'flt32' ],
+        'E_FLUX_PEAK':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_PEAK': ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_PEAK':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_PEAK':    ['E', 'mag'  ], #, 'flt16' ],
+        'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
+        'X_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
+        'XERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
+        'Y_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
+        'YERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
+        'RA_PSF_D':       ['D', 'deg'  ], #, 'flt64' ],
+        'DEC_PSF_D':      ['D', 'deg'  ], #, 'flt64' ],        
+        'E_FLUX_PSF_D':   ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_PSF_D':['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_PSF_D':      ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_PSF_D':   ['E', 'mag'  ], #, 'flt16' ],
+        'CHI2_PSF_D':     ['E', ''     ], #, 'flt32' ],
+        'X_MOFFAT_D':     ['E', 'pix'  ], #, 'flt32' ],
+        'XERR_MOFFAT_D':  ['E', 'pix'  ], #, 'flt32' ],
+        'Y_MOFFAT_D':     ['E', 'pix'  ], #, 'flt32' ],
+        'YERR_MOFFAT_D':  ['E', 'pix'  ], #, 'flt32' ],
+        'RA_MOFFAT_D':    ['D', 'deg'  ], #, 'flt64' ],
+        'DEC_MOFFAT_D':   ['D', 'deg'  ], #, 'flt64' ],
+        'FWHM_MOFFAT_D':  ['E', 'pix'  ], #, 'flt32' ],
+        'ELONG_MOFFAT_D': ['E', ''     ], #, 'flt32' ],
+        'CHI2_MOFFAT_D':  ['E', ''     ], #, 'flt32' ],
+        'X_GAUSS_D':      ['E', 'pix'  ], #, 'flt32' ],
+        'XERR_GAUSS_D':   ['E', 'pix'  ], #, 'flt32' ],
+        'Y_GAUSS_D':      ['E', 'pix'  ], #, 'flt32' ],
+        'YERR_GAUSS_D':   ['E', 'pix'  ], #, 'flt32' ],
+        'RA_GAUSS_D':     ['D', 'deg'  ], #, 'flt64' ],
+        'DEC_GAUSS_D':    ['D', 'deg'  ], #, 'flt64' ],
+        'FWHM_GAUSS_D':   ['E', 'pix'  ], #, 'flt32' ],
+        'ELONG_GAUSS_D':  ['E', ''     ], #, 'flt32' ],
+        'CHI2_GAUSS_D':   ['E', ''     ], #, 'flt32' ],
+        'CLASS_REAL':     ['E', ''     ], #, 'flt32' ],
+        'X_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
+        'Y_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
+        'S2N_FAKE_IN':    ['E', ''     ], #, 'flt32' ],
+        'E_FLUX_FAKE_IN': ['E', 'e-/s' ], #, 'flt32' ],
+        'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_SCORR':[thumbnail_fmt, 'sigma'], #, 'flt16' ]
+    }
+
+    
+    if cat_type is None:
+        # if no [cat_type] is provided, define the keys to record from
+        # the data columns
+        if cat_in is not None:
+            keys_to_record = data.dtype.names
+
+    elif cat_type == 'ref':
+        keys_to_record = ['NUMBER', 'X_POS', 'Y_POS',
+                          'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
+                          'RA', 'DEC',
+                          'CXX', 'CYY', 'CXY', 'A', 'B', 'THETA',
+                          'ELONGATION', 'FWHM', 'CLASS_STAR',
+                          'FLAGS', 'FLAGS_MASK',
+                          'BACKGROUND',
+                          'MAG_APER', 'MAGERR_APER',  
+                          'MAG_AUTO', 'MAGERR_AUTO', 'KRON_RADIUS',
+                          'MAG_ISO', 'MAGERR_ISO', 'ISOAREA',
+                          'MU_MAX', 'FLUX_RADIUS',
+                          'MAG_PETRO', 'MAGERR_PETRO', 'PETRO_RADIUS',
+                          'E_FLUX_OPT', 'E_FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+
+    elif cat_type == 'new':
+        keys_to_record = ['NUMBER', 'X_POS', 'Y_POS', 
+                          'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
+                          'RA', 'DEC',
+                          'ELONGATION', 'FWHM', 'CLASS_STAR', 
+                          'FLAGS', 'FLAGS_MASK', 'BACKGROUND',
+                          'MAG_APER', 'MAGERR_APER',
+                          'E_FLUX_OPT', 'E_FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
+
+    elif cat_type == 'trans':
+        keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
+                          'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK',
+                          'E_FLUX_PEAK', 'E_FLUXERR_PEAK', 'MAG_PEAK', 'MAGERR_PEAK',
+                          #
+                          'X_POS_SCORR', 'Y_POS_SCORR',
+                          'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
+                          'RA_SCORR', 'DEC_SCORR', 'ELONG_SCORR',
+                          'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
+                          'MAG_OPT_D', 'MAGERR_OPT_D',
+                          #
+                          'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
+                          'RA_PSF_D', 'DEC_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D', 
+                          'CHI2_PSF_D',
+                          #'X_MOFFAT_D', 'XERR_MOFFAT_D', 'Y_MOFFAT_D', 'YERR_MOFFAT_D',
+                          #'RA_MOFFAT_D', 'DEC_MOFFAT_D', 
+                          #'FWHM_MOFFAT_D', 'ELONG_MOFFAT_D', 'CHI2_MOFFAT_D',
+                          'X_GAUSS_D', 'XERR_GAUSS_D', 'Y_GAUSS_D', 'YERR_GAUSS_D',
+                          'RA_GAUSS_D', 'DEC_GAUSS_D', 
+                          'FWHM_GAUSS_D', 'ELONG_GAUSS_D', 'CHI2_GAUSS_D']
+
+
+        if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+            
+            keys_to_record.append('CLASS_REAL')
+            
+            # MeerCRAB probabilities ML_prob_real are now calculated
+            # before format_cat
+            if cat_in is not None and ML_prob_real is not None:
+                # field CLASS_REAL is not yet included in data, so
+                # append it using the probabilities initialised to -1;
+                # the actual probabilities will be added after this
+                # function is done when MeerCRAB is processed
+                data = append_fields(data, 'CLASS_REAL', ML_prob_real,
+                                     usemask=False, asrecarray=True)
+
+        if nfakestars > 0:
+            # add fakestar columns
+            keys_to_record.append('X_FAKE')
+            keys_to_record.append('Y_FAKE')
+            keys_to_record.append('S2N_FAKE_IN')
+            keys_to_record.append('E_FLUX_FAKE_IN')
+
+
+    # rename any of the keys using this dictionary, such as the
+    # pre-defined SExtractor column names
+    #keys2rename = {'ALPHAWIN_J2000': 'RA_ICRS', 'DELTAWIN_J2000': 'DEC_ICRS'}
+    keys2rename = {}
+    
+
+    def get_col (key, key_new, data_key=None):
+
+        # function that returns column definition based on input
+        # [key], [key_new], and [data_key]; for most fields [key] and
+        # [key_new] are the same, except for 'E_FLUX_APER' and
+        # 'E_FLUXERR_APER' or 'MAG_APER' and 'MAGERR_APER', which are
+        # split into the separate apertures, and the aperture sizes
+        # enter in the new key name as well.
+        
+        # if exposure time is non-zero, modify all 'e-/s' columns accordingly
+        if exptime != 0:
+            if formats[key][1]=='e-/s':
+                data_key /= exptime
+                #key_new = 'E-{}'.format(key_new)
+                key_new = '{}'.format(key_new)
+        else:
+            # if [format_cat] is called from [qc], then dummy catalogs
+            # are being made and no exptime is provided
+            dumcat = np.any([header[k] for k in header if 'DUMCAT' in k])
+            if log is not None and not dumcat:
+                log.warning('input [exptime] in function [format_cat] is zero')
+
+        if data_key is not None:
+            col = fits.Column(name=key_new, format=formats[key][0],
+                              unit=formats[key][1], #disp=formats[key][2],
+                              array=data_key)
+        # if [data_key] is None, define the column but without the
+        # data; this is used for making a table with the same field
+        # definitions but without any entries
+        else:
+            col = fits.Column(name=key_new, format=formats[key][0],
+                              unit=formats[key][1]) #, disp=formats[key][2])
+        return col   
+
+    
+    # using the above [get_col] function, loop through the keys to
+    # record and define the list of columns
+    columns = []
+    for key in keys_to_record:
+
+        if (key=='E_FLUX_APER' or key=='E_FLUXERR_APER' or
+            key=='MAG_APER' or key=='MAGERR_APER'):
+            # update column names of aperture fluxes to include radii
+            # loop apertures
+            for i_ap in range(len(apphot_radii)):
+                key_new = '{}_R{}xFWHM'.format(key, apphot_radii[i_ap])
+                if cat_in is not None:
+                    if key_new in data.dtype.names:
+                        #columns.append(get_col (key, key_new, data[key][:,i_ap]))
+                        columns.append(get_col (key, key_new, data[key_new]))
+                else:
+                    columns.append(get_col (key, key_new))
+
+            log.info ('key: {}, key_new: {}'.format(key, key_new))
+                    
+        else:
+
+            # check if key needs to be renamed
+            if key in keys2rename.keys():
+                key_new = keys2rename[key]
+            else:
+                key_new = key
+                
+            if cat_in is not None:
+                if key in data.dtype.names:
+                    columns.append(get_col (key, key_new, data[key]))
+            else:
+                columns.append(get_col (key, key_new))
+
+
+    if log is not None:
+        mem_use (label='after column definition in format_cat', log=log)
+
                 
     # add [thumbnails]
     if save_thumbnails:
@@ -2433,16 +2799,17 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
 
-
-    if log is not None and get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='format_cat', log=log)
-
-
-    hdu = fits.BinTableHDU.from_columns(columns)
+    hdu = fits.BinTableHDU.from_columns(columns, character_as_bytes=True)
     header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
     hdu.header += header
     hdu.writeto(cat_out, overwrite=True)
-            
+    del hdu
+
+
+    if log is not None and get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='format_cat_old', log=log)
+
+    
     return
 
 
@@ -6199,19 +6566,16 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         else:
             area[mask_zero] = np.median(area)
 
-        # reshape
+        # reshape and convert to -2.5*np.log10 (area)
         ysize, xsize = data_limmag.shape
         subsize = get_par(set_zogy.subimage_size,tel)
         nx = int(xsize / subsize)
         ny = int(ysize / subsize)
-        area = area.reshape((nx, ny)).transpose()
+        dmag = -2.5*np.log10(area).reshape((nx, ny)).transpose()
 
-        # interpolate and grow to size of data_limmag
-        data_area = ndimage.zoom(area, subsize, order=2, mode='nearest')
+        # interpolate, grow to size of data_limmag and add to data_limmag
+        data_limmag += ndimage.zoom(dmag, subsize, order=2, mode='nearest')
         
-        # finally multiply data_limmag with data_area
-        data_limmag *= data_area
-
         log.info ('limmag image per pixel corrected for median effective '
                   'aperture area of {:.2f} pixels, inferred from ratio of '
                   'subimage PSF_volume over PSF_peak'.format(np.median(area)))
@@ -6231,11 +6595,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             hdu = fits.PrimaryHDU(data_limmag, header)
             hdu.scale(data_type, 'minmax')
             hdu.writeto(fits_limmag, overwrite=True)
+            del hdu
         else:
             fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
 
-        del data_limmag, data_area
-            
+        del data_limmag
+
     else:
         log.warning ('PC-ZP or AIRMASSC not present in header of {}; limiting '
                      'magnitude image is therefore not made'.format(input_fits))
@@ -8475,6 +8840,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             log.exception('exception was raised during [run_psfex]: {}'.format(e))
         else:
             PSFEx_processed = True
+
         header['PSF-P'] = (PSFEx_processed, 'successfully processed by PSFEx?')
 
         # PSFex version
@@ -8482,9 +8848,14 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
         result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         version = str(result.stdout.read()).split()[2]
         header['PSF-V'] = (version, 'PSFEx version used')
-            
-        
-            
+
+        # now that header is updated, raise exception that will be caught
+        # in try-except block around [prep_optimal_subtraction]
+        if not PSFEx_processed:
+            raise
+
+
+
     # If [set_zogy.psffit_sex] parameter is set, then again run SExtractor,
     # but now using output PSF from PSFEx, so that PSF-fitting can be
     # performed for all objects. The output columns defined in
@@ -9853,6 +10224,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     status = process.returncode
     log.info('stdoutstr: {}'.format(stdoutstr))
     log.info('stderrstr: {}'.format(stderrstr))
+    log.info('status:    {}'.format(status))
 
 
     if os.path.exists('{}.solved'.format(base)) and status==0:
@@ -10368,6 +10740,7 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
     status = process.returncode
     log.info('stdoutstr: {}'.format(stdoutstr))
     log.info('stderrstr: {}'.format(stderrstr))
+    log.info('status:    {}'.format(status))
 
     if status != 0:
         log.error('SWarp failed with exit code {}'.format(status))
@@ -10422,7 +10795,8 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
     
 ################################################################################
 
-def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
+def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False,
+              nmin=5):
 
     """Function that accepts a FITS_LDAC table produced by SExtractor and
     returns the FWHM and its standard deviation in pixels.  The
@@ -10442,6 +10816,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
 
     data = read_hdulist (cat_ldac)
 
+
     # these arrays correspond to objecst with flag==0 and flux_auto>0.
     # add a S/N requirement
     index = ((data['FLAGS']==0) & (data['FLUX_AUTO']>0.) &
@@ -10454,6 +10829,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
     if get_elong:
         elong = data['ELONGATION'][index]
     
+
     if class_sort:
         # sort by CLASS_STAR
         index_sort = np.argsort(class_star)
@@ -10461,35 +10837,44 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False):
         # sort by FLUX_AUTO
         index_sort = np.argsort(flux_auto)
 
+
     # select fraction of targets
     index_select = np.arange(-np.int(len(index_sort)*fraction+0.5),-1)
     fwhm_select = fwhm[index_sort][index_select] 
     if get_elong:
         elong_select = elong[index_sort][index_select] 
-            
-    # print warning if few stars are selected
-    if len(fwhm_select) < 10:
-        log.warning('only {} objects selected for FWHM determination'
-                    .format(len(fwhm_select)))
+
 
     # determine mean, median and standard deviation through sigma clipping
-    fwhm_mean, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select,
-                                                           mask_value=0)
+    __, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select, mask_value=0)
+    # set values to zero if too few stars are selected or values
+    # just determined are non-finite
+    if (len(fwhm_select) < nmin or
+        not (np.isfinite(fwhm_median) and np.isfinite(fwhm_std))):
+        fwhm_median, fwhm_std = [0.] * 2
 
     if get_par(set_zogy.verbose,tel):
         log.info('catalog: {}'.format(cat_ldac))
-        log.info('fwhm_mean: {:.2f} pix, fwhm_median: {:.2f} pix, fwhm_std: '
-                 '{:.2f} pix'.format(fwhm_mean, fwhm_median, fwhm_std))
+        log.info('fwhm_median: {:.2f} pix, fwhm_std: {:.2f} pix'
+                 .format(fwhm_median, fwhm_std))
+
+
     if get_elong:
         # determine mean, median and standard deviation through sigma clipping
-        elong_mean, elong_median, elong_std = sigma_clipped_stats(
-            elong_select, mask_value=0)
+        __, elong_median, elong_std = sigma_clipped_stats(elong_select,
+                                                          mask_value=0)
+        # set values to zero if too few stars are selected or values
+        # just determined are non-finite
+        if (len(elong_select) < nmin or
+            not (np.isfinite(elong_median) and np.isfinite(elong_std))):
+            elong_median, elong_std = [0.] * 2
 
         if get_par(set_zogy.verbose,tel):
-            log.info('elong_mean: {:.3f}, elong_median: {:.3f}, elong_std: {:.3f}'
-                     .format(elong_mean, elong_median, elong_std))
-
+            log.info('elong_median: {:.3f}, elong_std: {:.3f}'
+                     .format(elong_median, elong_std))
+            
         
+
     if get_par(set_zogy.make_plots,tel):
 
         # best parameter to plot vs. FWHM is MAG_AUTO
@@ -10850,6 +11235,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
         status = process.returncode
         log.info('stdoutstr: {}'.format(stdoutstr))
         log.info('stderrstr: {}'.format(stderrstr))
+        log.info('status:    {}'.format(status))
 
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='run_sextractor before get_back', log=log)
@@ -11284,17 +11670,26 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     # log cmd executed
     cmd_str = ' '.join(cmd)
     log.info('PSFEx command executed:\n{}'.format(cmd_str))
-        
+
     process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (stdoutstr,stderrstr) = process.communicate()
     status = process.returncode
     log.info('stdoutstr: {}'.format(stdoutstr))
     log.info('stderrstr: {}'.format(stderrstr))
+    log.info('status:    {}'.format(status))
 
     # standard output of PSFEx is .psf; change this to _psf.fits
     psf_in = cat_in.replace('.fits', '.psf')
     psf_out = '{}_psf.fits'.format(base)
     os.rename (psf_in, psf_out)
+
+    # if zero stars were found by PSFEx, raise exception
+    header_psf = read_hdulist(psf_out, get_data=False, get_header=True)
+    if header_psf['ACCEPTED']==0:
+        msg = ('no appropriate source found by PSFEx in [run_psfex] for catalog '
+               '{}'.format(cat_in))
+        log.error (msg)
+        raise Exception (msg)
 
 
     # no need to limit disk space of LDAC catalog anymore, as it is no
