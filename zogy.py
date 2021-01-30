@@ -3268,9 +3268,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                          '{}; discarding the corresponding row(s)'
                          .format(col, nbad, fits_new))
     # filter
-    # switch off for the moment; CHECK!!!
-    if False:
-        table_trans = table_trans[mask_keep]
+    table_trans = table_trans[mask_keep]
 
     log.info('ntrans after Gauss fit chi2 filter: {}'.format(len(table_trans)))
 
@@ -4653,7 +4651,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         chi2_psf[i], xerr_psf[i], yerr_psf[i] = (
                             flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
                                          mask_use=mask_use, fwhm=fwhm_fit_init,
-                                         show=False, max_nfev=300, log=log))
+                                         show=False, max_nfev=200, log=log))
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
@@ -4674,7 +4672,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                             fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
                                                fit_gauss=gauss, fwhm=fwhm_fit_init,
                                                P_shift=P_shift, show=False,
-                                               max_nfev=300, log=log)
+                                               max_nfev=200, log=log)
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
                     
