@@ -2864,7 +2864,7 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
                header_new, header_ref, header_trans,
-               fits_new_psf, fits_ref_psf, nthreads=1, log=None):
+               fits_new_psf, fits_ref_psf, nthreads=1, keep_all=False, log=None):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
@@ -3070,7 +3070,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             log.info('discarding FLAGS_MASK value {}; no. of objects: {}'
                      .format(val, np.sum(mask_discard)))
 
-    table_trans = table_trans[~mask_flags]
+    if not keep_all:
+        table_trans = table_trans[~mask_flags]
+
     log.info ('ntrans after FLAGS_MASK cut: {}'.format(len(table_trans)))
 
     if get_par(set_zogy.make_plots,tel):
@@ -3096,7 +3098,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             log.info('discarding FLAGS value {}; no. of objects: {}'
                      .format(val, np.sum(mask_discard)))
 
-    table_trans = table_trans[~mask_flags]
+    if not keep_all:
+        table_trans = table_trans[~mask_flags]
+
     log.info ('ntrans after FLAGS cut: {}'.format(len(table_trans)))
 
     if get_par(set_zogy.make_plots,tel):
@@ -3112,7 +3116,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # ====================
 
     mask_elong = (table_trans['ELONGATION'] <= 3)
-    table_trans = table_trans[mask_elong]
+    if not keep_all:
+        table_trans = table_trans[mask_elong]
+
     log.info ('ntrans after ELONGATION cut: {}'.format(len(table_trans)))
     
 
@@ -3206,7 +3212,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                          '{}; discarding the corresponding row(s): {}'
                          .format(col, nbad, fits_new, row_numbers[~mask_finite]))
     # filter
-    table_trans = table_trans[mask_keep]
+    if not keep_all:
+        table_trans = table_trans[mask_keep]
 
     log.info('ntrans after PSF_D fit chi2 filter: {}'.format(len(table_trans)))
 
@@ -3230,7 +3237,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     mask_keep = (np.abs(s2n_psfD) >= get_par(set_zogy.transient_nsigma,tel))
-    table_trans = table_trans[mask_keep]    
+    if not keep_all:
+        table_trans = table_trans[mask_keep]    
 
     log.info('ntrans after PSF_D fit S/N filter: {}'.format(len(table_trans)))
 
@@ -3268,7 +3276,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                          '{}; discarding the corresponding row(s)'
                          .format(col, nbad, fits_new))
     # filter
-    table_trans = table_trans[mask_keep]
+    if not keep_all:
+        table_trans = table_trans[mask_keep]
 
     log.info('ntrans after Gauss fit chi2 filter: {}'.format(len(table_trans)))
 
@@ -9048,7 +9057,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             fits.writeto('{}_psf_ima_center_sub{}.fits'.format(base, nsub),
                          psf_ima_center.astype('float32'), overwrite=True)
             fits.writeto('{}_psf_ima_shift_sub{}.fits'.format(base, nsub),
-                         psf_ima_shift[nsub].astype('float32'), overwrite=True)
+                         psf_ima_shift_sub.astype('float32'), overwrite=True)
 
         
     # now that PSFEx is done, fit elliptical Moffat and Gauss
@@ -9921,6 +9930,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     header['Z-DXSTD'] = (dx_std, '[pix] dx sigma (STD) offset full image')
     header['Z-DY'] = (dy_median, '[pix] dy median offset full image')
     header['Z-DYSTD'] = (dy_std, '[pix] dy sigma (STD) offset full image')
+    header['Z-FNROPT'] = (get_par(set_zogy.fratio_optflux,tel),
+                          'optimal (T) or AUTO (F) flux used for flux ratio')
     header['Z-FNRLOC'] = (get_par(set_zogy.fratio_local,tel),
                           'flux ratios (Fnew/Fref) determined per subimage?')
     header['Z-FNR'] = (fratio_median_full,
