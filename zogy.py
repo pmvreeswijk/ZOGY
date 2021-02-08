@@ -7797,17 +7797,20 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
 
     # [objmask] is the mask indicating the zeros in the '-OBJECTS'
     # image (with True)
-    data_objmask = read_hdulist(fits_objmask)
+    data_objmask = read_hdulist(fits_objmask, dtype='float32')
     mask_reject = (np.abs(data_objmask)==0)
+    del data_objmask
+
 
     # also reject any masked pixel from input mask
     if fits_mask is not None:
         data_mask = read_hdulist (fits_mask, dtype='uint8')
         mask_reject |= (data_mask > 0)
 
+
     # let this mask grow a few pixels if masked fraction is not
     # already above limfrac_reject of all pixels
-    limfrac_reject_image = 0.66
+    limfrac_reject_image = 0.5
     mask_reject_old = mask_reject
     struct = np.ones((3,3), dtype=bool)
     for i in range(3):
@@ -7846,103 +7849,59 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
     nysubs = int(ysize / bkg_boxsize)
     nxsubs = int(xsize / bkg_boxsize)
 
-    # two alternative ways to determine the median and STD values of
-    # the subimages
-    if True:
 
-        # construct masked array
-        data_masked = np.ma.masked_array(data, mask=mask_reject)
+    t0 = time.time()
 
-        data_masked_reshaped = data_masked.reshape(
-            nysubs,bkg_boxsize,-1,bkg_boxsize).swapaxes(1,2).reshape(nysubs,nxsubs,-1)
-
-        if log is not None:
-            if (np.sum(~np.isfinite(data_masked_reshaped))) > 0:
-                log.warning ('data_masked_reshaped contains infinite or nan values')
-
-        # get clipped statistics; if background box is big enough, do the
-        # statistics on a random subset of pixels
-        t0 = time.time()
-        if bkg_boxsize > 300:
-            index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
-            __, mini_median, mini_std = sigma_clipped_stats (
-                data_masked_reshaped[:,:,index_stat],
-                sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
-            if log is not None:
-                log.warning ('subset of pixels used for statistics')
-        
-        else:
-            __, mini_median, mini_std = sigma_clipped_stats (
-                data_masked_reshaped,
-                sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
-            
-
-        # convert to 'float32'
-        mini_median = mini_median.astype('float32')
-        mini_std = mini_std.astype('float32')
-
-
-        # mask subimage if more than some fraction of all subimage pixels
-        # are masked (by OR combination of object mask and input image
-        # mask); do this iteratively starting with a large fraction and
-        # decreasing it to a low fraction, to prevent too many subimages
-        # being masked - the limit is again defined by
-        # [limfrac_reject_image]
-        for fraction in [1, 0.67, 0.5, 0.33]:
-            npix_lim = fraction * bkg_boxsize**2
-            # if number of invalid pixels along axis 2 is greater than
-            # [mask_minsize] then mask that background subimage
-            npix_bad = np.sum(data_masked_reshaped.mask, axis=2)
-            mask_temp = (npix_bad >= npix_lim)
-            if np.sum(mask_temp)/mask_temp.size < limfrac_reject_image:
-                mask_mini_avoid = mask_temp
-            else:
-                break
-        
-        # add any nan values to mask_mini_avoid
-        mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
-        mask_mini_avoid |= ~mask_mini_finite
-        
-        # set masked values to zero
-        mini_median[mask_mini_avoid] = 0
-        mini_std[mask_mini_avoid] = 0
-
-        # report masked fraction of image
-        if log is not None:
-            log.info ('fraction of subimages that were masked: {:.2f}'
-                      .format(np.sum(mask_mini_avoid)/mask_mini_avoid.size))
-
-    else:
-
-        # this block is the old way of iterating over the subimages
-        # which is probably slower but also lower in memory use
-        
-        centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
-            bkg_boxsize, ysize, xsize, log)        
-        nsubs = centers.shape[0]
-
-        # prepare output median and std output arrays
-        mini_median = np.zeros(nsubs, dtype='float32')
-        mini_std = np.zeros(nsubs, dtype='float32')
-
-        # loop over background subimages and determine
-        # their median and standard deviation
-        for nsub in range(nsubs):
-            mini_median[nsub], mini_std[nsub] = get_median_std(
-                nsub, cuts_ima, data, ~mask_reject, mask_minsize=0.5, clip=True)
-
-        # reshape and transpose
-        mini_median = mini_median.reshape((nxsubs, nysubs)).T
-        mini_std = mini_std.reshape((nxsubs, nysubs)).T
-        
-        # report masked fraction of image
-        if log is not None:
-            log.info ('fraction of subimages that were masked: {:.2f}'
-                      .format(np.sum(mini_median==0)))
-
-        
+    # construct masked array and reshape it so that new shape
+    # is: nboxes in y, nboxes in z, nvalues in box
+    data_masked = (np.ma.masked_array(data, mask=mask_reject, dtype='float32')
+                   .reshape(nysubs,bkg_boxsize,-1,bkg_boxsize)
+                   .swapaxes(1,2).reshape(nysubs,nxsubs,-1))
 
     if log is not None:
+        if (np.sum(~np.isfinite(data_masked))) > 0:
+            log.warning ('data_masked contains infinite or nan values')
+            
+    # get clipped statistics
+    nsigma = get_par(set_zogy.bkg_nsigma,tel)
+    __, mini_median, mini_std = sigma_clipped_stats(data_masked, sigma=nsigma,
+                                                    axis=2, mask_value=0)
+
+    # convert to 'float32'
+    mini_median = mini_median.astype('float32')
+    mini_std = mini_std.astype('float32')
+
+
+    # mask background subimage if more than some fraction of all
+    # subimage pixels are masked (by OR combination of object mask
+    # and input image mask); do this iteratively starting with a
+    # large fraction and decreasing it to a low fraction, to
+    # prevent too many subimages being masked - the limit is again
+    # set by [limfrac_reject_image]
+    for fraction in [1, 0.67, 0.5]:
+        npix_lim = fraction * bkg_boxsize**2
+        # if number of invalid pixels along axis 2 is greater than
+        # or equal to [npix_lim] then mask that background
+        # subimage
+        npix_bad = np.sum(data_masked.mask, axis=2)
+        mask_tmp = (npix_bad >= npix_lim)
+        if np.sum(mask_tmp)/mask_tmp.size < limfrac_reject_image:
+            mask_mini_avoid = mask_tmp
+        else:
+            break
+
+    # add any nan values to mask_mini_avoid
+    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
+    mask_mini_avoid |= ~mask_mini_finite
+
+    # set masked values to zero
+    mini_median[mask_mini_avoid] = 0
+    mini_std[mask_mini_avoid] = 0
+
+    # report masked fraction of image
+    if log is not None:
+        log.info ('fraction of subimages that were masked: {:.2f}'
+                  .format(np.sum(mask_mini_avoid)/mask_mini_avoid.size))
         log.info ('time to get statistics: {:.3f}s'.format(time.time()-t0))
 
 
@@ -7951,56 +7910,69 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
     size_filter = get_par(set_zogy.bkg_filtersize,tel)
     
     if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+
         mini_median_filt = fill_zeros_filter (mini_median, size_filter,
                                               use_median=True)
-        mini_std_filt = fill_zeros_filter (mini_std, size_filter,
-                                           use_median=True)
+
+        # set bkg_std to sqrt of the median background plus
+        # readnoise**2
+        if 'RDNOISE' in header:
+            rdnoise = header['RDNOISE']
+        else:
+            # assume a reasonable value
+            rdnoise = 5.
+
+        # create mini image with readnoise
+        mini_rdnoise = np.zeros_like (mini_median)
+        mini_rdnoise[:] = rdnoise
+
     else:
+
         # for ML/BG this needs to be done per channel separately, to
         # avoid channels with different average count levels affecting
         # each other
         mini_shape = mini_median.shape
         mini_sec = get_section_MLBG (mini_shape)
         nchans = np.shape(mini_sec)[0]
-
-        fill_zeros = True
-        apply_filter = True
         
-        # prepare output arrays and loop channels
-        mini_median_filt = np.zeros_like (mini_median)
-        mini_std_filt = np.zeros_like (mini_std)
+
+        # create mini image with rdnoise
+        mini_rdnoise = np.zeros_like (mini_median)
+        # factor to potentially boost noise a bit
+        f_rdnoise = 1.0
+        # loop channels        
         for i_chan in range(nchans):
-            sec_temp = mini_sec[i_chan]
-            mini_median_filt[sec_temp] = fill_zeros_filter (
-                mini_median[sec_temp], size_filter, use_median=True,
-                apply_filter=apply_filter, fill_zeros=fill_zeros)
-            mini_std_filt[sec_temp] = fill_zeros_filter (
-                mini_std[sec_temp], size_filter, use_median=True,
-                apply_filter=apply_filter, fill_zeros=fill_zeros)
 
-        # if any zeros still left, probably due to an entire channel
-        # having been masked, run the entire image through
-        # fill_zeros_filter
-        if np.any(mini_median_filt==0):
-            mini_median_filt = fill_zeros_filter (
-                mini_median_filt, size_filter, use_median=True,
-                apply_filter=apply_filter, fill_zeros=fill_zeros)
-        if np.any(mini_std_filt==0):
-            mini_std_filt = fill_zeros_filter (
-                mini_std_filt, size_filter, use_median=True,
-                apply_filter=apply_filter, fill_zeros=fill_zeros)
-
+            # channel section
+            sec_tmp = mini_sec[i_chan]
             
+            rdn_str = 'RDN{}'.format(i_chan+1)
+            if rdn_str not in header:
+                if log is not None:
+                    log.error ('keyword {} expected but not present in header'
+                               .format(rdn_str))
+            else:
+                mini_rdnoise[sec_tmp] = f_rdnoise * header[rdn_str]
+
+
+        # replace mini_std with sqrt(bkg + readnoise**2)
+        mini_std = np.sqrt(mini_median + mini_rdnoise**2)
+        # where mini_median was negative, use 0, or mini_std should at
+        # least have the value of readnoise
+        mini_std = np.maximum(mini_std, mini_rdnoise)
+        
+                
         if log is not None:
             mem_use (label='just before bkg_corr_MLBG', log=log)
 
-        # now try correcting the small-scale image for the differences
-        # in the channels; if [set_zogy.MLBG_chancorr] is True, then
-        # mini_median_filt, mini_std_filt and data are corrected with
-        # the channel correction factors in place.
+
+        # now try correcting the mini images for the differences in
+        # the channels; if [set_zogy.MLBG_chancorr] is True, then
+        # mini_median, mini_std and data are corrected with the
+        # channel correction factors in place.
         order_max = 2
-        bkg_corr, mini_median_filt_2Dfit = bkg_corr_MLBG (
-            mini_median_filt, mini_std_filt, data, header,
+        bkg_corr, mini_median_2Dfit = bkg_corr_MLBG (
+            mini_median, mini_std, data, header,
             correct_data=get_par(set_zogy.MLBG_chancorr,tel),
             order_max=order_max, mask_reject=mask_mini_avoid, log=log,
             tel=tel, set_zogy=set_zogy,
@@ -8010,15 +7982,39 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
         if bkg_corr:
             fits.writeto (fits_objmask.replace('_objmask',''), data, header,
                           overwrite=True)
-
         
         # now that images have been corrected, take the minimum of
-        # mini_median_filt and mini_median_filt_2Dfit
+        # mini_median and mini_median_2Dfit
         if get_par(set_zogy.MLBG_use2Dfit,tel):
-            # take minimimum of mini_median_filt and 2Dfit
-            mini_median_filt = np.amin(
-                [mini_median_filt, mini_median_filt_2Dfit], axis=0)
-        
+
+            # take minimimum of mini_median and 2Dfit
+            mini_median = np.amin([mini_median, mini_median_2Dfit], axis=0)
+
+            # boxes for which too few pixels were available for a
+            # reliable bkg estimate, adopt the 2Dfit value
+            mini_median[mask_mini_avoid] = (mini_median_2Dfit[mask_mini_avoid])
+
+            # finally, apply a median filter per channel
+            mini_median_filt = np.zeros_like(mini_median)
+            for i_chan in range(nchans):
+                # channel section
+                sec_tmp = mini_sec[i_chan]
+                # filter bkg mini image
+                mini_median_filt[sec_tmp] = fill_zeros_filter (
+                    mini_median[sec_tmp], size_filter, use_median=True,
+                    fill_zeros=False)
+
+            
+
+    if True:
+        # replace mini_std_filt with bkg value + readnoise**2
+        mini_std_filt = np.sqrt(mini_median_filt + mini_rdnoise**2)
+    else:
+        # alternatively, replace only the zeros in original mini_std
+        # image with bkg value + readnoise**2
+        mini_std_filt[mask_mini_avoid] = np.sqrt(
+            mini_median_filt[mask_mini_avoid] + mini_rdnoise[mask_mini_avoid]**2)
+
 
     # estimate median and std of entire image from the values of the subimages
     bkg_median = np.median(mini_median_filt)
@@ -8068,10 +8064,8 @@ def fill_zeros_filter (data_mini, size_filter, use_median=True,
     # fill zeros in data_mini with median of surrounding 3x3
     # pixels, until no more zeros left
     if fill_zeros:
-        if np.all(data_mini==0):
-            # avoid infinite loop in case all data_mini pixels are zero
-            pass
-        else:
+        # avoid infinite loop in case all data_mini pixels are zero
+        if not np.all(data_mini==0):
             while (np.sum(data_mini==0) != 0):
                 mask_zero = (data_mini==0)
                 #data_mini_old = data_mini
@@ -8083,7 +8077,7 @@ def fill_zeros_filter (data_mini, size_filter, use_median=True,
                                 data_mini_old=data_mini_old,
                                 data_mini_filt=data_mini_filt,
                                 data_mini=data_mini)
-                
+
     if apply_filter:
         if use_median:
             # median filter
@@ -8152,11 +8146,10 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
     # function mini2min
     f_norm = max(ysize_mini, xsize_mini)
     xx, yy = np.meshgrid(x, y)
-    zz = mini_median
     xx = xx[~mask_reject]
     yy = yy[~mask_reject]
-    zz = zz[~mask_reject]
-    
+    zz = mini_median[~mask_reject]
+
     # loop different polynomial orders up to [order_max]:
     chi2red_old = np.inf
     limfrac_reject_chan = 0.8
@@ -8365,7 +8358,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
 
 
     # N.B.: polynomials were fit with normalized x and y pixel indices
-    # (using [f_norm]) of the mini image, so coeffients should be
+    # (using [f_norm]) of the mini image, so coefficients should be
     # scaled accordingly if original image pixel indices are used to
     # infer the polynomial fit (most natural)
     bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
