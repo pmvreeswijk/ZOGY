@@ -7867,9 +7867,10 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
     __, mini_median, mini_std = sigma_clipped_stats(data_masked, sigma=nsigma,
                                                     axis=2, mask_value=0)
 
-    # convert to 'float32'
-    mini_median = mini_median.astype('float32')
-    mini_std = mini_std.astype('float32')
+    # convert to 'float32'; don't! - this somehow leads to factors fit
+    # in bkg_corr_MLBG being fixed to 1.0 or very close to 1.0
+    #mini_median = mini_median.astype('float32')
+    #mini_std = mini_std.astype('float32')
 
 
     # mask background subimage if more than some fraction of all
@@ -7889,9 +7890,10 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
             mask_mini_avoid = mask_tmp
         else:
             break
-
-    # add any nan values to mask_mini_avoid
-    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
+        
+    # add any nan and negative values to mask_mini_avoid
+    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std) &
+                        (mini_median >= 0))
     mask_mini_avoid |= ~mask_mini_finite
 
     # set masked values to zero
@@ -7914,17 +7916,15 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
         mini_median_filt = fill_zeros_filter (mini_median, size_filter,
                                               use_median=True)
 
-        # set bkg_std to sqrt of the median background plus
-        # readnoise**2
-        if 'RDNOISE' in header:
-            rdnoise = header['RDNOISE']
-        else:
-            # assume a reasonable value
-            rdnoise = 5.
+        # get readnoise from header
+        rdnoise = read_header(header, ['rdnoise'], log=log)
 
         # create mini image with readnoise
         mini_rdnoise = np.zeros_like (mini_median)
         mini_rdnoise[:] = rdnoise
+
+        # futher below this image is used to set bkg_std to sqrt of
+        # the median background plus readnoise**2
 
     else:
 
@@ -7957,9 +7957,6 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
 
         # replace mini_std with sqrt(bkg + readnoise**2)
         mini_std = np.sqrt(mini_median + mini_rdnoise**2)
-        # where mini_median was negative, use 0, or mini_std should at
-        # least have the value of readnoise
-        mini_std = np.maximum(mini_std, mini_rdnoise)
         
                 
         if log is not None:
@@ -7974,9 +7971,9 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
         bkg_corr, mini_median_2Dfit = bkg_corr_MLBG (
             mini_median, mini_std, data, header,
             correct_data=get_par(set_zogy.MLBG_chancorr,tel),
-            order_max=order_max, mask_reject=mask_mini_avoid, log=log,
-            tel=tel, set_zogy=set_zogy,
-            limfrac_reject_image=limfrac_reject_image)
+            order_max=order_max, mask_reject=mask_mini_avoid, log=log, tel=tel,
+            set_zogy=set_zogy, limfrac_reject_image=limfrac_reject_image)
+
 
         # save data to fits image if background correction was applied
         if bkg_corr:
@@ -8006,14 +8003,8 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
 
             
 
-    if True:
-        # replace mini_std_filt with bkg value + readnoise**2
-        mini_std_filt = np.sqrt(mini_median_filt + mini_rdnoise**2)
-    else:
-        # alternatively, replace only the zeros in original mini_std
-        # image with bkg value + readnoise**2
-        mini_std_filt[mask_mini_avoid] = np.sqrt(
-            mini_median_filt[mask_mini_avoid] + mini_rdnoise[mask_mini_avoid]**2)
+    # replace mini_std_filt with bkg value + readnoise**2
+    mini_std_filt = np.sqrt(mini_median_filt + mini_rdnoise**2)
 
 
     # estimate median and std of entire image from the values of the subimages
@@ -8117,8 +8108,8 @@ def get_section_MLBG (data_shape):
 ################################################################################
 
 def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
-                   order_max=2, mask_reject=None, log=None,
-                   tel=None, set_zogy=None, limfrac_reject_image=None):
+                   order_max=2, mask_reject=None, log=None, tel=None,
+                   set_zogy=None, limfrac_reject_image=None):
 
 
     if log is not None:
@@ -8170,10 +8161,16 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
             npix_masked = np.sum(mask_reject[mini_sec[i_chan]])
             if (npix_masked / npix_chan) > limfrac_reject_chan:
                 vary = False
+                if log is not None:
+                    log.warning ('ratio npix_masked / npix_chan = {} / {} is '
+                                 'larger than allowed ({}); fixing channel '
+                                 'correction factors to 1.0'
+                                 .format(npix_masked, npix_masked,
+                                         limfrac_reject_chan))
             else:
                 vary = True
 
-            params.add('factor{}'.format(i_chan+1), value=1, min=0.5, max=1.5,
+            params.add('factor{}'.format(i_chan+1), value=1.0, min=0.5, max=1.5,
                        vary=vary)
 
         # add polynomial coefficients to fit, with decent starting estimates
@@ -8206,6 +8203,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
             mini_median_corr_temp, mini_std_corr_temp, fit_temp, resid_temp = \
                 mini2min(params, mini_median, mini_std, mini_sec, order,
                          mask_reject_temp, f_norm, return_resid=False)
+
 
             # scale residuals with the chi-square value as standard
             # deviations (mini_std) are overestimated (e.g. if mean
@@ -8316,11 +8314,9 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                     mini_std_corr=mini_std_corr,
                     mini_median_2Dfit=mini_median_2Dfit,
                     resid_bf=resid_bf,
-                    mask_reject_bf=mask_reject_bf,
-                    bkg_mini=np.amin([mini_median_corr,mini_median_2Dfit],
-                                     axis=0)
-                    )
-                    
+                    mask_reject_bf=mask_reject_bf.astype(int),
+                    bkg_mini=np.amin([mini_median_corr,mini_median_2Dfit],axis=0))
+
         
     if log is not None:
         mem_use (label='just before correcting data in bkg_corr_MLBG', log=log) 
@@ -8387,7 +8383,8 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
 
 def mini2min (params, data, data_std, data_sec, order, mask_reject,
               f_norm, return_resid=True):
-    
+
+
     # fit parameters
     p = params
     
@@ -8405,8 +8402,7 @@ def mini2min (params, data, data_std, data_sec, order, mask_reject,
         factor_chan = p['factor{}'.format(i_chan+1)].value
         data_corr[data_sec[i_chan]] *= factor_chan
         data_std_corr[data_sec[i_chan]] *= factor_chan
-        
-        
+
     # exclude pixels where data_std_corr is zero
     mask_fit = (data_std_corr != 0)
             
