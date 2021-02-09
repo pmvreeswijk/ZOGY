@@ -95,6 +95,7 @@ pixscale = 0.5642	# in arcsec/pixel
 key_exptime = 'EXPTIME'
 key_filter = 'FILTER'
 key_obsdate = 'DATE-OBS'
+key_rdnoise = 'RDNOISE'
 
 
 #===============================================================================
