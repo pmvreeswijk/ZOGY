@@ -6596,9 +6596,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         #
         # where area_ap is the effective aperture area used, flux is
         # [data_wcs] and readnoise**2 + background is the same as
-        # [data_bkg_std]**2. Estimate [area_ap] from the ratio of the
-        # volume below the PSF divided by the PSF peak value; do this
-        # per subimage so the subimage PSFs can be used.
+        # [data_bkg_std]**2.
         #
         # N.B.: this is only valid if the flux in a particular pixel
         # is the same as the average flux per pixel in the imaginary
@@ -6612,11 +6610,19 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         area_ap = np.zeros(nsubs)
         for i in range(nsubs):
-            # effective aperture: volume below PSF / peak of PSF =
-            # 1. / peak PSF since volume below PSF was normalized
-            psf_max = np.amax(psf_orig[i])
-            if psf_max != 0:
-                area_ap[i] = 1./psf_max
+            # The effective area is inferred from the
+            # PSF profile P (volume normalized to unity) as follows:
+            #
+            # var = 1 / sum(P**2/V)  - Eq. 9 from Horne (1986)
+            #
+            # assuming V is roughly equal for each pixel, then:
+            #
+            # 1 / sum(P**2/V) = V / sum(P**2) = area_ap * V
+            # so: area_ap = 1 / sum(P**2)
+            sum_P2 = np.sum(psf_orig[i]**2)
+            if sum_P2 != 0:
+                area_ap[i] = 1./sum_P2
+
 
         # set zero values to median
         mask_zero = (area_ap==0)
