@@ -118,7 +118,7 @@ psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
 psf_rad_phot = 5.0       # PSF radius in units of FWHM used in optimal photometry
-psf_rad_zogy = 3.0       # PSF radius in units of FWHM used in optimal subtraction
+psf_rad_zogy = 5.0       # PSF radius in units of FWHM used in optimal subtraction
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
                          # new and ref image as follows:
@@ -127,7 +127,7 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet = 89         # size of the square VIGNETs saved in the SExtractor
+size_vignet = 107        # size of the square VIGNETs saved in the SExtractor
                          # LDAC catalog used by PSFEx; its value should be set to
                          # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * maximum
                          # expected FWHM in any of the images.
@@ -230,6 +230,9 @@ mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
 
 # subfolder to save the many temporary numpy binary files
 dir_numpy = 'NumpyFiles'
+
+# switch to keep intermediate/temporary files
+keep_tmp = True
 
 # switch on/off different functions
 redo_new = False         # execute SExtractor, astrometry.net, PSFEx, optimal flux

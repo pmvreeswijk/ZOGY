@@ -127,7 +127,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                         new_fits_mask=None, ref_fits_mask=None,
                         set_file='set_zogy', log=None,
                         redo_new=None, redo_ref=None,
-                        verbose=None, nthreads=1, telescope='ML1'):
+                        verbose=None, nthreads=1, telescope='ML1',
+                        keep_tmp=None):
 
 
     """Function that accepts a new and a reference fits image, finds their
@@ -168,13 +169,18 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     # (set_zogy.verbose)
     if verbose is not None:
         set_zogy.verbose = str2bool(verbose)
+
     # same for redo_new and redo_ref
     if redo_new is not None:
         set_zogy.redo_new = str2bool(redo_new)
     if redo_ref is not None:
         set_zogy.redo_ref = str2bool(redo_ref)
 
-        
+    # same for keep_tmp
+    if keep_tmp is not None:
+        set_zogy.keep_tmp = str2bool(keep_tmp)
+
+
     start_time1 = os.times()
 
     # initialise log if not provided as input
@@ -586,7 +592,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # which the subimage data arrays were saved;
             # [load_npy_fits] with input parameter nsub will read the
             # separate files properly
-            data_new, psf_new, psf_orig_new, data_new_bkg_std = (
+            dict_data_new, dict_psf_new, psf_orig_new, dict_data_new_bkg_std = (
                 prep_optimal_subtraction('{}.fits'.format(base_new), nsubs,
                                          'new', fwhm_new, header_new,
                                          fits_mask=new_fits_mask,
@@ -606,7 +612,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if ref:
 
         try:
-            data_ref, psf_ref, psf_orig_ref, data_ref_bkg_std = (
+            dict_data_ref, dict_psf_ref, psf_orig_ref, dict_data_ref_bkg_std = (
                 prep_optimal_subtraction('{}.fits'.format(base_ref), nsubs,
                                          'ref', fwhm_ref, header_ref,
                                          fits_mask=ref_fits_mask, remap=remap,
@@ -737,8 +743,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             nfake_sub = get_par(set_zogy.nfakestars,tel)
             for nsub in range(nsubs):
                 
-                data_new_sub = load_npy_fits (data_new, nsub)
-                data_new_bkg_std_sub = load_npy_fits (data_new_bkg_std, nsub)
+                data_new_sub = load_npy_fits (dict_data_new[nsub])
+                data_new_bkg_std_sub = load_npy_fits (dict_data_new_bkg_std[nsub])
                 
                 index_fake = tuple([slice(nsub * nfake_sub, (nsub+1) * nfake_sub)])
                 fakestar_xcoord[index_fake], fakestar_ycoord[index_fake], \
@@ -773,14 +779,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # run ZOGY
 
                 # load subimages
-                data_new_sub = load_npy_fits (data_new, nsub)
-                psf_new_sub = load_npy_fits (psf_new, nsub)
-                data_new_bkg_std_sub = load_npy_fits (data_new_bkg_std, nsub)
+                data_new_sub = load_npy_fits (dict_data_new[nsub])
+                psf_new_sub = load_npy_fits (dict_psf_new[nsub])
+                data_new_bkg_std_sub = load_npy_fits (dict_data_new_bkg_std[nsub])
 
-                data_ref_sub = load_npy_fits (data_ref, nsub)
-                psf_ref_sub = load_npy_fits (psf_ref, nsub)
-                data_ref_bkg_std_sub = load_npy_fits (data_ref_bkg_std, nsub)
-                                
+                data_ref_sub = load_npy_fits (dict_data_ref[nsub])
+                psf_ref_sub = load_npy_fits (dict_psf_ref[nsub])
+                data_ref_bkg_std_sub = load_npy_fits (dict_data_ref_bkg_std[nsub])
+
                 # if use_FFTW=True: proces the first subimage (could
                 # be any subimage) twice to avoid it showing vertical
                 # bands (e.g. see
@@ -805,6 +811,22 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            log=log)
 
                 results_zogy.append(result_sub)
+
+                
+                # delete if not keeping intermediate/temporary files
+                if not get_par(set_zogy.keep_tmp,tel):
+                    list2remove = [dict_psf_new[nsub],
+                                   dict_psf_ref[nsub],
+                                   dict_data_new_bkg_std[nsub],
+                                   dict_data_ref_bkg_std[nsub],
+                                   dict_data_ref[nsub]]
+                    # keep dict_data_new - needed below - if fake
+                    # stars were added
+                    if get_par(set_zogy.nfakestars,tel)==0:
+                        list2remove.append(dict_data_new[nsub])
+                    # remove
+                    remove_files (list2remove, log=log)
+
 
 
         except Exception as e:
@@ -865,21 +887,28 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                          'float32', nsubs, cuts_ima, index_extract,
                          sublist=sublist)
 
+            # delete if not keeping intermediate/temporary files
+            if not get_par(set_zogy.keep_tmp,tel):
+                remove_files (sublist, log=log)
+            
                 
         # if fake stars were added to the new image, also create
         # full image from data_new subimage files
         if get_par(set_zogy.nfakestars,tel)>0:
             log.info ('creating new image including fake stars '
                       'from subimages and writing it to disk')
-            # [data_new] subimages are assumed to all have the
-            # same extension
-            ext = data_new.split('.')[-1]
-            sublist = ['{}_sub{}.{}'.format(data_new.split('_sub')[0], i, ext)
-                       for i in range(nsubs)]
+            # subimage filenames are recorded in dictionary
+            # [dict_data_new]
+            sublist = [dict_data_new[i] for i in range(nsubs)]
             create_full ('{}_new.fits'.format(base_newref),
                          header_tmp, (ysize_new, xsize_new),
                          'float32', nsubs, cuts_ima, index_extract,
                          sublist=sublist)
+
+            # delete if not keeping intermediate/temporary files
+            if not get_par(set_zogy.keep_tmp,tel):
+                sublist = [dict_data_new[i] for i in range(nsubs)]
+                remove_files (sublist, log=log)
 
 
         mem_use (label='after creating full images', log=log)
@@ -889,7 +918,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             log.info ('displaying numerous subimages')
 
-            dir_newref = '/'.join(base_newref.split('/')[:-1])
+            path, name = os.path.split(base_newref)
+            if len(path)>0:
+                dir_newref = path
+            else:
+                dir_newref = '.'
+
             base_remap = '{}/{}'.format(dir_newref, base_ref.split('/')[-1])
             names_disp_list = ['{}.fits'.format(base_newref),
                                '{}_remap.fits'.format(base_remap),
@@ -937,7 +971,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         x_stat = (np.random.rand(nstat)*(xsize_new-2*edge)).astype(int) + edge
         y_stat = (np.random.rand(nstat)*(ysize_new-2*edge)).astype(int) + edge
         mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
-            data_Scorr_full[y_stat,x_stat])
+            data_Scorr_full[y_stat,x_stat].astype(float))
 
         if get_par(set_zogy.verbose,tel):
             log.info('Scorr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
@@ -953,7 +987,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # compute statistics on Fpsferr image
         mean_Fpsferr, median_Fpsferr, std_Fpsferr = sigma_clipped_stats (
-            data_Fpsferr_full[y_stat,x_stat])
+            data_Fpsferr_full[y_stat,x_stat].astype(float))
 
         if get_par(set_zogy.verbose,tel):
             log.info('Fpsferr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
@@ -982,7 +1016,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
         # define fits files names
-        dir_newref = '/'.join(base_newref.split('/')[:-1])
+        path, name = os.path.split(base_newref)
+        if len(path)>0:
+            dir_newref = path
+        else:
+            dir_newref = '.'
+
         base_remap = '{}/{}'.format(dir_newref, base_ref.split('/')[-1])
 
         if get_par(set_zogy.nfakestars,tel)>0:
@@ -1496,8 +1535,9 @@ def extract_fakestars (table_fake, table_trans, nsubs, cuts_ima, cuts_ima_fft,
                 table_fake['E_FLUX_IN'])
     fluxdiff_err = table_fake['E_FLUXERR_OUT'] / table_fake['E_FLUX_IN']
     
-    fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff)
-    fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err)
+    fd_mean, fd_median, fd_std = sigma_clipped_stats(fluxdiff.astype(float))
+    fderr_mean, fderr_median, fderr_std = sigma_clipped_stats(fluxdiff_err
+                                                              .astype(float))
 
     # write to ascii file
     filename = '{}_fakestars.dat'.format(base_new)
@@ -2957,7 +2997,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     #print ('mean: {}, median: {}, std: {}'
     #       .format(mean, median, std))
     mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
-        data_Scorr_bkgsub[y_stat,x_stat])
+        data_Scorr_bkgsub[y_stat,x_stat].astype(float))
     log.info ('mean_Scorr: {:.3f}, median_Scorr: {:.3f}, std_Scorr: {:.3f}'
               .format(mean_Scorr, median_Scorr, std_Scorr))
 
@@ -3031,16 +3071,20 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
               .format(len(table_trans)))
 
 
-    del data_Scorr_bkgsub
-
-
     # Filter on significance
     # ======================
 
-    # filter by abs(SCORR_PEAK) >= 6 / std_Scorr (do not divide by
-    # std_Scorr if source extractor was run on the normalized Scorr
-    # images)
-    nsigma_norm = get_par(set_zogy.transient_nsigma,tel) / std_Scorr
+    # filter by abs(SCORR_PEAK) >= 6; do not divide by [std_Scorr] -
+    # the value in the background-subtracted Scorr image is assumed to
+    # be the significance irrespective of the STD in the Scorr
+    # image. This is corroborated by a test with fake stars of S/N=10
+    # in an image compared with a deep reference image where the
+    # resulting Scorr STD was 0.8: scaling the stars' significance
+    # with 1/0.8 would boost their values beyond 10. In run_sextractor
+    # the source-extractor threshold is adjusted by [std_Scorr],
+    # because source extractor is using the actual STD in the image to
+    # determine its detection threshold.
+    nsigma_norm = get_par(set_zogy.transient_nsigma,tel) #/ std_Scorr
     mask_signif = np.abs(table_trans['SCORR_PEAK']) >= nsigma_norm
     table_trans = table_trans[mask_signif]
     log.info ('transient detection threshold: {}'.format(nsigma_norm))
@@ -3438,7 +3482,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         dict_thumbnails = {}
 
         # list of full data images to use in loop
-        data_full = [data_new, data_ref, data_D, data_Scorr]
+        data_full = [data_new, data_ref, data_D, data_Scorr_bkgsub]
         
         # size of full input images; assuming they have identical shapes
         ysize, xsize = data_new.shape
@@ -4577,7 +4621,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         elif bkg_var == 'calc_from_data':
             D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
             D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
-                D_sub_masked, mask_value=0)
+                D_sub_masked.astype(float), mask_value=0)
             bkg_var_sub = D_sub_std**2
 
             # if none of the above, write error message to log
@@ -5145,7 +5189,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100,
     # estimate minimum, maximum and background values
     D_min = np.amin(D[mask_inner])
     D_max = np.amax(D[mask_inner])
-    __, D_bkg, D_bkg_std = sigma_clipped_stats (D[~mask_inner])
+    __, D_bkg, D_bkg_std = sigma_clipped_stats (D[~mask_inner].astype(float))
 
 
     # create a set of Parameters
@@ -5896,9 +5940,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # determine psf of input image with get_psf function - needs to be
     # done before the optimal fluxes are determined, as it will run
     # PSFEx and create the _psf.fits file that is used in the optimal
-    # flux determination
-    psf, psf_orig = get_psf (input_fits, header, nsubs, imtype, fwhm,
-                             pixscale, remap, nthreads=nthreads, log=log)
+    # flux determination. The shifted subimage PSFs are saved in numpy
+    # files, the filenames of which are recorded in the dictionary
+    # [dict_psf] with the subimage integers as the keys.
+    dict_psf, psf_orig = get_psf (input_fits, header, nsubs, imtype, fwhm,
+                                  pixscale, remap, nthreads=nthreads, log=log)
 
 
     # -------------------------------
@@ -5988,7 +6034,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma,
                 imtype=imtype, log=log)
             limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
-                limflux_array, mask_value=0)
+                limflux_array.astype(float), mask_value=0)
             if get_par(set_zogy.verbose,tel):
                 log.info('{}-sigma limiting flux; mean: {}, std: {}, median: {}'
                          .format(nsigma, limflux_mean, limflux_std, limflux_median))
@@ -6328,8 +6374,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                         data_shape=data_wcs.shape, zp_type='background',
                         boxsize=subsize)
 
-                    # if make_plots, save these mini images
-                    if get_par(set_zogy.make_plots,tel):
+                    # if keeping intermediate/temporary files, save
+                    # these mini images
+                    if get_par(set_zogy.keep_tmp,tel):
 
                         fits.writeto('{}_zp_subs.fits'.format(base),
                                      zp_mini, overwrite=True)
@@ -6540,7 +6587,55 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         index_neg = np.nonzero(data_wcs<0)
         data_wcs_copy = np.copy(data_wcs)
         data_wcs_copy[index_neg] = 0
-        data_err = np.sqrt(data_wcs_copy + data_bkg_std**2)
+    
+        # create 1-sigma error image using:
+        #
+        #  noise = sqrt(flux_tot + area_ap * (rdnoise**2 + background))
+        #        ~ sqrt(area_ap * (flux/pixel + (rdnoise**2 + background))
+        #        = sqrt(area_ap * (data_wcs_copy + data_bkg_std**2)
+        #
+        # where area_ap is the effective aperture area used, flux is
+        # [data_wcs] and readnoise**2 + background is the same as
+        # [data_bkg_std]**2. Estimate [area_ap] from the ratio of the
+        # volume below the PSF divided by the PSF peak value; do this
+        # per subimage so the subimage PSFs can be used.
+        #
+        # N.B.: this is only valid if the flux in a particular pixel
+        # is the same as the average flux per pixel in the imaginary
+        # aperture of size area_ap centered on that pixel, which is
+        # fine for the background regions, but it will overestimate
+        # the noise at e.g. the centers of stars, where it is wrongly
+        # assumed the entire aperture contains the same flux per pixel
+        # as the flux at the center. Would have to convolve the noise
+        # image (data_wcs_copy + data_bkg_std**2) with the PSF and
+        # scale it to determine the proper limiting magnitude image
+
+        area_ap = np.zeros(nsubs)
+        for i in range(nsubs):
+            # effective aperture: volume below PSF / peak of PSF =
+            # 1. / peak PSF since volume below PSF was normalized
+            psf_max = np.amax(psf_orig[i])
+            if psf_max != 0:
+                area_ap[i] = 1./psf_max
+
+        # set zero values to median
+        mask_zero = (area_ap==0)
+        if np.all(mask_zero):
+            area_ap[:] = 1.
+        else:
+            area_ap[mask_zero] = np.median(area_ap)
+
+        # reshape, interpolate and grow area_ap array (1D) to size of
+        # data_wcs_copy
+        ysize, xsize = data_wcs_copy.shape
+        subsize = get_par(set_zogy.subimage_size,tel)
+        nx = int(xsize / subsize)
+        ny = int(ysize / subsize)
+        data_area_ap = ndimage.zoom(area_ap.reshape((nx, ny)).transpose(),
+                                    subsize, order=2, mode='nearest')
+
+        # calculate error image
+        data_err = np.sqrt(data_area_ap * (data_wcs_copy + data_bkg_std**2))
 
         # apply the zeropoint
         exptime, filt = read_header(header, ['exptime', 'filter'], log=log)
@@ -6551,41 +6646,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         del data_wcs_copy, data_err
 
-        # this is the limiting magnitude per pixel, need to correct
-        # for the number of pixels that were used in the flux
-        # measurement, which is the volume below the PSF divided by
-        # the PSF peak value; do this per subimage so the subimage
-        # PSFs can be used. It would be better to convolve the image
-        # with the normalized PSF, but this should be a good
-        # approximation in the flatter parts of the image.
-        area = np.zeros(nsubs)
-        for i in range(nsubs):
-            # effective aperture: volume below PSF / peak of PSF =
-            # 1. / peak PSF since volume below PSF was normalized
-            psf_max = np.amax(psf_orig[i])
-            if psf_max != 0:
-                area[i] = 1./psf_max
-
-        # set zero values to median
-        mask_zero = (area==0)
-        if np.all(mask_zero):
-            area[:] = 1.
-        else:
-            area[mask_zero] = np.median(area)
-
-        # reshape and convert to -2.5*np.log10 (area)
-        ysize, xsize = data_limmag.shape
-        subsize = get_par(set_zogy.subimage_size,tel)
-        nx = int(xsize / subsize)
-        ny = int(ysize / subsize)
-        dmag = -2.5*np.log10(area).reshape((nx, ny)).transpose()
-
-        # interpolate, grow to size of data_limmag and add to data_limmag
-        data_limmag += ndimage.zoom(dmag, subsize, order=2, mode='nearest')
-        
-        log.info ('limmag image per pixel corrected for median effective '
-                  'aperture area of {:.2f} pixels, inferred from ratio of '
-                  'subimage PSF_volume over PSF_peak'.format(np.median(area)))
+        log.info ('median effective aperture area for calculation of limiting '
+                  'magnitude image: {} pix, inferred from ratio of subimage '
+                  'PSF_volume over PSF_peak'.format(np.median(area_ap)))
 
 
         # try to write scaled uint8 or int16 limiting magnitude image
@@ -6663,8 +6726,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                    dtype='float32')
 
     # save fftdata and fftdata_bkg_std to numpy files, one for each
-    # subimage, and let the variable names point to the filenames from
-    # which they will be read in again later on
+    # subimage, and let these dictionaries contain the filenames with
+    # the subimage integer as the key
+    dict_fftdata = {}
+    dict_fftdata_bkg_std = {}
+
     for nsub in range(nsubs):
 
         # initialize to zero
@@ -6680,13 +6746,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                slice(subcutfft[2],subcutfft[3])])
         fftdata_sub[index_fft] = data[index_fftdata]
         fftdata_bkg_std_sub[index_fft] = data_bkg_std[index_fftdata]
-        
-        # save the subimage fft data arrays
-        fftdata = save_npy_fits (fftdata_sub, '{}_fftdata_sub{}.npy'
-                                 .format(base, nsub))
-        fftdata_bkg_std = save_npy_fits (fftdata_bkg_std_sub,
-                                         '{}_fftdata_bkg_std_sub{}.npy'
-                                         .format(base, nsub))
+
+        # record the numpy filename in a dictionary
+        dict_fftdata[nsub] = save_npy_fits (fftdata_sub, '{}_fftdata_sub{}.npy'
+                                            .format(base, nsub))
+
+        dict_fftdata_bkg_std[nsub] = save_npy_fits (fftdata_bkg_std_sub,
+                                                    '{}_fftdata_bkg_std_sub{}.npy'
+                                                    .format(base, nsub))
 
 
     if get_par(set_zogy.timing,tel):
@@ -6704,12 +6771,30 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         prep_plots (table_sex, header, base, log=log)
 
 
+    # remove file(s) if not keeping intermediate/temporary files
+    if not get_par(set_zogy.keep_tmp,tel):
+        if 'fits_calcat_field' in locals():
+            remove_files ([fits_calcat_field], log=log)
+
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='prep_optimal_subtraction', log=log)
 
 
-    return fftdata, psf, psf_orig, fftdata_bkg_std
+    return dict_fftdata, dict_psf, psf_orig, dict_fftdata_bkg_std
+
+
+################################################################################
+
+def remove_files (filelist, log=None):
+
+    for f in filelist:
+        if os.path.isfile(f):
+            os.remove(f)
+            if log is not None:
+                log.info ('removing temporary file {}'.format(f))
+
+    return
 
 
 ################################################################################
@@ -6929,26 +7014,17 @@ def calc_mag (flux1, flux2):
    
 ################################################################################
 
-def load_npy_fits (filename, nsub=None):
+def load_npy_fits (filename):
 
     # determine file extension
     ext = filename.split('.')[-1]
-
-    if nsub is not None:
-        if 'sub' in filename:
-            # name may already include sub number; if so, replace it
-            # with [nsub]
-            filename = '{}_sub{}.{}'.format(filename.split('_sub')[0], nsub, ext)
-        else:
-            # otherwise add _sub and [nsub] just before the extension
-            filename = '{}_sub{}.{}'.format(filename.split('.')[0], nsub, ext)
 
     # load numpy or fits file
     if 'fits' in ext:
         data = read_hdulist(filename)
     else:
         data = np.load(filename, mmap_mode='c')
-        
+
 
     return data
 
@@ -6979,7 +7055,9 @@ def save_npy_fits (data, filename, header=None):
         if dir_numpy is not None and len(dir_numpy) > 0:
 
             path, name = os.path.split(filename)
-            dir_numpy = '{}/{}'.format(path, dir_numpy)
+            if len(path)>0:
+                dir_numpy = '{}/{}'.format(path, dir_numpy)
+
             # make folder if it does not exist yet
             if not os.path.isdir(dir_numpy):
                 os.mkdir(dir_numpy)
@@ -6989,8 +7067,7 @@ def save_npy_fits (data, filename, header=None):
             
 
         # if file already exists, remove it
-        if os.path.isfile(filename):
-            os.remove(filename)
+        remove_files ([filename])
 
         # save numpy file
         np.save(filename, data)
@@ -7122,7 +7199,8 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
         nmax = get_par(set_zogy.phot_ncal_max,tel)
         if np.sum(zp_array != 0) >= 5:
 
-            __, zp_median, zp_std = sigma_clipped_stats (zp_array[0:nmax])
+            __, zp_median, zp_std = sigma_clipped_stats (zp_array[0:nmax]
+                                                         .astype(float))
 
             # make histrogram plot if needed
             if get_par(set_zogy.make_plots,tel):
@@ -7226,7 +7304,7 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
         # only determine median when sufficient number of values
         # [nval_min] are available; otherwise leave it at zero
         if np.sum(mask) >= nval_min:
-            mean, median, std = sigma_clipped_stats (zps[mask])
+            mean, median, std = sigma_clipped_stats (zps[mask].astype(float))
             zps_median[nsub] = median
             zps_std[nsub] = std
             
@@ -7534,11 +7612,12 @@ def fixpix (data, log, satlevel=60000., data_mask=None, base=None,
             #data_fixed = convolve(data_fixed, kernel)
             data_fixed = interpolate_replace_nans(data_fixed, kernel)
             log.info ('np.sum(np.isnan(data_fixed)): {}'.format(np.sum(np.isnan(data_fixed))))
-            
-            
-    if base is not None and get_par(set_zogy.make_plots,tel):
+
+
+    if base is not None and get_par(set_zogy.keep_tmp,tel):
         fits.writeto('{}_pixfixed.fits'.format(base), data_fixed, overwrite=True)
-        
+
+
     if timing:
         log_timing_memory (t0=t, label='fixpix', log=log)
              
@@ -7672,11 +7751,11 @@ def get_back_orig (data, header, objmask, imtype, log, clip=True, fits_mask=None
     if boxsize > 300:
         index_stat = get_rand_indices((data_masked_reshaped.shape[2],))
         __, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped[:,:,index_stat],
+            data_masked_reshaped[:,:,index_stat].astype(float),
             sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
     else:
         __, mini_median, mini_std = sigma_clipped_stats (
-            data_masked_reshaped,
+            data_masked_reshaped.astype(float),
             sigma=get_par(set_zogy.bkg_nsigma,tel), axis=2, mask_value=0)
 
 
@@ -7854,7 +7933,7 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
 
     # construct masked array and reshape it so that new shape
     # is: nboxes in y, nboxes in z, nvalues in box
-    data_masked = (np.ma.masked_array(data, mask=mask_reject, dtype='float32')
+    data_masked = (np.ma.masked_array(data, mask=mask_reject, dtype=float)
                    .reshape(nysubs,bkg_boxsize,-1,bkg_boxsize)
                    .swapaxes(1,2).reshape(nysubs,nxsubs,-1))
 
@@ -7864,9 +7943,14 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
             
     # get clipped statistics
     nsigma = get_par(set_zogy.bkg_nsigma,tel)
-    __, mini_median, mini_std = sigma_clipped_stats(data_masked, sigma=nsigma,
-                                                    axis=2, mask_value=0)
+    __, mini_median, mini_std = sigma_clipped_stats(
+        data_masked.astype(float), sigma=nsigma, axis=2, mask_value=0)
 
+    # set any nan or infinite values to zero
+    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
+    mini_median[~mask_mini_finite] = 0
+    mini_std[~mask_mini_finite] = 0
+    
     # convert to 'float32'; don't! - this somehow leads to factors fit
     # in bkg_corr_MLBG being fixed to 1.0 or very close to 1.0
     #mini_median = mini_median.astype('float32')
@@ -7891,10 +7975,9 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
         else:
             break
         
-    # add any nan and negative values to mask_mini_avoid
-    mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std) &
-                        (mini_median >= 0))
-    mask_mini_avoid |= ~mask_mini_finite
+    # add any negative values to mask_mini_avoid; include zeros to
+    # also count the nan/infinite values set to zero above
+    mask_mini_avoid |= (mini_median <= 0)
 
     # set masked values to zero
     mini_median[mask_mini_avoid] = 0
@@ -8036,7 +8119,8 @@ def get_median_std (nsub, cuts_ima, data, mask_use, mask_minsize=0.5, clip=True,
     if np.sum(mask_sub) > mask_minsize:
         if clip:
             # get clipped_stats mean, std and median
-            __, median, std = sigma_clipped_stats(data_sub[mask_sub])
+            __, median, std = sigma_clipped_stats(data_sub[mask_sub]
+                                                  .astype(float))
         else:
             median = np.median(data_sub[mask_sub])
             std = np.std(data_sub[mask_sub])
@@ -8282,7 +8366,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
             mem_use (label='at end of order loop in bkg_corr_MLBG', log=log)
 
 
-    log.info (fit_report(result_bf))
+    #log.info (fit_report(result_bf))
     log.info ('order used: {}, reduced chi-square: {}'.format(order_bf,
                                                               chi2red_bf))
     p = params_bf
@@ -8315,7 +8399,8 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                     mini_median_2Dfit=mini_median_2Dfit,
                     resid_bf=resid_bf,
                     mask_reject_bf=mask_reject_bf.astype(int),
-                    bkg_mini=np.amin([mini_median_corr,mini_median_2Dfit],axis=0))
+                    bkg_mini=np.amin([mini_median_corr,mini_median_2Dfit], axis=0)
+                    )
 
         
     if log is not None:
@@ -8923,7 +9008,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     else:
         fwhm_use = fwhm
 
-    psf_size = 2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use
+    psf_size = 2 * get_par(set_zogy.psf_rad_zogy,tel) * fwhm_use
     # make sure [psf_size] is not larger than [psf_size_config] *
     # [psf_samp], which will happen if FWHM is very large
     psf_size = int(min(psf_size, psf_size_config * psf_samp))
@@ -8986,6 +9071,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     # loop through nsubs and construct psf at the center of each
     # subimage, using the output from PSFex that was run on the full
     # image
+    dict_psf_ima_shift = {}
     for nsub in range(nsubs):
 
         # using function [get_psf_ima], construct the PSF image with
@@ -9029,11 +9115,11 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
         psf_ima_shift_sub = fft.fftshift(psf_ima_center)
 
         # save psf_ima_shift_sub to a .npy file using function
-        # [save_npy_fits] and let [psf_ima_shift] point to this
-        # filename string
-        psf_ima_shift = save_npy_fits (psf_ima_shift_sub,
-                                       '{}_psf_ima_shift_sub{}.npy'
-                                       .format(base, nsub))
+        # [save_npy_fits] and record the filenames in
+        # [dict_psf_ima_shift] with the subimage integers as the keys
+        dict_psf_ima_shift[nsub] = save_npy_fits (psf_ima_shift_sub,
+                                                  '{}_psf_ima_shift_sub{}.npy'
+                                                  .format(base, nsub))
 
 
         if (get_par(set_zogy.display,tel) and show_sub(nsub) and
@@ -9069,7 +9155,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_psf', log=log)
 
-    return psf_ima_shift, psf_ima
+    return dict_psf_ima_shift, psf_ima
 
 
 ################################################################################
@@ -9350,7 +9436,8 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     # estimate minimum, maximum and background values
     val_min = np.amin(image[mask_inner])
     val_max = np.amax(image[mask_inner])
-    __, val_bkg, val_bkg_std = sigma_clipped_stats (image[~mask_inner])
+    __, val_bkg, val_bkg_std = sigma_clipped_stats (image[~mask_inner]
+                                                    .astype(float))
 
         
     # create a set of Parameters
@@ -10114,7 +10201,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     base = image_in.replace('.fits','')
     sexcat = '{}_cat.fits'.format(base)
 
-    # read SExtractor catalogue (this is also used further down below in this function)
+    # read SExtractor catalogue (this is also used further down below
+    # in this function)
     data_sexcat = read_hdulist (sexcat)
     #nobjects = data_sexcat.shape[0]
     #header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
@@ -10231,11 +10319,6 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
         # image, before it is deleted
         data_match = read_hdulist ('{}.match'.format(base))
 
-        for ext in ['.solved', '.match', '.rdls', '.corr', '-indx.xyls', '.axy']:
-            file2remove = '{}{}'.format(base, ext)
-            if os.path.isfile (file2remove):
-                os.remove(file2remove)
-
     else:
         log.error('solve-field (Astrometry.net) failed with exit code {}'
                   .format(status))
@@ -10261,7 +10344,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
 
     # add specific keyword indicating index file of match
     if data_match['HEALPIX'][0]!=-1:
-        anet_index = 'index-{}-{:02d}.fits'.format(data_match['INDEXID'][0], data_match['HEALPIX'][0])
+        anet_index = 'index-{}-{:02d}.fits'.format(data_match['INDEXID'][0],
+                                                   data_match['HEALPIX'][0])
     else:
         anet_index = 'index-{}.fits'.format(data_match['INDEXID'][0])
 
@@ -10286,13 +10370,19 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     anet_rot = np.average([anet_rot_x, anet_rot_y])
 
     # add header keywords
-    header_wcs['A-PSCALE'] = (anet_pixscale, '[arcsec/pix] pixel scale WCS solution')
-    header_wcs['A-PSCALX'] = (anet_pixscale_x, '[arcsec/pix] X-axis pixel scale WCS solution')
-    header_wcs['A-PSCALY'] = (anet_pixscale_y, '[arcsec/pix] Y-axis pixel scale WCS solution')
+    header_wcs['A-PSCALE'] = (anet_pixscale,
+                              '[arcsec/pix] pixel scale WCS solution')
+    header_wcs['A-PSCALX'] = (anet_pixscale_x,
+                              '[arcsec/pix] X-axis pixel scale WCS solution')
+    header_wcs['A-PSCALY'] = (anet_pixscale_y,
+                              '[arcsec/pix] Y-axis pixel scale WCS solution')
 
-    header_wcs['A-ROT'] = (anet_rot, '[deg] rotation WCS solution (E of N for "up")')
-    header_wcs['A-ROTX'] = (anet_rot_x, '[deg] X-axis rotation WCS (E of N for "up")')
-    header_wcs['A-ROTY'] = (anet_rot_y, '[deg] Y-axis rotation WCS (E of N for "up")')
+    header_wcs['A-ROT'] = (anet_rot,
+                           '[deg] rotation WCS solution (E of N for "up")')
+    header_wcs['A-ROTX'] = (anet_rot_x,
+                            '[deg] X-axis rotation WCS (E of N for "up")')
+    header_wcs['A-ROTY'] = (anet_rot_y,
+                            '[deg] Y-axis rotation WCS (E of N for "up")')
 
     # convert SIP header keywords from Astrometry.net to PV keywords
     # that swarp, scamp (and sextractor) understand using this module
@@ -10414,8 +10504,8 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
         
         log.info('dra_mean [arcsec]: {:.3f}, dra_std: {:.3f}, dra_median: {:.3f}'
                  .format(dra_mean, dra_std, dra_median))
-        log.info('ddec_mean [arcsec]: {:.3f}, ddec_std: {:.3f}, ddec_median: {:.3f}'
-                 .format(ddec_mean, ddec_std, ddec_median))
+        log.info('ddec_mean [arcsec]: {:.3f}, ddec_std: {:.3f}, ddec_median: '
+                 '{:.3f}'.format(ddec_mean, ddec_std, ddec_median))
         
         # add header keyword(s):
         header['A-DRA'] = (dra_median,
@@ -10466,8 +10556,24 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
     fits.writeto(image_out, data, header, overwrite=True)
 
+
+    # remove file(s) if not keeping intermediate/temporary files
+    if not get_par(set_zogy.keep_tmp,tel):
+
+        if 'sexcat_bright' in locals():
+            remove_files ([sexcat_bright], log=log)
+
+        # astrometry.net output files
+        list2remove = ['{}{}'.format(base, ext) for ext in
+                       ['.solved', '.match', '.rdls', '.corr', '-indx.xyls',
+                        '.axy', '.wcs']]
+        remove_files (list2remove, log=log)
+
+
+
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t3, label='calculate offset wrt external catalog', log=log)
+        log_timing_memory (t0=t3, label='calculate offset wrt external catalog',
+                           log=log)
         
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_wcs', log=log)
@@ -10844,7 +10950,8 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False,
 
 
     # determine mean, median and standard deviation through sigma clipping
-    __, fwhm_median, fwhm_std = sigma_clipped_stats(fwhm_select, mask_value=0)
+    __, fwhm_median, fwhm_std = sigma_clipped_stats(
+        fwhm_select.astype(float), mask_value=0)
     # set values to zero if too few stars are selected or values
     # just determined are non-finite
     if (len(fwhm_select) < nmin or
@@ -10859,8 +10966,8 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False,
 
     if get_elong:
         # determine mean, median and standard deviation through sigma clipping
-        __, elong_median, elong_std = sigma_clipped_stats(elong_select,
-                                                          mask_value=0)
+        __, elong_median, elong_std = sigma_clipped_stats(
+            elong_select.astype(float), mask_value=0)
         # set values to zero if too few stars are selected or values
         # just determined are non-finite
         if (len(elong_select) < nmin or
@@ -10983,9 +11090,10 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
     
     # make copy of input image, as input image will get background
     # subtracted
-    image_orig = '{}_orig.fits'.format(base)
-    if not os.path.exists(image_orig):
-        shutil.copy2 (image, image_orig)
+    if get_par(set_zogy.keep_tmp,tel):
+        image_orig = '{}_orig.fits'.format(base)
+        if not os.path.exists(image_orig):
+            shutil.copy2 (image, image_orig)
 
         
     # if fraction less than one, run SExtractor on specified fraction of
@@ -11141,7 +11249,8 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
             log.info ('running 2nd pass of SExtractor')
 
             # save catalog of 1st/initial run to different filename
-            os.rename (cat_out, cat_out.replace('ldac', 'ldac_init'))
+            if get_par(set_zogy.keep_tmp,tel):
+                os.rename (cat_out, cat_out.replace('ldac', 'ldac_init'))
 
             # set back_type in command dictionary to 'MANUAL', because
             # background has been subtracted in the first pass
@@ -11189,7 +11298,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
             # only important for background-subtracted image
             if Scorr_mode=='init':
                 det_th *= 5
-                
+
             cmd_dict['-DETECT_THRESH'] = str(det_th)
             cmd_dict['-DETECT_MINAREA'] = '3'
             cmd_dict['-DETECT_MAXAREA'] = '2000'
@@ -11359,7 +11468,21 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
         header['S-BKGSTD'] = (gain * np.median(data_bkg_std), '[e-] sigma (STD) '
                               'background full image')
 
-        
+
+    # remove file(s) if not keeping intermediate/temporary files
+    if not get_par(set_zogy.keep_tmp,tel):
+
+        if 'image_fraction' in locals():
+            remove_files ([image_fraction], log=log)
+
+        if 'fits_objmask' in locals():
+            remove_files ([fits_objmask], log=log)
+
+        if fraction < 1:
+            remove_files ([cat_out], log=log)
+
+
+
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_sextractor', log=log)
 
@@ -11751,7 +11874,12 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
         # write image
         fits_output = '{}_psf_checkimages.fits'.format(base)
         hdulist.writeto(fits_output, overwrite=True)
-        
+
+
+    # remove file(s) if not keeping intermediate/temporary files
+    if not get_par(set_zogy.keep_tmp,tel):
+        remove_files ([cat_in], log=log)
+
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='run_psfex', log=log)
@@ -12432,6 +12560,8 @@ def main():
     parser.add_argument('--nthreads', type=int, default=1,
                         help='number of threads (CPUs) to use')
     parser.add_argument('--telescope', type=str, default='ML1', help='telescope')
+    parser.add_argument('--keep_tmp', default=None,
+                        help='keep intermediate/temporary files')
 
 
     # replaced [global_pars] function with importing [set_file] as C;
@@ -12441,9 +12571,9 @@ def main():
     args = parser.parse_args()
     optimal_subtraction(args.new_fits, args.ref_fits, args.new_fits_mask,
                         args.ref_fits_mask, args.set_file, args.log,
-                        args.redo_new, args_redo_ref,
-                        args.verbose, args.nthreads, args.telescope)
-    
+                        args.redo_new, args.redo_ref,
+                        args.verbose, args.nthreads, args.telescope,
+                        args.keep_tmp)
 
 if __name__ == "__main__":
     main()
