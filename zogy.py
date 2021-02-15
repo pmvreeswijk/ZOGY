@@ -2145,7 +2145,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     """
 
     if log is not None:
-        if get_par(set_zogy.timing,tel): t = time.time()
+        t = time.time()
         log.info('executing format_cat ...')
         mem_use (label='at start of format_cat', log=log)
 
@@ -2492,7 +2492,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     del hdu
 
 
-    if log is not None and get_par(set_zogy.timing,tel):
+    if log is not None:
         log_timing_memory (t0=t, label='format_cat', log=log)
 
     
@@ -4017,7 +4017,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     # filter out transient candidates with high chi2 values
     #mask_keep &= (chi2_moffat <= chi2_max)
     # for the moment, only filter out extreme reduced chisquare values
-    mask_keep &= (chi2_moffat <= 100.)
+    mask_keep &= (chi2_moffat <= 100)
     # and candidates with non-finite values in Moffat fit to D
     mask_keep &= (mask_finite)
     ntrans = np.sum(mask_keep)
