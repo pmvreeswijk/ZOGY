@@ -127,7 +127,7 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet = 107        # size of the square VIGNETs saved in the SExtractor
+size_vignet = 99         # size of the square VIGNETs saved in the SExtractor
                          # LDAC catalog used by PSFEx; its value should be set to
                          # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * maximum
                          # expected FWHM in any of the images.
