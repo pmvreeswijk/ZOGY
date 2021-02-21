@@ -4495,10 +4495,12 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # using function [get_psf_ima], construct the PSF image with
         # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
         # image is at the original pixel scale
+        psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
         psf_ima, __ = get_psf_ima (
             data_psf, xcoords[i], ycoords[i], psf_size,
             psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-            xshift=xshift, yshift=yshift, imtype=imtype, log=log)
+            xshift=xshift, yshift=yshift, imtype=imtype,
+            psf_clean_factor=psf_clean_factor, log=log)
 
 
         if i % 10000 == 0:
@@ -4534,7 +4536,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 data_psf_ref, xcoords[i], ycoords[i], psf_size,
                 psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
                 polscal2_ref, poldeg_ref, xshift=xshift, yshift=yshift,
-                imtype='ref', log=log)
+                imtype='ref', psf_clean_factor=psf_clean_factor, log=log)
 
 
             # [psf_ima_ref] needs to be rotated to the orientation of
@@ -4909,7 +4911,7 @@ def coords2chan (xcoords, ycoords):
 def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
                  polscal1, polzero2, polscal2, poldeg, xshift=0, yshift=0,
                  imtype=None, remap=False, header=None, header_new=None,
-                 log=None):
+                 psf_clean_factor=0, log=None):
 
     """function to infer the PSF image with shape (psfsize, psfsize) at
     the original pixel scale at the input pixel coordinates (xcoord,
@@ -4986,9 +4988,8 @@ def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
         psf_ima_resized_temp2 = np.copy(psf_ima_resized)
         
     # clean, cut and normalize PSF
-    psf_ima_resized = clean_cut_norm_psf (
-        psf_ima_resized, get_par(set_zogy.psf_clean_factor,tel),
-        cut_size=psf_size)
+    psf_ima_resized = clean_cut_norm_psf (psf_ima_resized, psf_clean_factor,
+                                          cut_size=psf_size)
 
 
     if False:
@@ -7939,18 +7940,18 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
 
     # construct masked array and reshape it so that new shape
     # is: nboxes in y, nboxes in z, nvalues in box
-    data_masked = (np.ma.masked_array(data, mask=mask_reject, dtype=float)
+    data_masked = (np.ma.masked_array(data, mask=mask_reject)
                    .reshape(nysubs,bkg_boxsize,-1,bkg_boxsize)
                    .swapaxes(1,2).reshape(nysubs,nxsubs,-1))
 
     if log is not None:
         if (np.sum(~np.isfinite(data_masked))) > 0:
             log.warning ('data_masked contains infinite or nan values')
-            
+
     # get clipped statistics
     nsigma = get_par(set_zogy.bkg_nsigma,tel)
     __, mini_median, mini_std = sigma_clipped_stats(
-        data_masked.astype(float), sigma=nsigma, axis=2, mask_value=0)
+        data_masked, sigma=nsigma, axis=2, mask_value=0)
 
     # set any nan or infinite values to zero
     mask_mini_finite = (np.isfinite(mini_median) & np.isfinite(mini_std))
@@ -9086,11 +9087,12 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
         if 'header_new' not in locals():
             header_new = None
 
+        psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
         psf_ima_sub, psf_ima_config_sub = get_psf_ima (
             data_psf, centers[nsub,1], centers[nsub,0], psf_size,
             psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
             imtype=imtype, remap=remap, header=header, header_new=header_new,
-            log=log)
+            psf_clean_factor=psf_clean_factor, log=log)
 
         # record psf image in [psf_ima] cube to be used for the Moffat
         # and Gaussian fits to the PSFs at the end of this function
@@ -12010,6 +12012,12 @@ def clean_cut_norm_psf (psf_array, clean_factor, cut=True, cut_size=None):
     # grid
     dist = dist_from_center (psf_array)
     psf_array[dist>(ysize/2.)] = 0
+
+
+    # also set any negative value to zero; switch this off because
+    # this appears to bias the optimal magnitudes and also the Scorr
+    # image is worse
+    #psf_array[psf_array < 0] = 0
 
 
     # return normalized array
