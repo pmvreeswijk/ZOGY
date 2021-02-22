@@ -2489,7 +2489,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     # update header and save hdu to fits
     hdu.header += header
     hdu.writeto(cat_out, overwrite=True)
-    del hdu
+
+    # also write separate header fits file
+    hdulist = fits.HDUList(fits.PrimaryHDU(header=hdu.header))
+    hdulist.writeto(cat_out.replace('.fits', '_hdr.fits'), overwrite=True)
 
 
     if log is not None:
@@ -6034,11 +6037,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim, ylim,
                 satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma,
                 imtype=imtype, log=log)
+
             limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
                 limflux_array.astype(float), mask_value=0)
+            
             if get_par(set_zogy.verbose,tel):
-                log.info('{}-sigma limiting flux; mean: {}, std: {}, median: {}'
-                         .format(nsigma, limflux_mean, limflux_std, limflux_median))
+                log.info('{}-sigma limiting flux; mean: {:.2f}, std: {:.2f}, '
+                         'median: {:.2f}'.format(nsigma, limflux_mean,
+                                                 limflux_std, limflux_median))
+
             return limflux_median
 
         
@@ -6654,8 +6661,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         del data_wcs_copy, data_err
 
         log.info ('median effective aperture area for calculation of limiting '
-                  'magnitude image: {} pix, inferred from ratio of subimage '
-                  'PSF_volume over PSF_peak'.format(np.median(area_ap)))
+                  'magnitude image: {:.2f} pix, inferred from 1/sum(P**2)'
+                  .format(np.median(area_ap)))
 
 
         # try to write scaled uint8 or int16 limiting magnitude image
