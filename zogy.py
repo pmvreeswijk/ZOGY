@@ -2459,7 +2459,18 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
 
     # add data to thumbnail columns
     if save_thumbnails:
+
+        # save version of transient catalog before heavy thumbnails
+        # are added
+        header['FORMAT-P'] = (True, 'successfully formatted catalog')
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         
+        # update header and save hdu to fits
+        hdu.header += header
+        hdu.writeto(cat_out.replace('.fits', '_light.fits', overwrite=True))
+
+
+        # loop thumbnail data
         for i_tn, key in enumerate(dict_thumbnails.keys()):
 
             if dict_thumbnails[key] is not None:
@@ -2482,12 +2493,15 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                                after='TFORM{}'.format(ic+1))
 
 
-    # add header keyword indicating catalog was successfully formatted
-    header['FORMAT-P'] = (True, 'successfully formatted catalog')
-    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-
-    # update header and save hdu to fits
-    hdu.header += header
+    # update header if not already done when saving light transient
+    # catalog
+    if not save_thumbnails:
+        # add header keyword indicating catalog was successfully formatted
+        header['FORMAT-P'] = (True, 'successfully formatted catalog')
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        hdu.header += header
+    
+    # save hdu to fits
     hdu.writeto(cat_out, overwrite=True)
 
     # also write separate header fits file
