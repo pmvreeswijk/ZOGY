@@ -12,6 +12,8 @@ subimage_size = 1320     # size of subimages
 subimage_border = 40     # border around subimage to avoid edge effects
 #subimage_size = 960      # size of subimages
 #subimage_border = 32     # border around subimage to avoid edge effects
+shape_new = (10560, 10560) # shape new image, ref image can have any shape
+
 
 # ZOGY parameters
 fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or full
@@ -118,7 +120,7 @@ psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
 psf_rad_phot = 5.0       # PSF radius in units of FWHM used in optimal photometry
-psf_rad_zogy = 5.0       # PSF radius in units of FWHM used in optimal subtraction
+psf_rad_zogy = 3.0       # PSF radius in units of FWHM used in optimal subtraction
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
                          # new and ref image as follows:
@@ -232,7 +234,7 @@ mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
 dir_numpy = 'NumpyFiles'
 
 # switch to keep intermediate/temporary files
-keep_tmp = True
+keep_tmp = False
 
 # switch on/off different functions
 redo_new = False         # execute SExtractor, astrometry.net, PSFEx, optimal flux
@@ -240,5 +242,5 @@ redo_ref = False         # determination even if new/ref products already presen
 verbose = True           # print out extra info
 timing = True            # (wall-)time the different functions
 display = False          # show intermediate fits images (centre and 4 corners)
-make_plots = True        # make diagnostic plots and save them as pdf
+make_plots = False       # make diagnostic plots and save them as pdf
 show_plots = False       # show diagnostic plots
