@@ -75,7 +75,7 @@ matplotlib.use('Agg')
 #from matplotlib.ticker import FormatStrFormatter
 
 # needed for Zafiirah's machine learning package MeerCRAB
-from meerCRAB_code.prediction_phase import realbogus_prediction
+from meerCRAB_code import prediction_phase
 
 # from memory_profiler import profile
 # import objgraph
@@ -149,10 +149,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
       https://github.com/stargaser/sip_tpv
     - pyfftw to speed up the many FFTs performed
     - the other modules imported at the top
-
-    Written by Paul Vreeswijk (pmvreeswijk@gmail.com) with vital input
-    from Barak Zackay and Eran Ofek. Adapted by Kerry Paterson for
-    integration into pipeline for MeerLICHT.
 
     """
 
@@ -234,10 +230,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     # global parameters
     if new:
-        global base_new, fwhm_new, pixscale_new, ysize_new, xsize_new
+        global base_new, fwhm_new, pixscale_new #, ysize_new, xsize_new
         # define the base names of input fits files as global so they
         # can be used in any function in this module
         base_new = new_fits.split('.fits')[0]
+
     if ref:
         global base_ref, fwhm_ref, pixscale_ref
         # define the base names of input fits files as global so they
@@ -568,6 +565,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     else:
         xsize = xsize_ref
         ysize = ysize_ref
+
 
     centers, cuts_ima, cuts_ima_fft, cuts_fft, sizes = centers_cutouts(
         get_par(set_zogy.subimage_size,tel), ysize, xsize, log)
@@ -1151,7 +1149,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 header_trans['MC-P'] = (ML_processed, 'successfully '
                                         'processed by MeerCRAB?')
                 # set version by hand
-                ML_version = '3.0.0'
+                ML_version = prediction_phase.__version__
                 header_trans['MC-V'] = (ML_version, 'MeerCRAB version used')
                 header_trans['MC-MODEL'] = (ML_model.split('/')[-1],
                                             'MeerCRAB training model used')
@@ -1600,6 +1598,7 @@ def show_sub (nsub):
 
     # create 2D integer array of subimages
     subsize = get_par(set_zogy.subimage_size,tel)
+    ysize_new, xsize_new = get_par(set_zogy.shape_new,tel)
     nx = int(xsize_new / subsize)
     ny = int(ysize_new / subsize)
     arr = np.arange(nx*ny).reshape(ny,nx)
@@ -1680,8 +1679,8 @@ def get_ML_prob_real (dict_thumbnails, model, use_30x30=True,
 
     # threshold (not important but required)
     prob_thresh = 0.5
-    ML_real_prob, __ = realbogus_prediction(model_name, data_stack, id_trans,
-                                            prob_thresh, model_path=model_path)
+    ML_real_prob, __ = prediction_phase.realbogus_prediction(
+        model_name, data_stack, id_trans, prob_thresh, model_path=model_path)
 
 
     return ML_real_prob
@@ -1741,8 +1740,8 @@ def get_ML_prob_real_old (fits_table, model, use_30x30=True, factor_norm=255.):
     # threshold (not important but required)
     prob_thresh = 0.5
 
-    ML_real_prob, __ = realbogus_prediction(model_name, data_stack, id_trans,
-                                            prob_thresh, model_path=model_path)
+    ML_real_prob, __ = prediction_phase.realbogus_prediction(
+        model_name, data_stack, id_trans, prob_thresh, model_path=model_path)
 
     return ML_real_prob
 
@@ -2467,7 +2466,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         
         # update header and save hdu to fits
         hdu.header += header
-        hdu.writeto(cat_out.replace('.fits', '_light.fits', overwrite=True))
+        hdu.writeto(cat_out.replace('.fits', '_light.fits'), overwrite=True)
 
 
         # loop thumbnail data
@@ -5758,18 +5757,21 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     # [interp_Xchan] determines whether interpolation is allowed
-    # across different channels in [mini2back]
+    # across different channels in [mini2back]; for ML/BG set to true
+    # only if background was corrected for channel factors
     if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or
         get_par(set_zogy.MLBG_chancorr,tel)):
         interp_Xchan = True
     else:
         interp_Xchan = False
 
-    # for bkg_std, do not interpolate for ML/BG images
-    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
-        interp_Xchan_std = False
-    else:
+    # for bkg_std, do not interpolate for ML/BG images, except for
+    # reference image when the standard deviation image is patchy
+    # anyway
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or imtype=='ref':
         interp_Xchan_std = True
+    else:
+        interp_Xchan_std = False
 
 
     # if not, then read in background image; N.B.: this if block below
@@ -5884,8 +5886,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             fits_out = fits2remap.replace('.fits', '_remap.fits')
             fits_out = get_remap_name(fits2remap2, fits2remap, fits_out)
             result = run_remap(fits2remap2, fits2remap, fits_out,
-                               (ysize_new, xsize_new), gain=gain, log=log,
-                               config=get_par(set_zogy.swarp_cfg,tel),
+                               get_par(set_zogy.shape_new,tel), gain=gain,
+                               log=log, config=get_par(set_zogy.swarp_cfg,tel),
                                resampling_type=resampling_type,
                                dtype=data2remap.dtype.name,
                                value_edge=value_edge,
@@ -5958,9 +5960,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # determine psf of input image with get_psf function - needs to be
     # done before the optimal fluxes are determined, as it will run
     # PSFEx and create the _psf.fits file that is used in the optimal
-    # flux determination. The shifted subimage PSFs are saved in numpy
-    # files, the filenames of which are recorded in the dictionary
-    # [dict_psf] with the subimage integers as the keys.
+    # flux determination. The fft-shifted subimage PSFs are saved in
+    # numpy files, the filenames of which are recorded in the
+    # dictionary [dict_psf] with the subimage integers as the keys.
     dict_psf, psf_orig = get_psf (input_fits, header, nsubs, imtype, fwhm,
                                   pixscale, remap, nthreads=nthreads, log=log)
 
@@ -6476,7 +6478,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # infer limiting magnitudes from limiting flux using zeropoint
         # and median airmass
         [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt, log)
-        log.info('{}-sigma limiting magnitude: {}'.format(nsigma, limmag))
+        log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
 
         # add header keyword(s):
         header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
@@ -6602,7 +6604,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     # now that calibration is done, create limiting magnitude image
-    if 'PC-ZP' in header and 'AIRMASSC' in header:
+    # if it does not exist yet or redo is True
+    fits_limmag = '{}_limmag.fits'.format(base)
+    if ((not os.path.isfile(fits_limmag) or redo) and 'PC-ZP' in header and
+        'AIRMASSC' in header):
 
         # create error image from positive background-subtracted
         # data_wcs and background STD image
@@ -6654,16 +6659,72 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             area_ap[mask_zero] = np.median(area_ap)
 
         # reshape, interpolate and grow area_ap array (1D) to size of
-        # data_wcs_copy
+        # data_wcs_copy; the reference image may not have the same
+        # size as the new image so that the [subimage_size] does not
+        # fit integer times into the image - in that case use the
+        # new-image size and pad the image to the actual size of the
+        # reference image
         ysize, xsize = data_wcs_copy.shape
+        ysize_new, xsize_new = get_par(set_zogy.shape_new,tel)
         subsize = get_par(set_zogy.subimage_size,tel)
-        nx = int(xsize / subsize)
-        ny = int(ysize / subsize)
-        data_area_ap = ndimage.zoom(area_ap.reshape((nx, ny)).transpose(),
+        if remap:
+            # remap is True, so the number of subimages is the same as
+            # for the new image
+            nx = int(xsize_new / subsize)
+            ny = int(ysize_new / subsize)
+        else:
+            # need to take care that ref image may have a different
+            # size than the new image
+            nx = int(xsize / subsize)
+            ny = int(ysize / subsize)
+            
+        data_area_ap = ndimage.zoom(area_ap.reshape((nx,ny)).transpose(),
                                     subsize, order=2, mode='nearest')
+
+        # if shape not that of input image [data_wcs], e.g. remap is
+        # False and reference image has a different size than the new
+        # image, pad it
+        if data_area_ap.shape != data_wcs_copy.shape:
+
+            if remap:
+
+                # find x,y pixel position in [data_wcs] of origin
+                # (x,y)=(1,1) of new image
+                header_new = read_hdulist ('{}.fits'.format(base_new),
+                                           get_data=False, get_header=True)
+                wcs_new = WCS(header_new)
+                x0 = y0 = np.array([1])
+                ra0, dec0 = wcs_new.all_pix2world(x0, y0, 1)
+                wcs_ref = WCS(header)
+                x0_ref, y0_ref = wcs_ref.all_world2pix(ra0, dec0, 1)
+                # determine padding on 4 sides
+                nx_before = max(int(x0_ref[0])-1, 0)
+                ny_before = max(int(y0_ref[0])-1, 0)
+                nx_after = max(xsize - (int(x0_ref[0])+xsize_new-1), 0)
+                ny_after = max(ysize - (int(y0_ref[0])+ysize_new-1), 0)
+
+            else:
+
+                # subimages were extracted starting from image index
+                # (0,0), so pad only after up to the image size
+                ny_before = nx_before = 0
+                ny_after = ysize - ny*subsize
+                nx_after = xsize - nx*subsize
+                
+            # pad
+            pad_width = ((ny_before, ny_after), (nx_before, nx_after))
+            log.info ('shape of [data_area_ap]: {} not equal to shape of '
+                      '[data_wcs]: {}; padding it with pad_width: {}'
+                      .format(data_area_ap.shape, data_wcs_copy.shape, pad_width))
+            data_area_ap = np.pad (data_area_ap, pad_width, mode='edge')
+
 
         # calculate error image
         data_err = np.sqrt(data_area_ap * (data_wcs_copy + data_bkg_std**2))
+
+        # replace any zero values with a large value
+        mask_zero = (data_err==0)
+        data_err[mask_zero] = 100*np.median(data_bkg_std)
 
         # apply the zeropoint
         exptime, filt = read_header(header, ['exptime', 'filter'], log=log)
@@ -6686,7 +6747,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # about 0.03 mag in the output image) then save as 'uint8'
         # leading to an fpacked image size of about 15MB; otherwise
         # use float32 which can be compressed to ~45MB using q=1
-        fits_limmag = '{}_limmag.fits'.format(base)
         header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         if limmag_range <= 7.5:
             data_type = 'uint8'
@@ -6700,8 +6760,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         del data_limmag
 
     else:
-        log.warning ('PC-ZP or AIRMASSC not present in header of {}; limiting '
-                     'magnitude image is therefore not made'.format(input_fits))
+        log.warning ('limiting magnitude image is not made for {}'
+                     .format(input_fits))
 
 
 
@@ -6828,7 +6888,10 @@ def remove_files (filelist, log=None):
 ################################################################################
 
 def prep_plots (table, header, base, log=None):
-    
+
+    if log is not None:
+        log.info ('preparing photometry plots ...')
+
     # and define flux_opt and fluxerr_opt
     flux_opt = table['E_FLUX_OPT']
     fluxerr_opt = table['E_FLUXERR_OPT']
@@ -6892,7 +6955,7 @@ def prep_plots (table, header, base, log=None):
         x1,x2,y1,y2 = plt.axis()
         title = 'filter: {}, exptime: {:.0f}s'.format(filt, exptime)
         if 'LIMMAG' in header:
-            limmag = np.float(header['LIMMAG'])
+            limmag = float(header['LIMMAG'])
             plt.plot([limmag, limmag], [y1,y2], color='black', linestyle='--')
             title = ('{}, lim. mag (5$\sigma$; dashed line): {:.2f}'
                      .format(title, limmag))
@@ -6905,30 +6968,26 @@ def prep_plots (table, header, base, log=None):
         plt.close()
 
 
+
     # compare flux_opt with flux_auto
+    title = 'rainbow colors follow CLASS_STAR: from purple (star) to red (galaxy)'
     dmag = calc_mag (flux_opt, flux_auto)
     plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                   ylabel='delta magnitude (OPT - AUTO)',
-                  filename='{}_opt_vs_auto.pdf'.format(base),
-                  title='rainbow color coding follows CLASS_STAR: '
-                  'from purple (star) to red (galaxy)')
+                  filename='{}_opt_vs_auto.pdf'.format(base), title=title)
 
     if mypsffit:
         # compare flux_mypsf with flux_auto
         dmag = calc_mag (flux_mypsf, flux_auto)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel='delta magnitude (MYPSF - AUTO)',
-                      filename='{}_mypsf_vs_auto.pdf'.format(base),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
+                      filename='{}_mypsf_vs_auto.pdf'.format(base), title=title)
         
         # compare flux_opt with flux_mypsf
         dmag = calc_mag (flux_opt, flux_mypsf)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel='delta magnitude (OPT - MYPSF)',
-                      filename='{}_opt_vs_mypsf.pdf'.format(base),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
+                      filename='{}_opt_vs_mypsf.pdf'.format(base), title=title)
 
         # compare x_win and y_win with x_psf and y_psf
         dist_win_psf = np.sqrt((x_win-x_psf)**2+(y_win-y_psf)**2)
@@ -6936,16 +6995,14 @@ def prep_plots (table, header, base, log=None):
                       class_star, xlabel=xlabel,
                       ylabel='distance XY_WIN vs. XY_MYPSF',
                       filename=('{}_xyposition_win_vs_mypsf_class.pdf'
-                                .format(base)),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
+                                .format(base)), title=title)
 
         plot_scatter (x_array, dist_win_psf, (limits[0],limits[1],-2.,2.),
                       fwhm_image, xlabel=xlabel,
                       ylabel='distance XY_WIN vs. XY_MYPSF', 
                       filename=('{}_xyposition_win_vs_mypsf_fwhm.pdf'
                                 .format(base)),
-                      title='rainbow color coding follows FWHM')
+                      title='rainbow colors follow FWHM')
 
             
     # compare flux_opt with flux_aper
@@ -6970,17 +7027,14 @@ def prep_plots (table, header, base, log=None):
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel=ylabel,
                       filename=('{}_opt_vs_aper_{}xFWHM.pdf'.format(base,aper)),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
+                      title=title)
 
         dmag = calc_mag (flux_auto, flux_aper)
         ylabel='delta magnitude (AUTO - APER_R{}xFWHM)'.format(aper)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel=ylabel,
                       filename=('{}_auto_vs_aper_{}xFWHM.pdf'.format(base, aper)),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
-
+                      title=title)
 
         if mypsffit:
             dmag = calc_mag (flux_mypsf, flux_aper)
@@ -6988,9 +7042,7 @@ def prep_plots (table, header, base, log=None):
             plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                           ylabel=ylabel, 
                           filename=('{}_mypsf_vs_aper_{}xFWHM.pdf'
-                                    .format(base, aper)),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
+                                    .format(base, aper)), title=title)
 
 
     # compare with flux_psf if psffit catalog available
@@ -7004,9 +7056,7 @@ def prep_plots (table, header, base, log=None):
         dmag = calc_mag (flux_sexpsf, flux_opt)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel='delta {}-band magnitude (SEXPSF - OPT)',
-                      filename='{}_sexpsf_vs_opt.pdf'.format(base),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
+                      filename='{}_sexpsf_vs_opt.pdf'.format(base), title=title)
 
         if mypsffit:
             # and compare 'my' psf with SExtractor psf
@@ -7014,16 +7064,14 @@ def prep_plots (table, header, base, log=None):
             plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                           ylabel='delta {}-band magnitude (SEXPSF - MYPSF)',
                           filename='{}_sexpsf_vs_mypsf.pdf'.format(base),
-                          title='rainbow color coding follows CLASS_STAR: '
-                          'from purple (star) to red (galaxy)')
+                          title=title)
 
         # and compare auto with SExtractor psf
         dmag = calc_mag (flux_sexpsf, flux_auto)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
                       ylabel='delta {}-band magnitude (SEXPSF - AUTO)',
                       filename='{}_sexpsf_vs_auto.pdf'.format(base),
-                      title='rainbow color coding follows CLASS_STAR: '
-                      'from purple (star) to red (galaxy)')
+                      title=title)
 
         
     return
@@ -7271,8 +7319,8 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
     if log is not None:
 
         if get_par(set_zogy.verbose,tel):
-            log.info('zp_median: {}'.format(zp_median))
-            log.info('zp_std: {}'.format(zp_std))
+            log.info('zp_median: {:.3f}'.format(zp_median))
+            log.info('zp_std: {:.3f}'.format(zp_std))
             log.info('nmatch: {}'.format(nmatch))
             
         if get_par(set_zogy.timing,tel):
@@ -8766,8 +8814,8 @@ def mini2back (data_mini, output_shape, order_interp=3, bkg_boxsize=None,
 
 def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
                   markersize=2, xlabel=None, ylabel=None, legendlabel=None,
-                  title=None, filename=None, simple=False, xscale='log',
-                  yscale='linear'):
+                  title=None, filename=None, simple=False, xscale='linear',
+                  yscale='linear', binsize=0.5):
 
     fig, ax = plt.subplots()
     ax.scatter(x, y, c=corder, cmap=cmap, alpha=0.5, label=legendlabel,
@@ -8776,7 +8824,21 @@ def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
     ax.set_xscale(xscale)
     ax.set_yscale(yscale)
 
-    #ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+
+    bins = np.arange(int(np.min(x)),np.ceil(np.max(x)),binsize)
+    indices = np.digitize(x, bins, right=True)
+    median = np.zeros(len(bins))
+    std = np.zeros(len(bins))
+    for i in indices:
+        mask = ((indices-1) == i)
+        if np.sum(mask)>0:
+            median[i] = np.median(y[mask])
+            std[i] = np.std(y[mask])
+
+    ax.plot(bins+binsize/2, median, color='k', linestyle='dashed')
+    ax.errorbar(bins+binsize/2, median, yerr=std, linestyle='None',
+                capsize=5, color='k')
+
     
     if legendlabel is not None:
         ax.legend(numpoints=1, fontsize='medium')
@@ -8788,7 +8850,7 @@ def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
         ax.set_ylabel(ylabel)
 
     if title is not None:
-        ax.set_title(title)
+        ax.set_title(title, fontsize=10)
 
     if filename is not None:
         fig.savefig(filename)
@@ -8893,11 +8955,20 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     else:
         base = base_ref
     
+
     # determine image size from header
-    xsize, ysize = header['NAXIS1'], header['NAXIS2']
+    if not remap:
+        xsize, ysize = header['NAXIS1'], header['NAXIS2']
+    else:
+        # if remap is True, force size of input ref image,
+        # to be the same as that of the new image
+        ysize, xsize = get_par(set_zogy.shape_new,tel)
+
+    # number of subimages in x and y
     subsize = get_par(set_zogy.subimage_size,tel)
     nx = int(xsize / subsize)
     ny = int(ysize / subsize)
+
 
 
     # switch to rerun some parts (source extractor, astrometry.net,
@@ -8998,8 +9069,6 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
         subimage_size, ysize, xsize, log)
     ysize_fft = subimage_size + 2*subimage_border
     xsize_fft = subimage_size + 2*subimage_border
-    nxsubs = xsize / subimage_size
-    nysubs = ysize / subimage_size
 
     if imtype=='ref':
         # in case of the ref image, the PSF was determined from the
@@ -9163,13 +9232,12 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
             fits.writeto('{}_psf_ima_shift_sub{}.fits'.format(base, nsub),
                          psf_ima_shift_sub.astype('float32'), overwrite=True)
 
-        
+
     # now that PSFEx is done, fit elliptical Moffat and Gauss
     # functions to centers of subimages across the frame using the
     # [fit_moffat] function. N.B.: in case the ref image has a
     # different orientation than the new image, the Moffat/Gauss fits
     # are done in the orientation of the new frame!
-    #if get_par(set_zogy.make_plots,tel):
     try:
         base_psf = '{}_psf'.format(base)
         fit_moffat(psf_ima, nx, ny, header, pixscale, base_psf, log,
@@ -9179,6 +9247,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1,
     except Exception as e:
         #log.info(traceback.format_exc())
         log.info('exception was raised during [fit_moffat]: {}'.format(e))
+
 
 
     if get_par(set_zogy.timing,tel):
@@ -10972,7 +11041,7 @@ def get_fwhm (cat_ldac, fraction, log, class_sort=False, get_elong=False,
 
 
     # select fraction of targets
-    index_select = np.arange(-np.int(len(index_sort)*fraction+0.5),-1)
+    index_select = np.arange(-int(len(index_sort)*fraction+0.5),-1)
     fwhm_select = fwhm[index_sort][index_select] 
     if get_elong:
         elong_select = elong[index_sort][index_select] 
@@ -11135,10 +11204,10 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
         xsize, ysize = header['NAXIS1'], header['NAXIS2']
         
         # determine cutout from [fraction]
-        center_x = np.int(xsize/2+0.5)
-        center_y = np.int(ysize/2+0.5)
-        halfsize_x = np.int((xsize * np.sqrt(fraction))/2.+0.5)
-        halfsize_y = np.int((ysize * np.sqrt(fraction))/2.+0.5)
+        center_x = int(xsize/2+0.5)
+        center_y = int(ysize/2+0.5)
+        halfsize_x = int((xsize * np.sqrt(fraction))/2.+0.5)
+        halfsize_y = int((ysize * np.sqrt(fraction))/2.+0.5)
         data_fraction = data[center_y-halfsize_y:center_y+halfsize_y,
                              center_x-halfsize_x:center_x+halfsize_x]
 
@@ -11197,6 +11266,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
     if 'BKG-SUB' in header:
         bkg_sub = header['BKG-SUB']
     else:
+        header['BKG-SUB'] = (False, 'sky background was subtracted?')
         bkg_sub = False
 
     # [interp_Xchan] determines whether interpolation is allowed
