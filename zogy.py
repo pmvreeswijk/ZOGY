@@ -6295,7 +6295,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
                                                  filt, imtype, data_wcs.shape,
                                                  zp_type='single', log=log)
-                
+
                 header['PC-NCAL'] = (ncal_used, 'number of brightest photcal '
                                      'stars used')
                 
@@ -7208,7 +7208,8 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
     magerr_sex_inst = pogson * fluxerr_opt / flux_opt
     zp_array = (mag_cal[index_cal] - mag_sex_inst[index_sex] +
                 airmass_sex[index_sex] * get_par(set_zogy.ext_coeff,tel)[filt])
-
+    zp_array = zp_array.value
+    
     if log is not None:
         log.info ('number of matches in collect_zps: {}'.format(len(zp_array)))
         if get_par(set_zogy.timing,tel):
