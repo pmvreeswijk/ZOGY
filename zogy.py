@@ -7203,9 +7203,9 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
     # calculate zeropoints using individual airmasses, since at A=2
     # the difference in airmass across the FOV is 0.1, i.e. a 5%
     # change
-    mag_sex_inst = -2.5*np.log10(flux_opt[index_sex]/exptime)
+    mag_sex_inst = -2.5*np.log10(flux_opt/exptime)
     pogson = 2.5/np.log(10.)
-    magerr_sex_inst = pogson*fluxerr_opt[index_sex]/flux_opt[index_sex]
+    magerr_sex_inst = pogson * fluxerr_opt / flux_opt
     zp_array = (mag_cal[index_cal] - mag_sex_inst[index_sex] +
                 airmass_sex[index_sex] * get_par(set_zogy.ext_coeff,tel)[filt])
 
@@ -7430,7 +7430,8 @@ def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box',
     ra_cat_cut = ra_cat[index_cut]
     dec_cat_cut = dec_cat[index_cut]
 
-    # separation in degrees
+    # separation in degrees; haversine is equivalent to astropy
+    # separation method
     sep = haversine(ra_cat_cut, dec_cat_cut, ra, dec)
     
     if search=='circle':
