@@ -649,7 +649,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              '{}_psfex.cat'.format(base_new),
                              '{}_psfex.cat'.format(base_ref),
                              header_new, header_ref, 
-                             nsubs, cuts_ima, log, header_trans, pixscale_new,
+                             nsubs, cuts_ima, log, header_trans,
                              use_optflux=get_par(set_zogy.fratio_optflux,tel)))
 
         if not ok:
@@ -823,7 +823,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     if get_par(set_zogy.nfakestars,tel)==0:
                         list2remove.append(dict_data_new[nsub])
                     # remove
-                    remove_files (list2remove, log=log)
+                    remove_files (list2remove)
 
 
 
@@ -887,8 +887,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             # delete if not keeping intermediate/temporary files
             if not get_par(set_zogy.keep_tmp,tel):
-                remove_files (sublist, log=log)
-            
+                remove_files (sublist)
+
                 
         # if fake stars were added to the new image, also create
         # full image from data_new subimage files
@@ -3115,11 +3115,11 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             value=table_trans['FLAGS_MASK'])
 
 
-    # filter on FLAGS_MASK values (1 + 4 + 8 + 16 + 32 = 61)
+    # filter on FLAGS_MASK values (1 + 2 + 4 + 8 + 16 + 32 = 63 = 2**6 - 1)
     # ===========================
     
     mask_flags = np.zeros(len(table_trans), dtype=bool)
-    masktype_discard = 61
+    masktype_discard = 63
     mask_value = get_par(set_zogy.mask_value,tel)
     # iterate over all mask values
     for val in mask_value.values():
@@ -3175,7 +3175,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # filter on ELONGATION
     # ====================
 
-    mask_elong = (table_trans['ELONGATION'] <= 3)
+    mask_elong = (table_trans['ELONGATION'] <= 5)
     if not keep_all:
         table_trans = table_trans[mask_elong]
 
@@ -4607,7 +4607,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             psf_ima = ndimage.shift(P_D, (1,1), order=2)
             # normalize
             psf_ima /= np.sum(psf_ima)
-            
+
             # this provides the same result (apart from the sn, sr,
             # fn, fr ratios), but is ~10 times slower:
             #psf_ima_config = ndimage.convolve(psf_ima_config, psf_ima_config_ref)
@@ -6289,8 +6289,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                     ra_sex[mask_zp], dec_sex[mask_zp], airmass_sex[mask_zp],
                     xcoords_sex[mask_zp], ycoords_sex[mask_zp],
                     flux_opt[mask_zp], fluxerr_opt[mask_zp],
-                    ra_cal, dec_cal, mag_cal, magerr_cal,
-                    exptime, filt, log=log)
+                    ra_cal, dec_cal, mag_cal, exptime, filt, log=log)
                 
                 # determine single zeropoint for entire image
                 zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
@@ -7186,72 +7185,41 @@ def create_modify_mask (data, satlevel, data_mask=None):
 ################################################################################
 
 def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
-                 flux_opt, fluxerr_opt, ra_cal, dec_cal, mag_cal, magerr_cal,
+                 flux_opt, fluxerr_opt, ra_cal, dec_cal, mag_cal,
                  exptime, filt, log=None):
 
     if log is not None:
         if get_par(set_zogy.timing,tel): t = time.time()
         log.info('executing collect_zps ...')
 
-    # maximum distance in degrees between sources to match
-    dist_max = 3./3600
 
-    # record zeropoints in array with same size as number of
-    # calibration stars in the FOV
-    ncal = np.shape(ra_cal)[0]
-    zp_array = np.zeros(ncal)
-    x_array = np.zeros(ncal)
-    y_array = np.zeros(ncal)
-    
-    # instrumental magnitudes and errors
-    nrows = np.shape(ra_sex)[0]
-    mag_sex_inst = np.zeros(nrows)-1
-    magerr_sex_inst = np.zeros(nrows)-1
-    mag_sex_inst = -2.5*np.log10(flux_opt/exptime)
+    # find calibration sources matching SExtractor coordinates using
+    # [get_matches]
+    index_sex, index_cal = get_matches (ra_sex, dec_sex, ra_cal, dec_cal,
+                                        dist_max=3, return_offsets=False)
+    x_array = xcoords_sex[index_sex]
+    y_array = ycoords_sex[index_sex]
+
+    # calculate zeropoints using individual airmasses, since at A=2
+    # the difference in airmass across the FOV is 0.1, i.e. a 5%
+    # change
+    mag_sex_inst = -2.5*np.log10(flux_opt[index_sex]/exptime)
     pogson = 2.5/np.log(10.)
-    magerr_sex_inst = pogson*fluxerr_opt/flux_opt
-
-    # sort calibration catalog arrays in brightness
-    index_sort = np.argsort(mag_cal)
-    ra_cal_sort = ra_cal[index_sort]
-    dec_cal_sort = dec_cal[index_sort]
-    mag_cal_sort = mag_cal[index_sort]
-
-    nmatch = 0
-    # loop calibration stars and find a match in SExtractor sources
-    for i in range(ncal):
-
-        index_match = find_stars (ra_sex, dec_sex, ra_cal_sort[i], dec_cal_sort[i],
-                                  dist_max, search='circle')
-
-        if len(index_match) > 0:
-            # take closest object if more than a single match
-            index_match = index_match[0]
-
-            # calculate its zeropoint; need to calculate airmass for
-            # each star, as around A=2, difference in airmass across
-            # the FOV is 0.1, i.e. a 5% change
-            zp_array[i] = (mag_cal_sort[i] - mag_sex_inst[index_match] +
-                           airmass_sex[index_match] *
-                           get_par(set_zogy.ext_coeff,tel)[filt])
-            x_array[i] = xcoords_sex[index_match]
-            y_array[i] = ycoords_sex[index_match]
-
-            nmatch += 1
-
-
-    mask_nonzero = (zp_array != 0)
+    magerr_sex_inst = pogson*fluxerr_opt[index_sex]/flux_opt[index_sex]
+    zp_array = (mag_cal[index_cal] - mag_sex_inst[index_sex] +
+                airmass_sex[index_sex] * get_par(set_zogy.ext_coeff,tel)[filt])
 
     if log is not None:
-
-        log.info ('number of matches in collect_zps: {}'
-                  .format(np.sum(mask_nonzero)))
-        
+        log.info ('number of matches in collect_zps: {}'.format(len(zp_array)))
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='collect_zps', log=log)
 
 
-    return x_array[mask_nonzero], y_array[mask_nonzero], zp_array[mask_nonzero]
+    # return x_array, y_array and zp_array in order of brightness
+    # determined by [mag_cal]
+    index_sort = np.argsort(mag_cal[index_cal])
+
+    return x_array[index_sort], y_array[index_sort], zp_array[index_sort]
 
 
 ################################################################################
@@ -7450,68 +7418,48 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
 
 ################################################################################
 
-def field_stars (ra_cat, dec_cat, ra, dec, dist, log, search='box'):
-
-    # find entries in [ra_cat] and [dec_cat] within [dist] of
-    # [ra] and [dec]
-    mask_data = np.zeros(len(ra_cat), dtype='bool')
-    # make a big cut in arrays ra_cat and dec_cat to speed up
-    mask_cut = (np.abs(dec_cat-dec)<=dist)
-    ra_cat_cut = ra_cat[mask_cut]
-    dec_cat_cut = dec_cat[mask_cut]
-    
-    center = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
-    targets = SkyCoord(ra=ra_cat_cut*u.deg, dec=dec_cat_cut*u.deg, frame='icrs')
-    separation = center.separation(targets).deg
-
-    if search=='circle':
-        # find within circle:
-        mask_data[mask_cut] = (separation<=dist)
-    else:
-        posangle = center.position_angle(targets).to(u.deg).rad
-        mask_data[mask_cut] = ((abs(separation*np.sin(posangle)) <= dist) & 
-                               (abs(separation*np.cos(posangle)) <= dist))
-
-    return mask_data
-
-
-################################################################################
-
-def find_stars_old (ra_cat, dec_cat, ra, dec, dist, search='box', log=None):
-
-    if log is not None:
-        if get_par(set_zogy.timing,tel): t = time.time()
-        log.info('executing find_stars ...')
-
-    # find entries in [ra_cat] and [dec_cat] within [dist] of
-    # [ra] and [dec]
-    mask_data = np.zeros(len(ra_cat), dtype='bool')
-    # make a big cut in arrays ra_cat and dec_cat to speed up
-    mask_cut = (np.abs(dec_cat-dec)<=dist)
-    ra_cat_cut = ra_cat[mask_cut]
-    dec_cat_cut = dec_cat[mask_cut]
-
-    if search=='circle':
-        # find within circle:
-        dsigma = haversine(ra_cat_cut, dec_cat_cut, ra, dec)
-        mask_data[mask_cut] = (dsigma<=dist)
-    else:
-        # find within box:
-        dsigma_ra = haversine(ra_cat_cut, dec_cat_cut, ra, dec_cat_cut)
-        dsigma_dec = np.abs(dec_cat_cut-dec)
-        mask_data[mask_cut] = ((dsigma_ra<=dist) & (dsigma_dec<=dist))
-
-    if log is not None:
-        if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t, label='find_stars', log=log)
-
-    return mask_data
-
-
-################################################################################
-
 def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box',
                 sort=False, log=None):
+    
+    """find entries in [ra_cat] and [dec_cat] within [dist] of [ra] and
+       [dec]; all in degrees
+    """
+
+    # make a big cut in arrays ra_cat and dec_cat to speed up
+    index_cut = np.nonzero(np.abs(dec_cat-dec)<=dist)
+    ra_cat_cut = ra_cat[index_cut]
+    dec_cat_cut = dec_cat[index_cut]
+
+    # separation in degrees
+    sep = haversine(ra_cat_cut, dec_cat_cut, ra, dec)
+    
+    if search=='circle':
+        # find within circle:
+        mask_dist = (sep<=dist)
+        
+    else:
+        center = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
+        targets = SkyCoord(ra=ra_cat_cut*u.deg, dec=dec_cat_cut*u.deg, frame='icrs')
+        dra, ddec = center.spherical_offsets_to(targets)
+        mask_dist = ((abs(dra.deg) <= dist) & (abs(ddec.deg) <= dist))
+
+
+    # indices of sources in input catalog within circle or box
+    index_dist = index_cut[0][mask_dist]
+
+    # sort indices in distance if needed
+    if sort:
+        index_sort = np.argsort(sep[mask_dist])
+        index_dist = index_dist[index_sort]
+
+
+    return index_dist
+
+
+################################################################################
+
+def find_stars_orig (ra_cat, dec_cat, ra, dec, dist, search='box',
+                     sort=False, log=None):
 
     if log is not None:
         if get_par(set_zogy.timing,tel): t = time.time()
@@ -9858,8 +9806,282 @@ def calc_psf_config (data, poldeg, x, y):
 ################################################################################
 
 def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
-                     header_ref, nsubs, cuts_ima, log, header, pixscale,
+                     header_ref, nsubs, cuts_ima, log, header,
                      use_optflux=False):
+
+    """Function that takes in output catalogs of stars from the PSFex runs
+    on the new and the ref image, and returns arrays with x,y pixel
+    coordinates (!) (in the new frame) and flux ratios for the
+    matching stars. The latter is inferred from the normalisation
+    fluxes as saved in the .._psf.cat file, or by using the optimal
+    fluxes in the catalogs. In addition, it provides the difference in
+    x- and y-coordinates between the catalogs after converting the
+    reference image pixels to pixels in the new image through the WCS
+    solutions of both images.
+
+    """
+    
+    t = time.time()
+    log.info('executing get_fratio_dxdy ...')
+
+
+    # helper function to read PSFEx output ASCII catalog and extract
+    # x, y and normalisation factor from the PSF stars
+    def readcat (psfcat):
+        table = ascii.read(psfcat, format='sextractor')
+        # In PSFEx version 3.18.2 all objects from the input
+        # SExtractor catalog are recorded, and in that case the
+        # entries with FLAGS_PSF=0 need to be selected.
+        if 'FLAGS_PSF' in table.colnames:
+            mask_psfstars = (table['FLAGS_PSF']==0)
+        # In PSFEx version 3.17.1 (last stable version), only stars
+        # with zero flags are recorded in the output catalog, so use
+        # the entire table
+        else:
+            mask_psfstars = np.ones(len(table), dtype=bool)
+
+        x = table['X_IMAGE'][mask_psfstars]
+        y = table['Y_IMAGE'][mask_psfstars]
+        norm = table['NORM_PSF'][mask_psfstars]
+        return x, y, norm
+
+    
+    # read psfcat_new
+    x_new, y_new, norm_new = readcat(psfcat_new)
+    # read psfcat_ref
+    x_ref, y_ref, norm_ref = readcat(psfcat_ref)
+
+    log.info('number of PSF stars in new: {}'.format(len(x_new)))
+    log.info('number of PSF stars in ref: {}'.format(len(x_ref)))
+
+
+    # get reference ra, dec corresponding to x, y using
+    # wcs.all_pix2world
+    wcs = WCS(header_ref)
+    ra_ref, dec_ref = wcs.all_pix2world(x_ref, y_ref, 1)
+    
+    # same for new ra, dec and also convert the reference RA and DEC
+    # to pixels in the new frame
+    wcs = WCS(header_new)
+    ra_new, dec_new = wcs.all_pix2world(x_new, y_new, 1)
+    x_ref2new, y_ref2new = wcs.all_world2pix(ra_ref, dec_ref, 1)
+    
+    
+    # use [get_matches] to find matches between new and ref coordinates
+    # of PSF stars
+    index_new, index_ref = get_matches (ra_new, dec_new, ra_ref, dec_ref,
+                                        dist_max=3, return_offsets=False)
+
+    x_new_match = x_new[index_new]
+    y_new_match = y_new[index_new]
+    x_ref_match = x_ref[index_ref]
+    y_ref_match = y_ref[index_ref]
+    dx_match = x_new_match - x_ref2new[index_ref]
+    dy_match = y_new_match - y_ref2new[index_ref]
+    fratio_match = norm_new[index_new] / norm_ref[index_ref]
+    nmatch = len(fratio_match)
+    
+    # correct for the ratio in ref/new exposure times; this method
+    # uses FLUX_AUTO (see PHOTFLUX_KEY parameter in psfex.config),
+    # saved in NORM_PSF column of PSFEx output file (.._red_psfex.cat)
+    # which has not been converted to e-/s
+    fratio_match *= header_ref['EXPTIME'] / header_new['EXPTIME']
+
+    log.info('fraction of PSF stars that match: {}'
+             .format((len(index_new)+len(index_ref))/(len(x_new)+len(x_ref))))
+    log.info ('median(fratio_match) using E_FLUX_AUTO: {}'
+              .format(np.median(fratio_match)))
+
+
+    if use_optflux:
+        
+        # now match these PSF stars' coordinates to the new and ref catalogs to
+        # extract their optimal fluxes
+        table_new = Table.read(cat_new, memmap=True)
+        table_ref = Table.read(cat_ref, memmap=True)
+
+        ra_psf = ra_new[index_new]
+        dec_psf = dec_new[index_new]
+        __, index_new_cat = get_matches (ra_psf, dec_psf,
+                                         table_new['RA'].quantity.value,
+                                         table_new['DEC'].quantity.value,
+                                         return_offsets=False)
+        __, index_ref_cat = get_matches (ra_psf, dec_psf,
+                                         table_ref['RA'].quantity.value,
+                                         table_ref['DEC'].quantity.value,
+                                         return_offsets=False)
+
+        if ('E_FLUX_OPT' in table_new.colnames and
+            'E_FLUX_OPT' in table_ref.colnames):
+
+            # final catalog fluxes have been saved in e-/s, while the
+            # corresponding header EXPTIME indicates the image
+            # EXPTIME; the intermediate catalogs are still in e-;
+            # solution: check the column unit, and if in e-/s, convert
+            # it back to e- to determine fratio
+            flux_new_tmp = np.copy(table_new['E_FLUX_OPT'])
+            flux_ref_tmp = np.copy(table_ref['E_FLUX_OPT'])
+            
+            if '/s' in str(table_new['E_FLUX_OPT'].unit):
+                flux_new_tmp *= header_new['EXPTIME']
+
+            if '/s' in str(table_ref['E_FLUX_OPT'].unit):
+                flux_ref_tmp *= header_ref['EXPTIME']
+
+            if len(index_new_cat) > 0 and len(index_ref_cat) > 0:
+                fratio_match = (flux_new_tmp[np.asarray(index_new_cat)] /
+                                flux_ref_tmp[np.asarray(index_ref_cat)])
+
+        else:
+            log.warning ('E_FLUX_OPT not available in catalogs to calculate '
+                         'flux ratios; using E_FLUX_AUTO instead')
+
+
+        log.info('median(fratio_match) using E_FLUX_OPT: {}'
+                 .format(np.median(fratio_match)))
+
+
+
+    # now also determine fratio, dx and dy for each subimage which can
+    # be used in function [run_ZOGY]:
+    fratio_subs = np.zeros(nsubs)
+    dx_subs = np.zeros(nsubs)
+    dy_subs = np.zeros(nsubs)
+
+
+    # calculations below require a bare minimum of matches, otherwise
+    # sigma_clipped_stats will return NaNs, which will cause an
+    # exception as header values cannot contain NaNs
+    nmatch_min = 15
+    if nmatch > nmatch_min:
+        
+        success = True
+        
+        # calculate full-frame average standard deviation and median
+        fratio_mean_full, fratio_median_full, fratio_std_full = (
+            sigma_clipped_stats(fratio_match, mask_value=0))
+        
+        dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
+        dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
+        dx_full = np.sqrt(dx_mean**2 + dx_std**2)
+        dy_full = np.sqrt(dy_mean**2 + dy_std**2)
+
+    else:
+
+        success = False
+
+        # set the values arbitrarily high
+        fratio_mean_full, fratio_median_full, fratio_std_full = 100, 100, 100
+        dx_mean, dx_median, dx_std = 100, 100, 100
+        dy_mean, dy_median, dy_std = 100, 100, 100
+        dx_full, dy_full = 100, 100
+        
+
+    log.info('full-frame fratio mean: {:.3f}, median: {:.3f}, std: {:.3f}'
+             .format(fratio_mean_full, fratio_median_full, fratio_std_full))
+    log.info('median dx: {:.3f} +- {:.3f} pix'.format(dx_median, dx_std))
+    log.info('median dy: {:.3f} +- {:.3f} pix'.format(dy_median, dy_std))
+    log.info('full-frame dx: {:.3f}, dy: {:.3f}'.format(dx_full, dy_full))
+
+        
+    # add header keyword(s):
+    header['Z-DXYLOC'] = (get_par(set_zogy.dxdy_local,tel),
+                          'star position offsets determined per subimage?')
+    header['Z-DX'] = (dx_median, '[pix] dx median offset full image')
+    header['Z-DXSTD'] = (dx_std, '[pix] dx sigma (STD) offset full image')
+    header['Z-DY'] = (dy_median, '[pix] dy median offset full image')
+    header['Z-DYSTD'] = (dy_std, '[pix] dy sigma (STD) offset full image')
+    header['Z-FNROPT'] = (get_par(set_zogy.fratio_optflux,tel),
+                          'optimal (T) or AUTO (F) flux used for flux ratio')
+    header['Z-FNRLOC'] = (get_par(set_zogy.fratio_local,tel),
+                          'flux ratios (Fnew/Fref) determined per subimage?')
+    header['Z-FNR'] = (fratio_median_full,
+                       'median flux ratio (Fnew/Fref) full image')
+    header['Z-FNRSTD'] = (fratio_std_full,
+                          'sigma (STD) flux ratio (Fnew/Fref) full image')
+
+    
+    def local_or_full (value_local, value_full, std_full, log, nsigma=3):
+        # function to return full-frame value if local value is more
+        # than [nsigma] (full frame) away from the full-frame value
+        if (np.abs(value_local-value_full)/std_full > nsigma or
+            not np.isfinite(value_local)):
+
+            if get_par(set_zogy.verbose,tel):
+                log.info('np.abs(value_local-value_full)/std_full: {}'
+                         .format(np.abs(value_local-value_full)/std_full))
+                log.info('adopted value: {}'.format(value_full))
+            return value_full
+
+        else:
+            return value_local
+
+        
+    # loop subimages
+    for nsub in range(nsubs):
+
+        # [subcut] defines the pixel indices [y1 y2 x1 x2] identifying
+        # the corners of the subimage in the entire input/output image
+        # coordinate frame; used various times below
+        subcut = cuts_ima[nsub]
+
+        # start with full-frame values
+        fratio_mean, fratio_std, fratio_median = (fratio_mean_full,
+                                                  fratio_std_full,
+                                                  fratio_median_full)
+        dx = dx_full
+        dy = dy_full
+        
+        # determine mask of full-frame matched values belonging to
+        # this subimage
+        y_index = (y_new_match-0.5).astype('uint16')
+        x_index = (x_new_match-0.5).astype('uint16')
+        mask_sub = ((y_index >= subcut[0]) & (y_index < subcut[1]) & 
+                    (x_index >= subcut[2]) & (x_index < subcut[3]))
+
+        # require a minimum number of values before adopting local
+        # values for fratio, dx and dy
+        if np.sum(mask_sub) >= 15:
+            
+            if get_par(set_zogy.fratio_local,tel):
+                # determine local fratios
+                fratio_mean, fratio_median, fratio_std = sigma_clipped_stats(
+                    fratio_match[mask_sub], mask_value=0)
+                fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
+                                             fratio_std_full, log)
+
+            # and the same for dx and dy
+            if get_par(set_zogy.dxdy_local,tel):
+                # determine local values
+                dx_mean, dx_median, dx_std = sigma_clipped_stats(
+                    dx_match[mask_sub], mask_value=0)
+                dy_mean, dy_median, dy_std = sigma_clipped_stats(
+                    dy_match[mask_sub], mask_value=0)
+                dx = np.sqrt(dx_mean**2 + dx_std**2)
+                dy = np.sqrt(dy_mean**2 + dy_std**2)
+
+                # adopt full-frame values if local values are more
+                # than nsigma away from the full-frame values
+                dx = local_or_full (dx, 0., dx_full, log)
+                dy = local_or_full (dy, 0., dy_full, log)
+                
+        fratio_subs[nsub] = fratio_mean
+        dx_subs[nsub] = dx
+        dy_subs[nsub] = dy
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_fratio_dxdy', log=log)
+
+    return success, x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
+        fratio_subs, dx_subs, dy_subs
+
+
+################################################################################
+
+def get_fratio_dxdy_orig (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
+                          header_ref, nsubs, cuts_ima, log, header, pixscale,
+                          use_optflux=False):
 
     """Function that takes in output catalogs of stars from the PSFex runs
     on the new and the ref image, and returns arrays with x,y pixel
@@ -10580,12 +10802,9 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
         # stars and any non-saturated SExtractor source
         newra_bright = newra[mask_use][index_sort][-nbright:]
         newdec_bright = newdec[mask_use][index_sort][-nbright:]        
-        dra_array, ddec_array = calc_offsets (newra_bright, newdec_bright,
-                                              ra_ast, dec_ast, log=log)
+        __, __, __, dra_array, ddec_array = get_matches (
+            newra_bright, newdec_bright, ra_ast, dec_ast, dist_max=1)
 
-        # convert to arcseconds
-        dra_array *= 3600.
-        ddec_array *= 3600.
 
         n_aststars_used = np.shape(dra_array)[0]
         log.info('number of astrometric stars used: {}'.format(n_aststars_used))
@@ -10681,111 +10900,39 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
 
 ################################################################################
 
-def calc_offsets (ra_sex, dec_sex, ra_ast, dec_ast, log):
-    
-    if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('executing calc_offsets ...')
+def get_matches (ra1, dec1, ra2, dec2, dist_max=None, return_offsets=True):
 
-    # number of astrometry comparison sources
-    n_ast = np.shape(ra_ast)[0]
+    """Find closest match for sources at [ra1], [dec1] among sources at
+    [ra2], [dec2]. If [dist_max] is provided (units: arcseconds), only
+    the (indices of) sources with total offsets within that limit are
+    returned. The indices of the matching sources, one for ra1/dec1
+    and one for ra2/dec2, are returned. If [return_offsets] is True,
+    the total offset and the RA and DEC offsets from ra1/dec1 to
+    ra2/dec2 (i.e. ra1 or dec1 + offset = ra2 or dec2) are also
+    returned in units of arcseconds. The input ras and decs are
+    assumed to be in units of degrees.
 
-    # prepare output arrays
-    dra_array = np.zeros(n_ast)
-    ddec_array = np.zeros(n_ast)
-    
-    # loop astrometry stars and find a match in SExtractor sources
-    dist_max = 1./3600
-    for i in range(n_ast):
-        
-        # make a big cut in declination in the SExtractor arrays to
-        # speed up distance calculation below
-        mask_cut = (np.abs(dec_sex-dec_ast[i])<=dist_max)
-        ra_sex_temp = ra_sex[mask_cut]
-        dec_sex_temp = dec_sex[mask_cut]
-        
-        # calculate distances using function [haversine]
-        dist = haversine(ra_sex_temp, dec_sex_temp, ra_ast[i], dec_ast[i])
-        
-        # mask with match(es) between subset of ra_sex and dec_sex and
-        # the source in the astrometry catalog
-        mask_match = (dist <= dist_max)
-        
-        if np.sum(mask_match)!=0:
-        
-            # select the nearest match
-            index_nearest = np.argmin(dist)
-            # calculate the RA, DEC offsets, including the sign!
-            ddec_array[i] = dec_sex_temp[index_nearest]-dec_ast[i]
-            # for RA, use the haversine function to get the right offset
-            dra_array[i] = haversine(ra_sex_temp[index_nearest], 
-                                     dec_sex_temp[index_nearest],
-                                     ra_ast[i], 
-                                     dec_sex_temp[index_nearest])
-            # add the sign (haversine provides absolute distances):
-            if ra_sex_temp[index_nearest] < ra_ast[i]:
-                dra_array[i] *= -1
-                        
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='calc_offsets', log=log)
+    """
 
-    mask_nonzero = ((dra_array != 0) & (ddec_array != 0))
-    return dra_array[mask_nonzero], ddec_array[mask_nonzero]
+    coords1 = SkyCoord(ra=ra1*u.degree, dec=dec1*u.degree)
+    index1 = np.arange(len(ra1))
     
-    
-################################################################################
+    coords2 = SkyCoord(ra=ra2*u.degree, dec=dec2*u.degree)
+    index2, dist, __ = coords1.match_to_catalog_sky(coords2)
 
-def calc_offsets_alt (ra_sex, dec_sex, ra_ast, dec_ast, log):
-    
-    if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('executing calc_offsets ...')
+    if dist_max is not None:
+        mask_match = (dist.arcsec <= dist_max)
+        index1 = index1[mask_match]
+        index2 = index2[mask_match]
+        dist = dist[mask_match]
 
-    # number of astrometry comparison sources
-    n_ast = np.shape(ra_ast)[0]
-    n_sex = np.shape(ra_sex)[0]
-    
-    # prepare output arrays
-    dra_array = np.zeros(n_sex)
-    ddec_array = np.zeros(n_sex)
-    
-    # loop astrometry stars and find a match in SExtractor sources
-    dist_max = 1./3600
-    for i in range(n_sex):
-        
-        # make a big cut in declination in the SExtractor arrays to
-        # speed up distance calculation below
-        mask_cut = (np.abs(dec_sex[i]-dec_ast)<=dist_max)
-        ra_ast_temp = ra_ast[mask_cut]
-        dec_ast_temp = dec_ast[mask_cut]
-        
-        # calculate distances using function [haversine]
-        dist = haversine(ra_ast_temp, dec_ast_temp, ra_sex[i], dec_sex[i])
-        
-        # mask with match(es) between subset of ra_sex and dec_sex and
-        # the source in the astrometry catalog
-        mask_match = (dist <= dist_max)
-        
-        if np.sum(mask_match)!=0:
-        
-            # select the nearest match
-            index_nearest = np.argmin(dist)
-            # calculate the RA, DEC offsets, including the sign!
-            ddec_array[i] = dec_ast_temp[index_nearest]-dec_sex[i]
-            # for RA, use the haversine function to get the right offset
-            dra_array[i] = haversine(ra_ast_temp[index_nearest], 
-                                     dec_ast_temp[index_nearest],
-                                     ra_sex[i], 
-                                     dec_ast_temp[index_nearest])
-            # add the sign (haversine provides absolute distances):
-            if ra_ast_temp[index_nearest] < ra_sex[i]:
-                dra_array[i] *= -1
-                        
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='calc_offsets', log=log)
+    if return_offsets:
+        dra, ddec = coords1[index1].spherical_offsets_to(coords2[index2])
+        return index1, index2, dist.arcsec, dra.arcsec, ddec.arcsec
+    else:
+        return index1, index2
 
-    mask_nonzero = ((dra_array != 0) & (ddec_array != 0))
-    return dra_array[mask_nonzero], ddec_array[mask_nonzero]
     
-
 ################################################################################
     
 def ldac2fits_alt (cat_ldac, cat_fits, log=None):
