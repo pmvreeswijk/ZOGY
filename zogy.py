@@ -977,9 +977,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             zp = header_new['PC-ZP']
             airm = header_new['AIRMASSC']
-            data_limmag = apply_zp( (get_par(set_zogy.transient_nsigma,tel) *
-                                     data_Fpsferr_full),
-                                    zp, airm, exptime, filt, log).astype('float32')
+            data_limmag = apply_zp((get_par(set_zogy.transient_nsigma,tel) *
+                                    data_Fpsferr_full), zp, airm, exptime, filt,
+                                   log=log).astype('float32')
         
         
         # add header keyword(s):
@@ -1042,10 +1042,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # number of transients in table to add to header below
         ntrans = len(table_trans)
 
-        # if one or more fake stars were added to the new image,
-        # compare the input flux with the PSF flux determined by
-        # run_ZOGY and at what S/N it is present in the transient
-        # catalog
+        # if one or more fake stars were added to the new image, merge
+        # the fake star table with the output transient catalog
         if get_par(set_zogy.nfakestars,tel)>0:
 
             log.info ('extracting fake stars from data')
@@ -1087,7 +1085,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             exptime, filt = read_header(header_new, keywords, log=log)
             zeropoint = header_new['PC-ZP']
             airmass = header_new['AIRMASSC']
-            [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log)
+            [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt, log=log)
             header_trans['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
                                      'lim. mag'.format(
                                          get_par(set_zogy.transient_nsigma,tel)))
@@ -1446,15 +1444,26 @@ def merge_fakestars (table, table_fake, cat_type, header, log=None):
                                      dist_max=2, return_offsets=False)
 
     # add zero-valued fake columns to table
-    table.add_columns([0.]*4, names=['X_FAKE', 'Y_FAKE',
-                                     'SNR_FAKE_IN', 'E_FLUX_FAKE_IN'])
-
+    table.add_columns([0.]*5, names=['X_FAKE', 'Y_FAKE',
+                                     'SNR_FAKE_IN', 'E_FLUX_FAKE_IN',
+                                     'MAG_FAKE_IN'])
+    
     table['X_FAKE'][index] = table_fake['X_FAKE'][index_fake]
     table['Y_FAKE'][index] = table_fake['Y_FAKE'][index_fake]
     table['SNR_FAKE_IN'][index] = table_fake['SNR_FAKE_IN'][index_fake]
     table['E_FLUX_FAKE_IN'][index] = table_fake['E_FLUX_FAKE_IN'][index_fake]
 
+    keywords = ['exptime', 'filter']
+    exptime, filt = read_header(header, keywords)
+    zeropoint = header['PC-ZP']
+    airmass = header['AIRMASSC']
 
+    flux_fake_in = table_fake['E_FLUX_FAKE_IN'][index_fake]
+    mag_fake_in = apply_zp (flux_fake_in, zeropoint, airmass, exptime, filt,
+                            log=log)
+    table['MAG_FAKE_IN'][index] = mag_fake_in
+
+    
     return table
 
 
@@ -2151,6 +2160,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'Y_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
         'SNR_FAKE_IN':    ['E', ''     ], #, 'flt32' ],
         'E_FLUX_FAKE_IN': ['E', 'e-/s' ], #, 'flt32' ],
+        'MAG_FAKE_IN':    ['E', 'mag'  ], #, 'flt32' ],
         'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
         'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
@@ -2231,6 +2241,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         keys_to_record.append('Y_FAKE')
         keys_to_record.append('SNR_FAKE_IN')
         keys_to_record.append('E_FLUX_FAKE_IN')
+        keys_to_record.append('MAG_FAKE_IN')
 
 
     # rename any of the keys using this dictionary, such as the
@@ -3302,17 +3313,18 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     del data_Fpsf, data_Fpsferr
     
     mag_peak, magerr_peak = apply_zp (
-        np.abs(flux_peak), zp, airmass_trans, exptime, filt, log, zp_std=None,
+        np.abs(flux_peak), zp, airmass_trans, exptime, filt, log=log,
         fluxerr=np.abs(fluxerr_peak))
     
     mag_psf_D, magerr_psf_D = apply_zp (
         np.abs(table_trans['E_FLUX_PSF_D']), zp, airmass_trans, exptime, filt,
-        log, fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']), zp_std=None)
+        log=log, fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']))
 
     if False:
         mag_opt_D, magerr_opt_D = apply_zp (
             np.abs(table_trans['E_FLUX_OPT_D']), zp, airmass_trans, exptime, filt,
-            log, fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']), zp_std=None)
+            log=log, fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']))
+
 
     log.info ('[get_trans] time after converting flux to mag: {}'
               .format(time.time()-t))
@@ -3321,12 +3333,11 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     table_trans.add_columns([flux_peak, fluxerr_peak,
                              mag_peak,  magerr_peak,
                              mag_psf_D, magerr_psf_D],
-                            #mag_opt_D, magerr_opt_D],
                             names=['E_FLUX_ZOGY', 'E_FLUXERR_ZOGY',
                                    'MAG_ZOGY',    'MAGERR_ZOGY',
                                    'MAG_PSF_D',   'MAGERR_PSF_D'])
-                                   #, 'MAG_OPT_D',   'MAGERR_OPT_D'])
-
+    
+                                   
     # change some of the column names
     colnames_new = {'X_POS':      'X_POS_SCORR',
                     'Y_POS':      'Y_POS_SCORR',
@@ -3953,20 +3964,20 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     # the sign of Scorr_peak.
     flux_peak = np.abs(flux_peak)
     mag_peak, magerr_peak = apply_zp (flux_peak, zp, airmass_trans, exptime, 
-                                      filt, log, fluxerr=np.abs(fluxerr_peak),
-                                      zp_std=None)
+                                      filt, log=log, fluxerr=np.abs(fluxerr_peak))
+
     flux_psf_D = np.abs(flux_psf_D)
     mag_psf_D, magerr_psf_D = apply_zp (flux_psf_D, zp, airmass_trans, exptime, 
-                                        filt, log, fluxerr=np.abs(fluxerr_psf_D),
-                                        zp_std=None)
+                                        filt, log=log,
+                                        fluxerr=np.abs(fluxerr_psf_D))
     if False:
         flux_opt_D = np.abs(flux_opt_D)
         mag_opt_D, magerr_opt_D = apply_zp (flux_opt_D, zp, airmass_trans,
-                                            exptime, filt, log,
-                                            fluxerr=np.abs(fluxerr_opt_D),
-                                            zp_std=None)
+                                            exptime, filt, log=log,
+                                            fluxerr=np.abs(fluxerr_opt_D))
 
-    log.info ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
+    log.info ('[get_trans] time after converting flux to mag: {}'
+              .format(time.time()-t))
 
     # determine RA and DEC corresponding to x_psf_D and y_psf_D
     ra_psf_D, dec_psf_D = wcs_new.all_pix2world(x_psf_D, y_psf_D, 1)
@@ -6035,7 +6046,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
         # create table_fake to be used later to merge with full-source
-        # or transient catalog
+        # or transient catalog; magnitude corresponding to
+        # E_FLUX_FAKE_IN is added later on in [merge_fakestars]
         names_fake = ['X_FAKE', 'Y_FAKE', 'SNR_FAKE_IN', 'E_FLUX_FAKE_IN']
         table_fake = Table(
             [xcoords_fake, ycoords_fake, nsigma_fake_in, fakestar_flux_in],
@@ -6561,7 +6573,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_max,tel),
                                   'input max. number of photcal stars to use')
             header['PC-NCMIN'] = (get_par(set_zogy.phot_ncal_min,tel),
-                                  'input min. number of stars to apply filter cut')
+                                  'input min. number of stars to apply filter '
+                                  'cut')
 
             if get_par(set_zogy.timing,tel):
                 log_timing_memory (
@@ -6578,15 +6591,19 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # particular field), use the default zeropoints defined in the
         # Settings module
         if ncalstars==0 or zp==0:
-            header['PC-P'] = (False, 'successfully processed by phot. calibration?')
+            header['PC-P'] = (False, 'successfully processed by phot. '
+                              'calibration?')
             zp = get_par(set_zogy.zp_default,tel)[filt]
             zp_std = 0.
         else:
-            header['PC-P'] = (True, 'successfully processed by phot. calibration?')            
-            
+            header['PC-P'] = (True, 'successfully processed by phot. '
+                              'calibration?')
+
+
         # infer limiting magnitudes from limiting flux using zeropoint
         # and median airmass
-        [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt, log)
+        [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt,
+                            log=log)
         log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
 
         # add header keyword(s):
@@ -6645,10 +6662,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 col_mag = col.replace('E_FLUX', 'MAG')
                 col_magerr = col.replace('E_FLUX', 'MAGERR')
 
-                mag_tmp, magerr_tmp = apply_zp(table_sex[col_flux], zp, airmass_sex,
-                                               exptime, filt, log,
-                                               fluxerr=table_sex[col_fluxerr],
-                                               zp_std=None)
+                mag_tmp, magerr_tmp = apply_zp(
+                    table_sex[col_flux], zp, airmass_sex, exptime, filt, log=log,
+                    fluxerr=table_sex[col_fluxerr])
+
                 if col_mag in colnames:
                     del table_sex[col_mag, col_magerr]
 
@@ -6667,8 +6684,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 else:
                     flux_max = 10**(-0.4*table_sex['MU_MAX']) * pixscale**2
                 
-                mag_tmp = apply_zp(flux_max, zp, airmass_sex,
-                                   exptime, filt, log, zp_std=None)
+                mag_tmp = apply_zp(flux_max, zp, airmass_sex, exptime, filt,
+                                   log=log)
                 table_sex['MU_MAX'] = mag_tmp
 
 
@@ -6844,8 +6861,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         exptime, filt = read_header(header, ['exptime', 'filter'], log=log)
         zp = header['PC-ZP']
         airm = header['AIRMASSC']
-        data_limmag = apply_zp( (get_par(set_zogy.source_nsigma,tel) * data_err),
-                                zp, airm, exptime, filt, log).astype('float32')
+        data_limmag = apply_zp((get_par(set_zogy.source_nsigma,tel) * data_err),
+                               zp, airm, exptime, filt, log=log).astype('float32')
 
         del data_wcs_copy, data_err
 
@@ -7490,8 +7507,8 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
 
 ################################################################################
 
-def apply_zp (flux, zp, airmass, exptime, filt, log,
-              fluxerr=None, zp_std=None):
+def apply_zp (flux, zp, airmass, exptime, filt, fluxerr=None, zp_std=None,
+              log=None):
 
     """Function that converts the array [flux] into calibrated magnitudes
     using [zp] (a scalar), [airmass] (scalar or array with the same
@@ -7501,8 +7518,11 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
     errors. The output will be numpy arrays with the same number of
     elements as the input flux."""
     
-    if get_par(set_zogy.timing,tel): t = time.time()
-    #log.info('executing apply_zp ...')
+    if get_par(set_zogy.timing,tel):
+        t = time.time()
+
+    if log is not None:
+        log.info('executing apply_zp ...')
 
     # make sure input fluxes are numpy arrays
     flux = np.asarray(flux)
@@ -7530,14 +7550,14 @@ def apply_zp (flux, zp, airmass, exptime, filt, log,
             # add zp_std to output magnitude error
             magerr = np.sqrt(magerr**2 + zp_std**2)
             # provide warning if zp_std is large
-            if zp_std>0.1:
+            if zp_std>0.1 and log is not None:
                 log.info('Warning: zp_std is larger than 0.1 mag: {}'.
                          format(zp_std))
         # set errors of sources with non-positive fluxes to -1
         magerr[~mask_pos] = -1
         
-    #if get_par(set_zogy.timing,tel):
-    #    log_timing_memory (t0=t, label='apply_zp', log=log)
+    if get_par(set_zogy.timing,tel) and log is not None:
+        log_timing_memory (t0=t, label='apply_zp', log=log)
 
     if fluxerr is not None:
         return mag, magerr
