@@ -21,9 +21,9 @@ fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or ful
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required significance in Scorr for transient detection
-chi2_max = 5             # maximum reduced chi2 in PSF/Gauss fit to D to filter
+chi2_max = float('inf')  # maximum reduced chi2 in PSF/Gauss fit to D to filter
                          # transients
-                         
+
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
 transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
@@ -35,10 +35,15 @@ size_thumbnails = 100    # size of square thumbnail arrays in (new) image pixels
 orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
-# add optional fake stars for testing purposes
-nfakestars = 0           # number of fake stars to be added to each subimage; first star
-                         # is at the center, the rest (if any) is randomly distributed
-fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
+#===============================================================================
+# Injection of fake stars/transients into new image
+#===============================================================================
+nfakestars = 1000        # number of fake stars to be added to each subimage;
+                         # first star is at the center, the rest (if any) is
+                         # randomly distributed
+fakestar_radec = (199.7506, -21.0621) # [deg] if defined, the first fake star is
+                          # inserted at these coordinates
+fakestar_s2n = 20.       # required signal-to-noise ratio of the fake stars
 
 
 #===============================================================================
@@ -63,6 +68,7 @@ bkg_boxsize = 60         # size of region used to determine
                          # background (both methods)
 bkg_filtersize = 3       # size of filter used for smoothing the above
                          # regions (both methods)
+bkg_phototype = 'local'  # use local or global background for photometry
 
 
 # these parameters are related to MeerLICHT/BlackGEM images only
@@ -71,7 +77,7 @@ MLBG_chancorr = True     # apply channel correction factor estimated while
                          # performing a 2D polynomial fit to the background
 MLBG_chancorr_limdev = 0.05 # single channel correction limiting deviation
                             # above which none of the corrections are applied
-                          
+
 
 #===============================================================================
 # Header keywords
@@ -152,7 +158,6 @@ astronet_radius = 30.
 pixscale_varyfrac = 0.001  # pixscale solution found by Astrometry.net will
                            # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
-
 cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
            .format(os.environ['ZOGYHOME']),
            'BG': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
@@ -183,7 +188,11 @@ source_nsigma = 5             # required S/N in total flux (optimal or psffit)
                               # and magnitudes of images
 source_minpixfrac = 0.67      # required fraction of good pixels in footprint
                               # for source to be included in output catalog
-                              
+fit_bkg_opt = True            # perform polyfit to local background in optimal
+                              # photometry determination
+poldeg_bkg_opt = 1            # polynomial degree of background fit
+
+
 # Photometric calibration
 # telescope latitude in degrees (North)
 obs_lat = {'ML1': -32.3799, 'BG': -29.2575}  
