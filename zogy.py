@@ -4624,21 +4624,25 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # perform optimal photometry measurements
             try:
 
-                dist_tmp = np.sqrt((xcoords[i]-5460)**2 +
-                                   (ycoords[i]-4760)**2)
-                #if dist_tmp < 10:
-                #    show=True
-                #    print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
-                #                                                   ycoords[i]))
-                #else:
-                #    show=False
+                if True:
+                    show=False
+                else:
+                    # show optimal fit of particular object(s)
+                    dist_tmp = np.sqrt((xcoords[i]-8817)**2 +
+                                       (ycoords[i]-3335)**2)
+                    if dist_tmp < 10:
+                        show=True
+                        print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
+                                                                       ycoords[i]))
+                    else:
+                        show=False
 
 
                 fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
                     fit_bkg=fit_bkg, D_objmask=D_objmask_sub, fwhm=fwhm_use,
-                    show=False, log=log)
+                    show=show, log=log)
             except Exception as e:
                 #log.exception(traceback.format_exc())
                 log.exception('problem running [flux_optimal] on object at pixel '
@@ -5321,7 +5325,7 @@ def get_s2n_ZO (P, D, V):
 
 ################################################################################
 
-def flux_optimal (P, D, bkg_var, nsigma_inner=10, nsigma_outer=5, max_iters=10,
+def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=10,
                   epsilon=0.1, mask_use=None, add_V_ast=False, D_objmask=None,
                   fit_bkg=False, fwhm=None, dx2=0, dy2=0, dxy=0, show=False,
                   log=None):
@@ -7035,13 +7039,6 @@ def prep_plots (table, header, base, log=None):
     if log is not None:
         log.info ('preparing photometry plots ...')
 
-    # and define flux_opt and fluxerr_opt
-    flux_opt = table['E_FLUX_OPT']
-    fluxerr_opt = table['E_FLUXERR_OPT']
-    # and corresponding calibrated magnitudes
-    if 'MAG_OPT' in table.colnames:
-        mag_opt = table['MAG_OPT']
-        magerr_opt = table['MAGERR_OPT']
 
     mypsffit = get_par(set_zogy.psffit,tel)
     if mypsffit:
@@ -7049,6 +7046,7 @@ def prep_plots (table, header, base, log=None):
         fluxerr_mypsf = table['E_FLUXERR_PSF']
         x_psf = table['X_PSF']
         y_psf = table['Y_PSF']
+
 
     # read a few extra header keywords needed below
     keywords = ['gain', 'exptime', 'filter', 'obsdate']
