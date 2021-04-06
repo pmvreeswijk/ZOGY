@@ -1491,9 +1491,9 @@ def extract_fakestars_orig (table_fake, table_trans, data_Fpsf, data_Fpsferr,
             table_trans['SNR_FAKE_IN'][i_trans] = table_fake['SNR_IN'][i_fake]
             table_trans['E_FLUX_FAKE_IN'][i_trans] = table_fake['E_FLUX_IN'][i_fake]
             # replace peak-pixel OUT values with actually extracted values
-            table_fake['E_FLUX_OUT'][i_fake] = table_trans['E_FLUX_PEAK'][i_trans]
-            table_fake['E_FLUXERR_OUT'][i_fake] = table_trans['E_FLUXERR_PEAK'][i_trans]
-            table_fake['SNR_OUT'][i_fake] = table_trans['SCORR_PEAK'][i_trans]
+            table_fake['E_FLUX_OUT'][i_fake] = table_trans['E_FLUX_ZOGY'][i_trans]
+            table_fake['E_FLUXERR_OUT'][i_fake] = table_trans['E_FLUXERR_ZOGY'][i_trans]
+            table_fake['SNR_OUT'][i_fake] = table_trans['SNR_ZOGY'][i_trans]
 
 
     # overwrite output fits catalog created in [get_trans]
@@ -2055,9 +2055,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'XYCOV_POS':      ['E', 'pix^2'], #, 'flt16' ],
         'X_POS_SCORR':    ['E', 'pix'  ], #, 'flt32' ],
         'Y_POS_SCORR':    ['E', 'pix'  ], #, 'flt32' ],
-        'XVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
-        'YVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
-        'XYCOV_POS_SCORR':['E', 'pix^2'], #, 'flt16' ],
+        #'XVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
+        #'YVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
+        #'XYCOV_POS_SCORR':['E', 'pix^2'], #, 'flt16' ],
         'CXX':            ['E', 'pix^(-2)'], #, 'flt16' ],
         'CYY':            ['E', 'pix^(-2)'], #, 'flt16' ],
         'CXY':            ['E', 'pix^(-2)'], #, 'flt16' ],
@@ -2108,15 +2108,15 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'Y_PEAK':         ['I', 'pix'  ], #, 'flt32' ],
         'RA_PEAK':        ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PEAK':       ['D', 'deg'  ], #, 'flt64' ],
-        'SCORR_PEAK':     ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_PEAK':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_PEAK': ['E', 'e-/s' ], #, 'flt16' ],
-        'MAG_PEAK':       ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_PEAK':    ['E', 'mag'  ], #, 'flt16' ],
-        'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
-        'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
+        'SNR_ZOGY':       ['E', ''     ], #, 'flt32' ],
+        'E_FLUX_ZOGY':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_ZOGY': ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_ZOGY':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_ZOGY':    ['E', 'mag'  ], #, 'flt16' ],
+        #'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
+        #'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
+        #'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
+        #'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
         'X_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
         'XERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
         'Y_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
@@ -2190,15 +2190,14 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
 
     elif cat_type == 'trans':
         keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
-                          'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK',
-                          'E_FLUX_PEAK', 'E_FLUXERR_PEAK', 'MAG_PEAK', 'MAGERR_PEAK',
+                          'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
+                          'E_FLUX_ZOGY', 'E_FLUXERR_ZOGY', 'MAG_ZOGY', 'MAGERR_ZOGY',
                           #
                           'X_POS_SCORR', 'Y_POS_SCORR',
-                          'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
+                          #'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
                           'RA_SCORR', 'DEC_SCORR', 'ELONG_SCORR',
                           'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
-                          'MAG_OPT_D', 'MAGERR_OPT_D',
-                          #
+                          #'MAG_OPT_D', 'MAGERR_OPT_D',
                           'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                           'RA_PSF_D', 'DEC_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D', 
                           'CHI2_PSF_D',
@@ -2446,9 +2445,9 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         'XYCOV_POS':      ['E', 'pix^2'], #, 'flt16' ],
         'X_POS_SCORR':    ['E', 'pix'  ], #, 'flt32' ],
         'Y_POS_SCORR':    ['E', 'pix'  ], #, 'flt32' ],
-        'XVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
-        'YVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
-        'XYCOV_POS_SCORR':['E', 'pix^2'], #, 'flt16' ],
+        #'XVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
+        #'YVAR_POS_SCORR': ['E', 'pix^2'], #, 'flt16' ],
+        #'XYCOV_POS_SCORR':['E', 'pix^2'], #, 'flt16' ],
         'CXX':            ['E', 'pix^(-2)'], #, 'flt16' ],
         'CYY':            ['E', 'pix^(-2)'], #, 'flt16' ],
         'CXY':            ['E', 'pix^(-2)'], #, 'flt16' ],
@@ -2499,15 +2498,15 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         'Y_PEAK':         ['I', 'pix'  ], #, 'flt32' ],
         'RA_PEAK':        ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PEAK':       ['D', 'deg'  ], #, 'flt64' ],
-        'SCORR_PEAK':     ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_PEAK':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_PEAK': ['E', 'e-/s' ], #, 'flt16' ],
-        'MAG_PEAK':       ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_PEAK':    ['E', 'mag'  ], #, 'flt16' ],
-        'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
-        'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
+        'SNR_ZOGY':       ['E', ''     ], #, 'flt32' ],
+        'E_FLUX_ZOGY':    ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUXERR_ZOGY': ['E', 'e-/s' ], #, 'flt16' ],
+        'MAG_ZOGY':       ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_ZOGY':    ['E', 'mag'  ], #, 'flt16' ],
+        #'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
+        #'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
+        #'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
+        #'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
         'X_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
         'XERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
         'Y_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
@@ -2581,14 +2580,14 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
 
     elif cat_type == 'trans':
         keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
-                          'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK',
-                          'E_FLUX_PEAK', 'E_FLUXERR_PEAK', 'MAG_PEAK', 'MAGERR_PEAK',
+                          'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
+                          'E_FLUX_ZOGY', 'E_FLUXERR_ZOGY', 'MAG_ZOGY', 'MAGERR_ZOGY',
                           #
                           'X_POS_SCORR', 'Y_POS_SCORR',
-                          'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
+                          #'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
                           'RA_SCORR', 'DEC_SCORR', 'ELONG_SCORR',
                           'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
-                          'MAG_OPT_D', 'MAGERR_OPT_D',
+                          #'MAG_OPT_D', 'MAGERR_OPT_D',
                           #
                           'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                           'RA_PSF_D', 'DEC_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D', 
@@ -2948,15 +2947,15 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     index_x = table_trans_pos['X_PEAK'] - 1
     index_y = table_trans_pos['Y_PEAK'] - 1
     Scorr_peak_pos = data_Scorr_bkgsub[index_y, index_x]
-    # add 'SCORR_PEAK' to table
-    table_trans_pos.add_column (Scorr_peak_pos, name='SCORR_PEAK')
+    # add 'SNR_ZOGY' to table
+    table_trans_pos.add_column (Scorr_peak_pos, name='SNR_ZOGY')
 
     # same for negative
     table_trans_neg = Table.read(sexcat_neg, memmap=True)
     index_x = table_trans_neg['X_PEAK'] - 1
     index_y = table_trans_neg['Y_PEAK'] - 1
     Scorr_peak_neg = data_Scorr_bkgsub[index_y, index_x]
-    table_trans_neg.add_column (Scorr_peak_neg, name='SCORR_PEAK')
+    table_trans_neg.add_column (Scorr_peak_neg, name='SNR_ZOGY')
 
     # merge positive and negative catalogs
     table_trans = vstack([table_trans_pos, table_trans_neg])
@@ -2967,7 +2966,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # Filter on significance
     # ======================
 
-    # filter by abs(SCORR_PEAK) >= 6; do not divide by [std_Scorr] -
+    # filter by abs(SNR_ZOGY) >= 6; do not divide by [std_Scorr] -
     # the value in the background-subtracted Scorr image is assumed to
     # be the significance irrespective of the STD in the Scorr
     # image. This is corroborated by a test with fake stars of S/N=10
@@ -2978,7 +2977,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # because source extractor is using the actual STD in the image to
     # determine its detection threshold.
     nsigma_norm = get_par(set_zogy.transient_nsigma,tel) #/ std_Scorr
-    mask_signif = np.abs(table_trans['SCORR_PEAK']) >= nsigma_norm
+    mask_signif = np.abs(table_trans['SNR_ZOGY']) >= nsigma_norm
     table_trans = table_trans[mask_signif]
     log.info ('transient detection threshold: {}'.format(nsigma_norm))
     log.info ('ntrans after threshold cut: {}'.format(len(table_trans)))
@@ -3104,7 +3103,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             moffat=moffat, gauss=gauss, psfex_bintable_ref=fits_ref_psf,
             data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
             header_new=header_new, header_ref=header_ref,
-            Scorr_peak=table_trans['SCORR_PEAK'], log=log)
+            Scorr_peak=table_trans['SNR_ZOGY'], log=log)
 
         return results
 
@@ -3307,24 +3306,26 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         fluxerr=np.abs(fluxerr_peak))
     
     mag_psf_D, magerr_psf_D = apply_zp (
-        np.abs(table_trans['E_FLUX_PSF_D']), zp, airmass_trans, exptime, filt, log,
-        fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']), zp_std=None)
-    
-    mag_opt_D, magerr_opt_D = apply_zp (
-        np.abs(table_trans['E_FLUX_OPT_D']), zp, airmass_trans, exptime, filt, log,
-        fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']), zp_std=None)
+        np.abs(table_trans['E_FLUX_PSF_D']), zp, airmass_trans, exptime, filt,
+        log, fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']), zp_std=None)
 
-    log.info ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
+    if False:
+        mag_opt_D, magerr_opt_D = apply_zp (
+            np.abs(table_trans['E_FLUX_OPT_D']), zp, airmass_trans, exptime, filt,
+            log, fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']), zp_std=None)
+
+    log.info ('[get_trans] time after converting flux to mag: {}'
+              .format(time.time()-t))
 
     # adding magnitudes and also flux_peak to table
     table_trans.add_columns([flux_peak, fluxerr_peak,
                              mag_peak,  magerr_peak,
-                             mag_psf_D, magerr_psf_D,
-                             mag_opt_D, magerr_opt_D],
-                            names=['E_FLUX_PEAK', 'E_FLUXERR_PEAK',
-                                   'MAG_PEAK',    'MAGERR_PEAK',
-                                   'MAG_PSF_D',   'MAGERR_PSF_D',
-                                   'MAG_OPT_D',   'MAGERR_OPT_D'])
+                             mag_psf_D, magerr_psf_D],
+                            #mag_opt_D, magerr_opt_D],
+                            names=['E_FLUX_ZOGY', 'E_FLUXERR_ZOGY',
+                                   'MAG_ZOGY',    'MAGERR_ZOGY',
+                                   'MAG_PSF_D',   'MAGERR_PSF_D'])
+                                   #, 'MAG_OPT_D',   'MAGERR_OPT_D'])
 
     # change some of the column names
     colnames_new = {'X_POS':      'X_POS_SCORR',
@@ -3958,11 +3959,13 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     mag_psf_D, magerr_psf_D = apply_zp (flux_psf_D, zp, airmass_trans, exptime, 
                                         filt, log, fluxerr=np.abs(fluxerr_psf_D),
                                         zp_std=None)
-    flux_opt_D = np.abs(flux_opt_D)
-    mag_opt_D, magerr_opt_D = apply_zp (flux_opt_D, zp, airmass_trans, exptime, 
-                                        filt, log, fluxerr=np.abs(fluxerr_opt_D),
-                                        zp_std=None)
-    
+    if False:
+        flux_opt_D = np.abs(flux_opt_D)
+        mag_opt_D, magerr_opt_D = apply_zp (flux_opt_D, zp, airmass_trans,
+                                            exptime, filt, log,
+                                            fluxerr=np.abs(fluxerr_opt_D),
+                                            zp_std=None)
+
     log.info ('[get_trans] time after converting flux to mag: {}'.format(time.time()-t))
 
     # determine RA and DEC corresponding to x_psf_D and y_psf_D
@@ -3976,9 +3979,9 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     #'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
     #'ELONGATION',
     names = ('NUMBER', 'NPIX_MASK',
-             'X_PEAK', 'Y_PEAK', 'RA_PEAK', 'DEC_PEAK', 'SCORR_PEAK', 
-             'E_FLUX_PEAK', 'E_FLUXERR_PEAK',  'MAG_PEAK', 'MAGERR_PEAK',
-             'E_FLUX_OPT_D', 'E_FLUXERR_OPT_D', 'MAG_OPT_D', 'MAGERR_OPT_D',
+             'X_PEAK', 'Y_PEAK', 'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY', 
+             'E_FLUX_ZOGY', 'E_FLUXERR_ZOGY',  'MAG_ZOGY', 'MAGERR_ZOGY',
+             #'E_FLUX_OPT_D', 'E_FLUXERR_OPT_D', 'MAG_OPT_D', 'MAGERR_OPT_D',
              'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D', 
              'RA_PSF_D', 'DEC_PSF_D',
              'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D',
@@ -3991,7 +3994,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     table = Table([np.arange(nregions)+1, npix_mask,
                    x_peak, y_peak, ra_peak, dec_peak, Scorr_peak,
                    flux_peak, fluxerr_peak, mag_peak, magerr_peak,
-                   flux_opt_D, fluxerr_opt_D, mag_opt_D, magerr_opt_D,
+                   #flux_opt_D, fluxerr_opt_D, mag_opt_D, magerr_opt_D,
                    x_psf_D, xerr_psf_D, y_psf_D, yerr_psf_D, 
                    ra_psf_D, dec_psf_D,
                    flux_psf_D, fluxerr_psf_D, mag_psf_D, magerr_psf_D,
