@@ -38,7 +38,7 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 #===============================================================================
 # Injection of fake stars/transients into new image
 #===============================================================================
-nfakestars = 1000        # number of fake stars to be added to each subimage;
+nfakestars = 0           # number of fake stars to be added to each subimage;
                          # first star is at the center, the rest (if any) is
                          # randomly distributed
 fakestar_radec = (199.7506, -21.0621) # [deg] if defined, the first fake star is
@@ -126,7 +126,7 @@ psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
 psf_rad_phot = 5.0       # PSF radius in units of FWHM used in optimal photometry
-psf_rad_zogy = 3.0       # PSF radius in units of FWHM used in optimal subtraction
+psf_rad_zogy = 4.0       # PSF radius in units of FWHM used in optimal subtraction
 psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # If zero, it is automatically determined for the
                          # new and ref image as follows:
@@ -155,7 +155,7 @@ astronet_tweak_order = 3
 # only search in Astrometry.net index files within this radius of the
 # header RA and DEC [deg]
 astronet_radius = 30.
-pixscale_varyfrac = 0.001  # pixscale solution found by Astrometry.net will
+pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
                            # be within this fraction of the assumed pixscale
 # calibration catalog used for both astrometry and photometry
 cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
