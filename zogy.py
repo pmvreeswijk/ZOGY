@@ -4624,25 +4624,23 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # perform optimal photometry measurements
             try:
 
-                if True:
-                    show=False
-                else:
+                show=False
+
+                if False:
                     # show optimal fit of particular object(s)
-                    dist_tmp = np.sqrt((xcoords[i]-8817)**2 +
-                                       (ycoords[i]-3335)**2)
-                    if dist_tmp < 10:
+                    dist_tmp = np.sqrt((xcoords[i]-5560)**2 +
+                                       (ycoords[i]-4940)**2)
+                    if dist_tmp < 300:
                         show=True
                         print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
                                                                        ycoords[i]))
-                    else:
-                        show=False
-
 
                 fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
                     fit_bkg=fit_bkg, D_objmask=D_objmask_sub, fwhm=fwhm_use,
                     show=show, log=log)
+
             except Exception as e:
                 #log.exception(traceback.format_exc())
                 log.exception('problem running [flux_optimal] on object at pixel '
@@ -5367,9 +5365,9 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
         # use [dist_from_center] to calculate distance from center of
         # 2D array, also obtaining the corresponding xx- and yy-grid
         dist, xx, yy = dist_from_center(P)
-        # mask indicating outer ring of [width_sky] pixels
-        mask_bkg = ((dist >  int(ysize/2)-width_sky) & 
-                    (dist <= int(ysize/2)+1))
+        # mask indicating outer ring of [width_sky] pixels plus the
+        # pixels in the four corners
+        mask_bkg = (dist >  int(ysize/2)-width_sky) #& (dist <= int(ysize/2)+1))
         npix_bkg = np.sum(mask_bkg)
 
         # do not consider pixels affected by objects, which correspond
@@ -8982,9 +8980,9 @@ def plot_scatter (x, y, limits, corder, cmap='rainbow_r', marker='o',
             median[i] = np.median(y[mask])
             std[i] = np.std(y[mask])
 
-    ax.plot(bins+binsize/2, median, color='k', linestyle='dashed')
+    ax.plot(bins+binsize/2, median, color='tab:red', linestyle='dashed')
     ax.errorbar(bins+binsize/2, median, yerr=std, linestyle='None',
-                capsize=5, color='k')
+                capsize=5, color='tab:red')
 
     
     if legendlabel is not None:
