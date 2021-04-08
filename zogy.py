@@ -436,8 +436,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                             del header[key]
                     WCS_processed = False
                     fits_base = '{}.fits'.format(base)
-                    run_wcs(fits_base, fits_base, ra, dec, pixscale, xsize,
-                            ysize, header, imtype, log)
+                    run_wcs(fits_base, ra, dec, pixscale, xsize, ysize, header,
+                            imtype, log)
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
@@ -5362,12 +5362,14 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
         else:
             width_sky = 3
 
-        # use [dist_from_center] to calculate distance from center of
-        # 2D array, also obtaining the corresponding xx- and yy-grid
-        dist, xx, yy = dist_from_center(P)
+        # use [dist_from_peak] to calculate distance from peak value
+        # of 2D array (not necessarily the center, e.g. for objects
+        # near the CCD edge), also obtaining the corresponding xx- and
+        # yy-grid
+        dist, xx, yy = dist_from_peak(P)
         # mask indicating outer ring of [width_sky] pixels plus the
         # pixels in the four corners
-        mask_bkg = (dist >  int(ysize/2)-width_sky) #& (dist <= int(ysize/2)+1))
+        mask_bkg = (dist > int(ysize/2)-width_sky) #& (dist <= int(ysize/2)+1))
         npix_bkg = np.sum(mask_bkg)
 
         # do not consider pixels affected by objects, which correspond
@@ -8119,10 +8121,17 @@ def get_back (data, header, fits_objmask, fits_mask=None, log=None,
         if (np.sum(~np.isfinite(data_masked))) > 0:
             log.warning ('data_masked contains infinite or nan values')
 
-    # get clipped statistics
-    nsigma = get_par(set_zogy.bkg_nsigma,tel)
-    __, mini_bkg, mini_std = sigma_clipped_stats(
-        data_masked, sigma=nsigma, axis=2, mask_value=0)
+
+    # suppressing expected "RuntimeWarning: Mean of empty slice"
+    # warning for boxes where all values are masked
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+
+        # get clipped statistics
+        nsigma = get_par(set_zogy.bkg_nsigma,tel)
+        __, mini_bkg, mini_std = sigma_clipped_stats(
+            data_masked, sigma=nsigma, axis=2, mask_value=0)
+
 
     # set any nan or infinite values to zero
     mask_mini_finite = (np.isfinite(mini_bkg) & np.isfinite(mini_std))
@@ -10705,8 +10714,7 @@ def ds9_arrays(regions=None, **kwargs):
     
 ################################################################################
 
-def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
-            imtype, log):
+def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype, log):
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing run_wcs ...')
@@ -10845,8 +10853,6 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     
     if get_par(set_zogy.timing,tel): t2 = time.time()
 
-    # read image_in
-    data = read_hdulist (image_in)
 
     # read header saved in .wcs 
     wcsfile = '{}.wcs'.format(base)
@@ -10906,7 +10912,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     # from David Shupe: sip_to_pv
 
     # using the old version of sip_to_pv (before June 2017):
-    #status = sip_to_pv(image_out, image_out, log, tpv_format=True)
+    #status = sip_to_pv(image_in, image_in, log, tpv_format=True)
     #if status == False:
     #    log.error('sip_to_pv failed.')
     #    return 'error'
@@ -10929,7 +10935,7 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
     # avoids having to save the new RAs and DECs to file and read them
     # back into python arrays. It provides the same RA and DEC as
     # wcs-xy2rd and also as SExtractor run independently on the WCS-ed
-    # image (i.e.  the image_out in this function).
+    # image.
     # N.B.: WCS accepts header objects - gets rid of old warning about
     # axis mismatch, as .wcs files have NAXIS=0, while proper image
     # header files have NAXIS=2
@@ -11066,9 +11072,10 @@ def run_wcs(image_in, image_out, ra, dec, pixscale, width, height, header,
         fits.writeto (fits_calcat_field, data_cal, overwrite=True)
 
 
-    # write image_out including header
+    # update header of input image
     header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-    fits.writeto(image_out, data, header, overwrite=True)
+    with fits.open(image_in, 'update', memmap=True) as hdulist:
+        hdulist[0].header = header
 
 
     # remove file(s) if not keeping intermediate/temporary files
@@ -11845,8 +11852,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
                                   'sigma (STD) background full image')
 
 
-            # edge pixels will be negative, best to ensure that they
-            # are set to zero
+            # best to ensure that edge pixels are set to zero
             value_edge = get_par(set_zogy.mask_value['edge'],tel)
             mask_edge = (data_mask & value_edge == value_edge)
             data[mask_edge] = 0
@@ -12447,7 +12453,7 @@ def clean_cut_norm_psf (psf_array, clean_factor, cut=True, cut_size=None):
     # set values in the corners of the remaining PSF image to zero;
     # the exact half of the array is used to compare to the distance
     # grid
-    dist, __, __ = dist_from_center (psf_array)
+    dist, __, __ = dist_from_peak (psf_array)
     psf_array[dist>(ysize/2.)] = 0
 
 
@@ -12475,17 +12481,47 @@ def dist_from_center (data):
     """
     
     ysize, xsize = data.shape
-    hsize = int(xsize/2)
 
-    if xsize % 2 == 0:
-        # even case
-        xy = np.arange(-hsize+0.5, hsize+0.5)
-    else:
-        # odd case
-        xy = np.arange(-hsize, hsize+1)
+
+    def get_range (size):
+        hsize = int(size/2)
+        if size % 2 == 0:
+            # even case
+            xy = np.arange(-hsize+0.5, hsize+0.5)
+        else:
+            # odd case
+            xy = np.arange(-hsize, hsize+1)
+            
+        return xy
+
+
+    x = get_range(xsize)
+    y = get_range(ysize)
 
     # define the grid
-    xx, yy = np.meshgrid(xy, xy, sparse=False)
+    xx, yy = np.meshgrid(x, y, sparse=False)
+
+    # return the distance
+    return np.sqrt(xx**2+yy**2), xx, yy
+
+
+################################################################################
+
+def dist_from_peak (data):
+
+    """function to return a grid with the same shape as [data] indicating
+       the distance in pixels from the peak pixel in data
+
+    """
+    
+    ysize, xsize = data.shape
+    ypeak, xpeak = np.unravel_index(np.argmax(data), data.shape)
+
+    x = np.arange(xsize) - xpeak
+    y = np.arange(ysize) - ypeak
+    
+    # define the grid
+    xx, yy = np.meshgrid(x, y, sparse=False)
 
     # return the distance
     return np.sqrt(xx**2+yy**2), xx, yy
