@@ -11782,6 +11782,10 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale, log,
         log.info('stderrstr: {}'.format(stderrstr))
         log.info('status:    {}'.format(status))
 
+        if status != 0:
+            log.error('SExtractor failed with exit code {}'.format(status))
+            raise Exception('SExtractor failed with exit code {}'.format(status))
+
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='run_sextractor before get_back',
                                log=log)
@@ -12249,6 +12253,11 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     log.info('stdoutstr: {}'.format(stdoutstr))
     log.info('stderrstr: {}'.format(stderrstr))
     log.info('status:    {}'.format(status))
+
+    if status != 0:
+        log.error('PSFEx failed with exit code {}'.format(status))
+        raise Exception('PSFEx failed with exit code {}'.format(status))
+
 
     # standard output of PSFEx is .psf; change this to _psf.fits
     psf_in = cat_in.replace('.fits', '.psf')
