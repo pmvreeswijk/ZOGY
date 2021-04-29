@@ -15,17 +15,19 @@
 # ================================================================================
 
 # python version
-v_python="3.7"
-# zogy; for latest version, leave these empty ("") or comment out
-v_zogy="0.9.1"
+v_python="3"
+# zogy and meercrab; for latest version, leave these empty ("") or comment out
+v_zogy=""
+v_meercrab=""
 
-# define home of zogy
+# define home of zogy and meercrab
 zogyhome=${PWD}/ZOGY
+meercrabhome=${PWD}/meercrab
 
 # exit script if zogyhome already exists
-if [ -d "${zogyhome}" ]
+if [ -d "${zogyhome}" ] || [ -d "${meercrabhome}" ]
 then
-    echo "${zogyhome} already exists; exiting script"
+    echo "${zogyhome} and/or ${meercrabhome} already exist(s); exiting script"
     exit
 fi
 
@@ -47,7 +49,10 @@ sudo ${packman} -y upgrade
 # python, pip and git
 # ================================================================================
 
-sudo ${packman} -y install python${v_python} python${v_python}-dev
+echo "installing python, pip and git"
+sudo ${packman} -y install python${v_python}
+sudo ${packman} -y install python${v_python}-dev
+
 if [ ${v_python} \< "3" ]
 then
     sudo ${packman} -y install python-pip
@@ -57,12 +62,13 @@ fi
 pip="python${v_python} -m pip"
 
 # git
-sudo ${packman} -y install git
+sudo ${packman} -y install git git-lfs
 
 
 # clone ZOGY repository in current directory
 # ================================================================================
 
+echo "cloning ZOGY repository"
 if [ ! -z ${v_zogy} ]
 then
     zogy_branch="--branch v${v_zogy}"
@@ -71,39 +77,61 @@ fi
 git clone ${zogy_branch} https://github.com/pmvreeswijk/ZOGY
 
 
-# install ZOGY repository
+if [ ! -z ${v_meercrab} ]
+then
+    meercrab_branch="--branch v${v_meercrab}"
+    v_meercrab_git="@v${v_meercrab}"
+fi
+echo "cloning meercrab repository"
+git clone ${meercrab_branch} https://github.com/Zafiirah13/meercrab
+cd ${meercrabhome}
+git lfs install
+git lfs pull
+cd ${meercrabhome}/..
+
+
+# install ZOGY and MeerCRAB repositories
 # ================================================================================
 
+echo "installing ZOGY packages"
 sudo -H ${pip} install git+git://github.com/pmvreeswijk/ZOGY${v_zogy_git}
+
+echo "installing MeerCRAB packages"
+# for MeerCRAB, not possible to use setup.py on git with latest python:
+#sudo -H ${pip} install git+git://github.com/Zafiirah13/meercrab${v_meercrab_git}
+# so install required packages manually:
+sudo -H ${pip} install pandas tensorflow imbalanced-learn matplotlib scipy keras Pillow scikit_learn numpy astropy h5py==2.10.0 testresources
 
 
 # packages used by ZOGY
 # ================================================================================
 
 # Astrometry.net
-sudo ${packman} -y install astrometry.net
+echo "installing astrometry.net"
+DEBIAN_FRONTEND=noninteractive sudo ${packman} -q -y install astrometry.net
 
 # SExtractor (although it seems already installed automatically)
-sudo ${packman} -y install sextractor
+echo "installing sextractor"
+DEBIAN_FRONTEND=noninteractive sudo ${packman} -q -y install sextractor
 # the executable for this installation is 'sextractor' while ZOGY
 # versions starting from 0.9.2 expect 'source-extractor'; make a
-# symbolic link
-sudo ln -s /usr/bin/sextractor /usr/bin/source-extractor
-# the command 'sex' is used in ZOGY versions before 0.9.2
-sudo ln -s /usr/bin/sextractor /usr/bin/sex
-
+# symbolic link; N.B.: since 2020-04-25 not needed anymore
+#sudo ln -s /usr/bin/sextractor /usr/bin/source-extractor
 
 # SWarp
-sudo ${packman} -y install swarp
+echo "installing SWarp"
+DEBIAN_FRONTEND=noninteractive sudo ${packman} -q -y install swarp
 # the executable for this installation is 'SWarp' while ZOGY expects
 # 'swarp'; make a symbolic link
 sudo ln -s /usr/bin/SWarp /usr/bin/swarp
 
 # PSFEx - this basic install does not allow multi-threading
-sudo ${packman} -y install psfex
+echo "installing PSFEx"
+DEBIAN_FRONTEND=noninteractive sudo ${packman} -q -y install psfex
 
 # ds9; add environment DEBIAN_FRONTEND to avoid interaction with TZONE
-#DEBIAN_FRONTEND=noninteractive sudo ${packman} -y install saods9
+echo "installing saods9"
+DEBIAN_FRONTEND=noninteractive sudo ${packman} -q -y install saods9
 
 
 # download calibration catalog
@@ -164,21 +192,23 @@ echo "# ZOGY system variables"
 if [[ ${SHELL} == *"bash"* ]] || [[ ${SHELL} == *"zsh"* ]]
 then
     echo "export ZOGYHOME=${zogyhome}"
+    echo "export MEERCRABHOME=${meercrabhome}"   
     echo "if [ -z \"\${PYTHONPATH}\" ]"
     echo "then"
-    echo "    export PYTHONPATH=${zogyhome}:${zogyhome}/Settings"
+    echo "    export PYTHONPATH=${zogyhome}:${zogyhome}/Settings:${meercrabhome}"
     echo "else"
-    echo "    export PYTHONPATH=\${PYTHONPATH}:${zogyhome}:${zogyhome}/Settings"
+    echo "    export PYTHONPATH=\${PYTHONPATH}:${zogyhome}:${zogyhome}/Settings:${meercrabhome}"
     echo "fi"
 fi
 
 if [[ ${SHELL} == *"csh"* ]]
 then
     echo "setenv ZOGYHOME ${zogyhome}"
+    echo "setenv MEERCRABHOME ${meercrabhome}"   
     echo "if ( \$?PYTHONPATH ) then"
-    echo "    setenv PYTHONPATH \${PYTHONPATH}:${zogyhome}:${zogyhome}/Settings"
+    echo "    setenv PYTHONPATH \${PYTHONPATH}:${zogyhome}:${zogyhome}/Settings:${meercrabhome}"
     echo "else"
-    echo "    setenv PYTHONPATH ${zogyhome}:${zogyhome}/Settings"
+    echo "    setenv PYTHONPATH ${zogyhome}:${zogyhome}/Settings:${meercrabhome}"
     echo "endif"
 fi
 
