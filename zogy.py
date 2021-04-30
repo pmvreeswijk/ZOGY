@@ -2302,12 +2302,24 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 columns.append(get_col (key, key_new))
                 
 
-    mem_use (label='after column definition in format_cat')
+
+    # create hdu from columns
+    hdu = fits.BinTableHDU.from_columns(columns, character_as_bytes=True)
+    mem_use (label='after hdu creation in format_cat')
 
 
-    # add [thumbnails] column definition without the data
+    # add [thumbnails] column definition and the corresponding data
     if save_thumbnails:
 
+        # save light version of transient catalog before heavy
+        # thumbnails are added
+        header['FORMAT-P'] = (True, 'successfully formatted catalog')
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+        hdu.header += header
+        hdu.writeto(cat_out.replace('.fits', '_light.fits'), overwrite=True)
+        del hdu
+
+        # add column definitions
         dim_str = '({},{})'.format(size_thumbnails, size_thumbnails)
         for i_tn, key in enumerate(dict_thumbnails.keys()):
             
@@ -2316,34 +2328,20 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                               unit=formats[key][1], dim=dim_str)
             # append column
             columns.append(col)
+            
+
+        # recreate hdu with additional columns
+        hdu = fits.BinTableHDU.from_columns(columns, character_as_bytes=True)
+        mem_use (label='after hdu creation including thumbnails in format_cat')
 
 
-    # create hdu from columns
-    hdu = fits.BinTableHDU.from_columns(columns, character_as_bytes=True)
-    mem_use (label='after hdu creation in format_cat')
-
-
-    # add data to thumbnail columns
-    if save_thumbnails:
-
-        # save light version of transient catalog before heavy
-        # thumbnails are added
-        header['FORMAT-P'] = (True, 'successfully formatted catalog')
-        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        
-        # update header and save hdu to fits
-        hdu.header += header
-        hdu.writeto(cat_out.replace('.fits', '_light.fits'), overwrite=True)
-
-
-        # loop thumbnail data
+        # loop thumbnail data and add them to the hdu
         for i_tn, key in enumerate(dict_thumbnails.keys()):
 
             if dict_thumbnails[key] is not None:
                 
                 # read data_thumbnail from input [dict_thumbnails]
                 hdu.data[key] = np.load(dict_thumbnails[key], mmap_mode='c')
-                
                 mem_use (label='after adding column {} to hdu.data in '
                          'format_cat'.format(key))
 
@@ -2358,14 +2356,11 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                                after='TFORM{}'.format(ic+1))
 
 
-    # update header if not already done when saving light transient
-    # catalog
-    if not save_thumbnails:
-        # add header keyword indicating catalog was successfully formatted
-        header['FORMAT-P'] = (True, 'successfully formatted catalog')
-        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        hdu.header += header
-    
+    # add header keyword indicating catalog was successfully formatted
+    header['FORMAT-P'] = (True, 'successfully formatted catalog')
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+    hdu.header += header
+
     # save hdu to fits
     hdu.writeto(cat_out, overwrite=True)
 
