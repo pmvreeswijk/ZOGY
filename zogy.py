@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 
 ################################################################################
@@ -220,8 +220,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 header_temp = read_hdulist (image_fits, get_data=False,
                                             get_header=True)
                 if header_temp['NAXIS'] != 2:
-                    log.critical('input images need to be uncompressed')
-                    raise RuntimeError
+                    msg = 'input images need to be uncompressed'
+                    log.critical(msg)
+                    raise RuntimeError(msg)
             else:
                 log.info('file {} does not exist'.format(image_fits))
         return ima_bool
@@ -230,8 +231,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     new = set_bool (new_fits)
     ref = set_bool (ref_fits)
     if not new and not ref:
-        log.critical('no valid input image(s) provided')
-        raise RuntimeError
+        msg = 'no valid input image(s) provided'
+        log.critical(msg)
+        raise RuntimeError(msg)
 
     # global parameters
     if new:
@@ -259,8 +261,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     def check_files (filelist):
         for filename in filelist:
             if not os.path.isfile(filename):
-                log.critical('{} does not exist'.format(filename))
-                raise RuntimeError
+                msg = '{} does not exist'.format(filename)
+                log.critical(msg)
+                raise RuntimeError(msg)
 
 
     check_files([get_par(set_zogy.sex_cfg,tel), get_par(set_zogy.psfex_cfg,tel),
@@ -317,7 +320,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             
         header['S-ELONG'] = (elong, 'SExtractor ELONGATION (A/B) estimate')
         header['S-ELOSTD'] = (elong_std, 'sigma (STD) SExtractor ELONGATION (A/B)')
-        
+
         return fwhm, fwhm_std, elong, elong_std
             
 
@@ -333,10 +336,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             fwhm_new, fwhm_std_new, elong_new, elong_std_new = sex_fraction(
                 base_new, sexcat_new, pixscale_new, 'new', header_new)
 
-        if fwhm_new <= 0:
-            # raise an exception and leave
-            raise Exception('exception: fwhm_new not positive')
-
 
             
     # same for the reference image
@@ -350,10 +349,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         else:
             fwhm_ref, fwhm_std_ref, elong_ref, elong_std_ref = sex_fraction(
                 base_ref, sexcat_ref, pixscale_ref, 'ref', header_ref)
-
-        if fwhm_ref <= 0:
-            # raise an exception and leave
-            raise Exception('exception: fwhm_ref not positive')
 
             
             
@@ -500,31 +495,42 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     if new:
         # now run above function [sex_wcs] on new image
-        success = sex_wcs(
-            base_new, sexcat_new, get_par(set_zogy.sex_par,tel), pixscale_new,
-            fwhm_new, True, 'new', new_fits_mask, ra_new, dec_new, xsize_new,
-            ysize_new, header_new)
-        
+        if fwhm_new > 0:
+            success = sex_wcs(
+                base_new, sexcat_new, get_par(set_zogy.sex_par,tel), pixscale_new,
+                fwhm_new, True, 'new', new_fits_mask, ra_new, dec_new, xsize_new,
+                ysize_new, header_new)
+        else:
+            success = False
+
         if not success:
-            # leave because an exception occurred during
-            # [run_sextractor] or [run_wcs] inside [sex_wcs]
-            raise Exception('exception was raised in [run_sextractor] or '
-                            '[run_wcs] on new image')
-            
+            # leave because either FWHM estimate from initial
+            # SExtractor is not positive, or an exception occurred
+            # during [run_sextractor] or [run_wcs] inside [sex_wcs]
+            if not ref:
+                return header_new
+            else:
+                return header_new, header_trans
+
 
     if ref:
         # and reference image
-        success = sex_wcs(
-            base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel),
-            pixscale_ref, fwhm_ref, True, 'ref', ref_fits_mask, ra_ref,
-            dec_ref, xsize_ref, ysize_ref, header_ref)
-            
-        if not success:
-            # leave because an exception occurred during
-            # [run_sextractor] or [run_wcs] inside [sex_wcs]
-            raise Exception('exception was raised in [run_sextractor] or '
-                            '[run_wcs] on ref image')
+        if fwhm_ref > 0:
+            success = sex_wcs(
+                base_ref, sexcat_ref, get_par(set_zogy.sex_par_ref,tel),
+                pixscale_ref, fwhm_ref, True, 'ref', ref_fits_mask, ra_ref,
+                dec_ref, xsize_ref, ysize_ref, header_ref)
+        else:
+            success = False
 
+        if not success:
+            # leave because either FWHM estimate from initial
+            # SExtractor is not positive, or an exception occurred
+            # during [run_sextractor] or [run_wcs] inside [sex_wcs]
+            if not new:
+                return header_ref            
+            else:
+                return header_new, header_trans
 
 
     # check that new and ref image have at least some overlap; if not,
@@ -540,7 +546,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # convert these to ra, dec
         wcs_new = WCS(header_new)
         ra_new, dec_new = wcs_new.all_pix2world(x_new, y_new, 1)
-        
+
         # convert these to pixel positions in the ref image
         wcs_ref = WCS(header_ref)
         x_ref, y_ref = wcs_ref.all_world2pix(ra_new, dec_new, 1)
@@ -557,10 +563,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # if none of the corners are within the ref image, then there
         # is no or too little overlap
         if not np.any(mask_on):
-            raise Exception('overlap between new image {} and ref image {} is '
-                            'less than {} pixels in the reference frame; leaving'
-                            .format(new_fits, ref_fits, dpix))
-        
+
+            log.error ('overlap between new image {} and ref image {} is '
+                       'less than {} pixels in the reference frame; leaving'
+                       .format(new_fits, ref_fits, dpix))
+
+            return header_new, header_trans
+
+
 
     # determine cutouts
     if new:
@@ -602,9 +612,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         except Exception as e:
             log.exception('exception was raised during [prep_optimal_extraction]'
                           ' of new image {}: {}'.format(base_new, e))
-            # reraise so that exception is noticed by modules using
-            # this function
-            raise Exception(e)
+            if not ref:
+                return header_new
+            else:
+                return header_new, header_trans
 
 
     # prepare cubes with shape (nsubs, ysize_fft, xsize_fft) with ref,
@@ -618,13 +629,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                          'ref', fwhm_ref, header_ref,
                                          fits_mask=ref_fits_mask, remap=remap,
                                          nthreads=nthreads))
-            
+
         except Exception as e:
             log.exception('exception was raised during [prep_optimal_extraction]'
                           ' of reference image {}: {}'.format(base_ref, e))
-            # reraise so that exception is noticed by modules using
-            # this function
-            raise Exception(e)
+            if not new:
+                return header_ref
+            else:
+                return header_new, header_trans
 
 
         if remap:
@@ -657,8 +669,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if not ok:
             # leave because of too few matching stars in new and ref
             # to determine fratio, dx and dy
-            raise Exception('too few matching stars in new and ref to determine '
-                            'fratio, dx and dy')
+            log.error ('too few matching stars in new and ref to determine '
+                       'fratio, dx and dy')
+            return header_new, header_trans
+
 
         
         if False:
@@ -818,9 +832,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                        '[pix] size of ZOGY subimage borders')
             # if exception occurred in [run_ZOGY], leave
             if not zogy_processed:
-                raise Exception(e)
+                return header_new, header_trans
 
-        
+
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_zogy, label='after run_ZOGY finshed')
 
@@ -1122,8 +1136,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 header_trans['MC-MODEL'] = (ML_model.split('/')[-1],
                                             'MeerCRAB training model used')
 
+            # if exception occurred in [get_ML_prob_real], leave
+            if not ML_processed:
+                return header_new, header_trans
 
-                                
+
         # write full ZOGY output images to fits
         if get_par(set_zogy.timing,tel):
             t_fits = time.time() 
@@ -1854,8 +1871,9 @@ def read_CD_matrix (header):
         data2return = np.array([[header['CD1_1'], header['CD2_1']],
                                 [header['CD1_2'], header['CD2_2']]])
     else:
-        log.error ('one of CD?_? keywords not in header')
-        raise KeyError('one of CD?_? keywords not in header')
+        msg = 'one of CD?_? keywords not in header'
+        log.critical(msg)
+        raise KeyError(msg)
         data2return = None
 
 
@@ -5685,16 +5703,17 @@ def get_keyvalue (key, header):
         try:
             key_name = eval('set_zogy.key_{}'.format(key))
         except:
-            log.critical('either [{}] or [key_{}] needs to be defined in '
-                         '[settings_file]'.format(key, key))
-            raise RuntimeError
+            msg = ('either [{}] or [key_{}] needs to be defined in '
+                   '[settings_file]'.format(key, key))
+            log.critical(msg)
+            raise RuntimeError(msg)
         else:
             if key_name in header:
                 value = header[key_name]
             else:
-                log.critical('keyword {} not present in header'
-                             .format(key_name))
-                raise RuntimeError
+                msg = 'keyword {} not present in header'.format(key_name)
+                log.critical(msg)
+                raise RuntimeError(msg)
 
     #log.info('keyword: {}, adopted value: {}'.format(key, value))
 
@@ -9389,7 +9408,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1):
         # now that header is updated, raise exception that will be caught
         # in try-except block around [prep_optimal_subtraction]
         if not PSFEx_processed:
-            raise
+            raise Exception ('exception was raised during [run_psfex]')
 
 
 
@@ -11045,11 +11064,11 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         data_match = read_hdulist ('{}.match'.format(base))
 
     else:
-        log.error('solve-field (Astrometry.net) failed with exit code {}'
-                  .format(status))
-        raise Exception('solve-field (Astrometry.net) failed with exit code {}'
-                        .format(status))
-    
+        msg = ('solve-field (Astrometry.net) failed with exit code {}'
+               .format(status))
+        log.exception(msg)
+        raise Exception(msg)
+
     
     if get_par(set_zogy.timing,tel): t2 = time.time()
 
@@ -11492,8 +11511,9 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
     log.info('status:    {}'.format(status))
 
     if status != 0:
-        log.error('SWarp failed with exit code {}'.format(status))
-        raise Exception('SWarp failed with exit code {}'.format(status))
+        msg = 'SWarp failed with exit code {}'.format(status)
+        log.exception(msg)
+        raise Exception(msg)
 
     if run_alt:
         image_resample = image_out.replace('_remap.fits', resample_suffix)
@@ -12005,8 +12025,9 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
         log.info('status:    {}'.format(status))
 
         if status != 0:
-            log.error('SExtractor failed with exit code {}'.format(status))
-            raise Exception('SExtractor failed with exit code {}'.format(status))
+            msg = 'SExtractor failed with exit code {}'.format(status)
+            log.exception(msg)
+            raise Exception(msg)
 
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t, label='run_sextractor before get_back')
@@ -12467,8 +12488,9 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     log.info('status:    {}'.format(status))
 
     if status != 0:
-        log.error('PSFEx failed with exit code {}'.format(status))
-        raise Exception('PSFEx failed with exit code {}'.format(status))
+        msg = 'PSFEx failed with exit code {}'.format(status)
+        log.exception(msg)
+        raise Exception(msg)
 
 
     # standard output of PSFEx is .psf; change this to _psf.fits
@@ -12481,7 +12503,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     if header_psf['ACCEPTED']==0:
         msg = ('no appropriate source found by PSFEx in [run_psfex] for catalog '
                '{}'.format(cat_in))
-        log.error (msg)
+        log.exception (msg)
         raise Exception (msg)
 
 
