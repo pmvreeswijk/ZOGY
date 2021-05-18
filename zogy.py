@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 
 
 ################################################################################
@@ -3108,13 +3108,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         return results
 
 
-    # determine optimal flux in D, directly added as columns to table_trans 
-    colnames = ['E_FLUX_OPT_D', 'E_FLUXERR_OPT_D']
-    table_trans.add_columns(help_psffit_D (False, False, False), names=colnames)
-    
+    if False:
+        # determine optimal flux in D, directly added as columns to table_trans 
+        colnames = ['E_FLUX_OPT_D', 'E_FLUXERR_OPT_D']
+        table_trans.add_columns(help_psffit_D (False, False, False), names=colnames)
+
     
     # PSF fit to D, directly added as columns to table_trans
-    colnames = ['E_FLUX_OPT_D_alt1', 'E_FLUXERR_OPT_D_alt1', 'E_FLUX_PSF_D',
+    colnames = ['E_FLUX_OPT_D', 'E_FLUXERR_OPT_D', 'E_FLUX_PSF_D',
                 'E_FLUXERR_PSF_D', 'X_PSF_D', 'Y_PSF_D', 'CHI2_PSF_D',
                 'XERR_PSF_D', 'YERR_PSF_D']
     table_trans.add_columns(help_psffit_D (True, False, False), names=colnames)
