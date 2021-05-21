@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.2'
+__version__ = '1.0.3'
 
 
 ################################################################################
@@ -7912,7 +7912,7 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3):
                 # do leastsq polynomial fit including z_err
                 yerr_fit = data_std_row[mask_fit]
                 result = minimize (gauss2min, params, method='Least_squares',
-                                   args=(x_fit, y_fit, yerr_fit,))
+                                   args=(x_fit, y_fit, yerr_fit,), max_nfev=100)
 
                 p = list(result.params.valuesdict().values())
                 fit = lambda x: gauss1d(p, x)
@@ -8593,9 +8593,9 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
         mask_reject_temp = np.copy(mask_reject)
         npix_reject_old = np.sum(mask_reject_temp)
         for it in range(5):
-            result = minimize (mini2min, params, method='Least_squares', max_nfev=100,
+            result = minimize (mini2min, params, method='Least_squares',
                                args=(mini_median, mini_std, mini_sec, order,
-                                     mask_reject_temp, f_norm,))
+                                     mask_reject_temp, f_norm,), max_nfev=100)
             params = result.params
             chi2red = result.redchi
            
@@ -8658,9 +8658,9 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                        vary=mask_cfit[i_coeff])
 
         # fit
-        result = minimize (mini2min, params, method='Least_squares', max_nfev=100,
+        result = minimize (mini2min, params, method='Least_squares',
                            args=(mini_median, mini_std, mini_sec, order,
-                                 mask_reject_temp, f_norm,))
+                                 mask_reject_temp, f_norm,), max_nfev=100)
         params = result.params
         chi2red = result.redchi
         log.info ('order: {}, chi2red: {}'.format(order, chi2red))
@@ -8885,7 +8885,7 @@ def polyfit2d (x, y, z, z_err=None, order=2, fit_higher_Xterms=False,
             
         # do leastsq polynomial fit including z_err
         result = minimize (polyfcn2d, params, method='Least_squares',
-                           args=(x, y, z, z_err, order,))
+                           args=(x, y, z, z_err, order,), max_nfev=100)
         
         p = result.params.valuesdict()
         coeffs = np.array([p['c{}'.format(i)] for i in range(nc)])
@@ -9712,9 +9712,10 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, fit_gauss=False)
     params.add('x0', value=center, min=center-5, max=center+5, vary=True)
     params.add('y0', value=center, min=center-5, max=center+5, vary=True)
     params.add('theta', value=0, min=-180, max=180, vary=True)
-    params.add('amplitude', value=np.amax(psf_ima[int(nsubs/2)]), min=0, vary=True)
+    params.add('amplitude', value=np.amax(psf_ima[int(nsubs/2)]), min=0,
+               vary=True)
     params.add('background', value=0, min=-1, max=1, vary=True)
-        
+
     if fit_gauss:
         params.add('sigma1', value=1, min=0.01, max=psf_size_config/4, vary=True)
         params.add('sigma2', value=1, min=0.01, max=psf_size_config/4, vary=True)
@@ -9731,7 +9732,7 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, fit_gauss=False)
         
         # do leastsq model fit
         result = minimize(moffat2min, params, method='Least_squares', 
-                          args=(psf_ima[i], xx, yy, fit_gauss))
+                          args=(psf_ima[i], xx, yy, fit_gauss),  max_nfev=100)
 
         p = result.params.valuesdict()
         chi2red[i] = result.redchi
