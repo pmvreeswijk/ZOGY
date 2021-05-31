@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.3'
+__version__ = '1.0.4'
 
 
 ################################################################################
@@ -1000,6 +1000,17 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                     '[e-/s] median Fpsferr full image')
         header_trans['Z-FPESTD'] = (std_Fpsferr/exptime,
                                     '[e-/s] sigma (STD) Fpsferr full image')
+
+
+        # if [std_Scorr] is very large, do not bother to continue as
+        # too many spurious transients are likely to be identified
+        std_Scorr_limit = 2.5
+        if std_Scorr > std_Scorr_limit:
+            log.error ('Scorr image standard deviation is larger than {}; not '
+                       'continuing with the transient extraction as too many '
+                       'spurious transients are likely to be identified'
+                       .format(std_Scorr_limit))
+            return header_new, header_trans
 
 
         # define fits files names
