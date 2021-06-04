@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.4'
+__version__ = '1.0.5'
 
 
 ################################################################################
@@ -400,7 +400,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # SExtractor version
                 cmd = ['source-extractor', '-v']
                 result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-                version = str(result.stdout.read()).split()[2]
+                version = str(result.stdout.read()).split()[3]
                 header['S-V'] = (version, 'SExtractor version used')
                 if not SE_processed:
                     return False
