@@ -399,9 +399,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  'SExtractor?')
                 # SExtractor version
                 cmd = ['source-extractor', '-v']
-                result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-                version = str(result.stdout.read()).split()[3]
-                header['S-V'] = (version, 'SExtractor version used')
+                result = subprocess.run(cmd, capture_output=True)
+                version = str(result.stdout).split()[3]
+                header['S-V'] = (version.strip(), 'SExtractor version used')
                 if not SE_processed:
                     return False
 
@@ -467,10 +467,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                  'Astrometry.net?')
                 # Astrometry.net version
                 cmd = ['solve-field', '-h']
-                result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-                version = (str(result.stdout.read()).split('Revision')[1]
-                           .split(',')[0])
-                header['A-V'] = (version, 'Astrometry.net version used')
+                result = subprocess.run(cmd, capture_output=True)
+                version = str(result.stdout).split('Revision')[1].split(',')[0]
+                header['A-V'] = (version.strip(), 'Astrometry.net version used')
                 if not WCS_processed:
                     return False
                 
@@ -648,9 +647,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             header_trans['SWARP-P'] = (True, 'reference image successfully SWarped?')
             # SWarp version
             cmd = ['swarp', '-v']
-            result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-            version = str(result.stdout.read()).split()[2]
-            header_trans['SWARP-V'] = (version, 'SWarp version used')
+            result = subprocess.run(cmd, capture_output=True)
+            version = str(result.stdout).split()[2]
+            header_trans['SWARP-V'] = (version.strip(), 'SWarp version used')
 
 
     if new and ref:
@@ -1300,7 +1299,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             
         #if get_par(set_zogy.display,tel):
         if False:
-            result = subprocess.call(cmd)
+            result = subprocess.run(cmd)
 
 
     if new and ref:
@@ -1348,7 +1347,7 @@ def display_subs (base_new, base_ref, nsubs, names):
             cmd.append('{}_psf_ima_shift_{}'.format(base_ref, subend))
             cmd.append('{}_PD_{}'.format(base_new, subend))
 
-            result = subprocess.call(cmd)
+            result = subprocess.run(cmd)
 
 
 ################################################################################
@@ -9413,9 +9412,9 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1):
 
         # PSFex version
         cmd = ['psfex', '-v']
-        result = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-        version = str(result.stdout.read()).split()[2]
-        header['PSF-V'] = (version, 'PSFEx version used')
+        result = subprocess.run(cmd, capture_output=True)
+        version = str(result.stdout).split()[2]
+        header['PSF-V'] = (version.strip(), 'PSFEx version used')
 
         # now that header is updated, raise exception that will be caught
         # in try-except block around [prep_optimal_subtraction]
@@ -10941,7 +10940,7 @@ def ds9_arrays(regions=None, **kwargs):
         # append to command
         cmd.append(fitsfile)
 
-    result = subprocess.call(cmd)
+    result = subprocess.run(cmd)
 
     
 ################################################################################
@@ -11061,13 +11060,12 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # log cmd executed
     cmd_str = ' '.join(cmd)
     log.info('Astrometry.net command executed:\n{}'.format(cmd_str))
-    
-    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    (stdoutstr,stderrstr) = process.communicate()
-    status = process.returncode
-    log.info('stdoutstr: {}'.format(stdoutstr))
-    log.info('stderrstr: {}'.format(stderrstr))
-    log.info('status:    {}'.format(status))
+
+    result = subprocess.run(cmd, capture_output=True)
+    status = result.returncode
+    log.info('stdout: {}'.format(result.stdout.decode('UTF-8')))
+    log.info('stderr: {}'.format(result.stderr.decode('UTF-8')))
+    log.info('status: {}'.format(status))
 
 
     if os.path.exists('{}.solved'.format(base)) and status==0:
@@ -11516,12 +11514,12 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
     cmd_str = ' '.join(cmd)
     log.info('SWarp command executed:\n{}'.format(cmd_str))
 
-    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    (stdoutstr,stderrstr) = process.communicate()
-    status = process.returncode
-    log.info('stdoutstr: {}'.format(stdoutstr))
-    log.info('stderrstr: {}'.format(stderrstr))
-    log.info('status:    {}'.format(status))
+    result = subprocess.run(cmd, capture_output=True)
+    status = result.returncode
+    log.info('stdout: {}'.format(result.stdout.decode('UTF-8')))
+    log.info('stderr: {}'.format(result.stderr.decode('UTF-8')))
+    log.info('status: {}'.format(status))
+
 
     if status != 0:
         msg = 'SWarp failed with exit code {}'.format(status)
@@ -12029,13 +12027,11 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
         log.info('SExtractor command executed:\n{}'.format(cmd_str))
         
         # run command
-        process = subprocess.Popen(cmd_list,stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-        (stdoutstr,stderrstr) = process.communicate()
-        status = process.returncode
-        log.info('stdoutstr: {}'.format(stdoutstr))
-        log.info('stderrstr: {}'.format(stderrstr))
-        log.info('status:    {}'.format(status))
+        result = subprocess.run(cmd_list, capture_output=True)
+        status = result.returncode
+        log.info('stdout: {}'.format(result.stdout.decode('UTF-8')))
+        log.info('stderr: {}'.format(result.stderr.decode('UTF-8')))
+        log.info('status: {}'.format(status))
 
         if status != 0:
             msg = 'SExtractor failed with exit code {}'.format(status)
@@ -12493,12 +12489,11 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     cmd_str = ' '.join(cmd)
     log.info('PSFEx command executed:\n{}'.format(cmd_str))
 
-    process=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    (stdoutstr,stderrstr) = process.communicate()
-    status = process.returncode
-    log.info('stdoutstr: {}'.format(stdoutstr))
-    log.info('stderrstr: {}'.format(stderrstr))
-    log.info('status:    {}'.format(status))
+    result = subprocess.run(cmd, capture_output=True)
+    status = result.returncode
+    log.info('stdout: {}'.format(result.stdout.decode('UTF-8')))
+    log.info('stderr: {}'.format(result.stderr.decode('UTF-8')))
+    log.info('status: {}'.format(status))
 
     if status != 0:
         msg = 'PSFEx failed with exit code {}'.format(status)
