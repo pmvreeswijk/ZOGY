@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.5'
+__version__ = '1.0.6'
 
 
 ################################################################################
@@ -3113,7 +3113,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             moffat=moffat, gauss=gauss, psfex_bintable_ref=fits_ref_psf,
             data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
             header_new=header_new, header_ref=header_ref,
-            Scorr_peak=table_trans['SNR_ZOGY'])
+            Scorr_peak=table_trans['SNR_ZOGY'], set_zogy=set_zogy, tel=tel)
 
         return results
 
@@ -3867,8 +3867,8 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
         results = get_psfoptflux (
             psfex_bintable_new, data_D, data_D_var, data_newref_mask,
             x_peak[mk], y_peak[mk], psffit=psffit, moffat=moffat,
-            psfex_bintable_ref=psfex_bintable_ref, 
-            header_new=header_new, header_ref=header_ref)
+            psfex_bintable_ref=psfex_bintable_ref, header_new=header_new,
+            header_ref=header_ref, set_zogy=set_zogy, tel=tel)
 
         return results
 
@@ -4266,13 +4266,14 @@ def get_shape_parameters (x2, y2, xy, errx2, erry2, errxy):
 ################################################################################
 
 def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
-                    satlevel=50000, replace_satdata=False, psffit=False,
-                    moffat=False, gauss=False, get_limflux=False,
+                    psffit=False, moffat=False, gauss=False, get_limflux=False,
                     limflux_nsigma=5., psfex_bintable_ref=None,
                     data_new_bkg_std=None, data_ref_bkg_std=None,
                     header_new=None, header_ref=None, header_trans=None,
                     imtype=None, Scorr_peak=None, inject_fake=False,
-                    nsigma_fake=10., D_objmask=None):
+                    nsigma_fake=10., D_objmask=None, remove_psf=False,
+                    replace_sat_psf=False, replace_sat_nmax=100,
+                    set_zogy=None, tel=None, fwhm=None, diff=True):
 
     """Function that returns the optimal flux and its error (using the
        function [flux_optimal] of a source at pixel positions [xcoords],
@@ -4285,10 +4286,12 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
        [ycoords] are arrays, and the output flux and its error will be
        arrays as well.
     
-       If [replace_satdata]=True, the function will update [D] where
+       If [replace_sat_psf]=True, the function will update [D] where
        any saturated values in the PSF footprint of the
        [xcoords],[ycoords] coordinates that are being processed is
-       replaced by the expected flux according to the PSF.
+       replaced by the expected flux according to the PSF. If the
+       object contains more than [replace_sat_nmax] saturated pixels,
+       the replacement is skipped for that object.
 
        If [get_limflux]=True, the function will return the limiting
        flux (at significance [limflux_nsigma]) at the input
@@ -4365,13 +4368,21 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # the psf_size should be defined using the maximum of fwhm_new and
     # fwhm_ref.
     if imtype=='new':
-        fwhm_use = fwhm_new
+        if fwhm is not None:
+            fwhm_use = fwhm
+        else:
+            fwhm_use = fwhm_new
+
         # initial fwhm used for flux limits and Moffat/Gauss fits below
-        fwhm_fit_init = fwhm_new
+        fwhm_fit_init = fwhm_use
 
     elif imtype=='ref':
-        fwhm_use = fwhm_ref
-        fwhm_fit_init = fwhm_ref
+        if fwhm is not None:
+            fwhm_use = fwhm
+        else:
+            fwhm_use = fwhm_ref
+
+        fwhm_fit_init = fwhm_use
 
     elif imtype is None:
         fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
@@ -4568,6 +4579,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                       'not understood'
                       .format('bkg_var', bkg_var, 'get_psfoptflux'))
 
+        # initialize 2dfit to sky background, which will be updated in
+        # [flux_optimal] and used in case saturated pixels are
+        # replaced by the PSF
+        bkg_2dfit_sub = np.zeros(D_sub.shape)
+            
 
         # determine optimal or psf or limiting flux
         if get_limflux:
@@ -4633,19 +4649,21 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 show=False
 
                 if False:
+
                     # show optimal fit of particular object(s)
-                    dist_tmp = np.sqrt((xcoords[i]-5560)**2 +
-                                       (ycoords[i]-4940)**2)
-                    if dist_tmp < 300:
+                    dist_tmp = np.sqrt((xcoords[i]-2500)**2 +
+                                       (ycoords[i]-9450)**2)
+                    if dist_tmp < 50:
                         show=True
                         print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
                                                                        ycoords[i]))
 
                 fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
-                flux_opt[i], fluxerr_opt[i] = flux_optimal (
+                bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
+                flux_opt[i], fluxerr_opt[i], bkg_2dfit_sub = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fit_bkg=fit_bkg, D_objmask=D_objmask_sub, fwhm=fwhm_use,
-                    show=show)
+                    fit_bkg=fit_bkg, bkg_order=bkg_order,
+                    D_objmask=D_objmask_sub, fwhm=fwhm_use, show=show)
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
@@ -4668,7 +4686,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         chi2_psf[i], xerr_psf[i], yerr_psf[i] = (
                             flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
                                          mask_use=mask_use, fwhm=fwhm_fit_init,
-                                         show=False, max_nfev=200))
+                                         show=False, max_nfev=200, diff=diff))
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
@@ -4702,6 +4720,89 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     continue
 
 
+            # replace saturated+connected pixels with PSF profile
+            if replace_sat_psf:
+
+                if False:
+                    if np.sqrt((xcoords[i]-2500)**2 +
+                               (ycoords[i]-9450)**2) < 100:
+                        log.info('xcoords[i]: {}, ycoords[i]: {}'
+                                 .format(xcoords[i], ycoords[i]))
+
+                # determine pixels to be replaced; avoid including
+                # saturated pixels from other objects within the
+                # footprint
+
+                # mask of saturated+connected pixels in subimage:
+                mask_sat_sub = (D_mask_sub & value_sat == value_sat)
+                mask_satcon_sub = (mask_sat_sub |
+                                   (D_mask_sub & value_satcon == value_satcon))
+
+                # label saturated+connected pixels; also
+                # diagonally-connected pixels are included in a region
+                struct = np.ones((3,3), dtype=bool)
+                regions, nregions = ndimage.label(mask_satcon_sub,
+                                                  structure=struct)
+                
+
+                # loop regions
+                for ir in range(nregions):
+
+                    mask_region = (regions==ir+1)
+                    nsat = np.sum(mask_sat_sub & mask_region)
+
+                    if np.sqrt((xcoords[i]-2500)**2 +
+                               (ycoords[i]-9450)**2) < 100:
+                        log.info('xcoords[i]: {}, ycoords[i]: {}'
+                                 .format(xcoords[i], ycoords[i]))
+                        log.info('nsat: {}, np.sum(mask_central & mask_region): {}'
+                                 .format(nsat, np.sum(mask_central & mask_region)))
+
+                    # check if there is overlap with central PSF region
+                    if (np.sum(mask_central & mask_region) > 0 and
+                        nsat > 0 and nsat <= replace_sat_nmax): 
+                        
+                        mask_satcon_use = (mask_satcon_sub & mask_region)
+
+                        # CHECK!!!
+                        if False:
+                            D_sub_orig = np.copy(D_sub)
+
+                        # replace these by the estimate of flux_opt * PSF + 2d
+                        # fit to the sky background, determined in function
+                        # [flux_optimal]
+                        D_sub[mask_satcon_use] = (
+                            P_shift[mask_satcon_use] * flux_opt[i]
+                            + bkg_2dfit_sub[mask_satcon_use])
+
+
+                        # CHECK!!!
+                        if False:
+                            if np.sqrt((xcoords[i]-2500)**2 +
+                                       (ycoords[i]-9450)**2) < 100:
+                                D_sub_psf = P_shift * flux_opt[i] + bkg_2dfit_sub
+                                ds9_arrays (D_sub_orig=D_sub_orig, D_sub=D_sub,
+                                            D_mask_sub=D_mask_sub.astype(int))
+
+
+                    else:
+                        log.warning ('saturated+connected pixels not replaced '
+                                     'for object at x,y={},{}; '
+                                     'np.sum(mask_central & mask_region): {}, '
+                                     'nsat: {}'
+                                     .format(int(xcoords[i]), int(ycoords[i]),
+                                             np.sum(mask_central & mask_region),
+                                             nsat))
+
+                        
+
+        if remove_psf:
+            if psffit:
+                D_sub -= P_shift * flux_psf[i]
+            else:       
+                D_sub -= P_shift * flux_opt[i]
+
+                
         if False:
             if i % 10000 == 0:
                 t_loop = time.time()-t_temp
@@ -4711,27 +4812,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 if psfex_bintable_ref is not None:
                     log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
                               .format(t_ref, t_ref/t_loop))
-
-
-        if replace_satdata:        
-
-            # first determine mask of saturated pixels in image around source:
-            mask_sat_sub = ((D_mask_sub & value_sat == value_sat) |
-                            (D_mask_sub & value_satcon == value_satcon))
-
-            if np.any(mask_sat_sub):
-                
-                # identify central connected group of saturated pixels
-                
-                # replace these; still need to add sky background
-                D_sub[mask_sat_sub] = P_shift[mask_sat_sub] * flux_opt[i]
-                
-                # and put through [flux_optimal] once more without a
-                # saturated pixel mask
-                #flux_opt[i], fluxerr_opt[i] = flux_optimal (P_shift, D_sub,
-                #                                                      S_sub, RON,
-                #                                                      dx2=dx2[i], dy2=dy2[i], dxy=dxy[i])
-                #D[index][mask_use] = P_shift[mask_use] * flux_opt[i] + S_sub[mask_use]
 
 
 
@@ -5127,7 +5207,7 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
 ################################################################################
 
 def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100,
-                 show=False, fwhm=6):
+                 show=False, fwhm=6, diff=True):
 
 
     # define objective function: returns the array to be minimized
@@ -5151,12 +5231,18 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100,
         # exclusively at the moment), [D_err] already includes the
         # variance of both images, including the transient flux, so
         # adding the model flux would be too much
-        
-        # residual
-        mask_nonzero = (D_err != 0)
-        resid = (D - sky - model)
-        resid[mask_nonzero] /= D_err[mask_nonzero]
 
+        var = D_err**2
+        if not diff:
+            var += np.abs(model) + np.max(sky, 0)
+            
+        err = np.sqrt(var)
+        
+        # residuals
+        mask_nonzero = (err != 0)
+        resid = (D - sky - model)
+        resid[mask_nonzero] /= err[mask_nonzero]
+        resid[~mask_nonzero] = 0
 
         # return raveled (flattened) array
         if mask_use is not None:
@@ -5280,7 +5366,8 @@ def get_optflux (P, D, V):
     # avoid zeros in V
     mask_V0 = (V==0)
 
-    optflux = optfluxerr = 0.
+    optflux = 0
+    optfluxerr = 0
     if np.sum(~mask_V0 != 0):
         denominator = np.sum(P[~mask_V0]**2/V[~mask_V0])
         if denominator > 0:
@@ -5353,7 +5440,8 @@ def get_s2n_ZO (P, D, V):
 
 def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=10,
                   epsilon=0.1, mask_use=None, add_V_ast=False, D_objmask=None,
-                  fit_bkg=False, fwhm=None, dx2=0, dy2=0, dxy=0, show=False):
+                  fit_bkg=False, bkg_order=1, fwhm=None, dx2=0, dy2=0, dxy=0,
+                  show=False):
 
     """Function that calculates optimal flux and corresponding error based
        on the PSF [P], sky-subtracted data [D] and background variance
@@ -5379,6 +5467,9 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
         mask_use = np.copy(mask_use)
 
 
+    # initialize bkg_2dfit
+    bkg_2dfit = np.zeros(D.shape)
+        
     if fit_bkg:
 
         # image size
@@ -5413,7 +5504,6 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
             # fit low-order 2D polynomial to background ring;
             # normalize coordinates by image size to make it easier on
             # the polynomial fit
-            order = get_par(set_zogy.poldeg_bkg_opt,tel)
             f_norm = max(ysize, xsize)
             # subtract 1 from coordinate arrays to convert fit
             # to pixel indices rather than pixel coordinates,
@@ -5421,17 +5511,17 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
             # around 0-1
             coeffs_best = polyfit2d (
                 xx[mask_bkg]/f_norm, yy[mask_bkg]/f_norm,
-                D[mask_bkg], order=order, verbose=show)
+                D[mask_bkg], order=bkg_order, verbose=show)
 
 
             if False:
-                for i_order in range(order+1):
-
+                for i_order in range(bkg_order+1):
+                    
                     coeffs, chi2red = polyfit2d (
                         xx[mask_bkg]/f_norm, yy[mask_bkg]/f_norm,
                         D[mask_bkg], order=i_order, verbose=show,
                         z_err=np.sqrt(D[mask_bkg]+bkg_var[mask_bkg]))
-
+                    
                     if i_order==0:
                         coeffs_best = coeffs
                         chi2red_best = chi2red
@@ -5448,7 +5538,20 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
             # subtract polynomial from data
             D_orig = np.copy(D)
             D = D - bkg_2dfit
-            bkg_var = bkg_var + np.maximum(bkg_2dfit, 0)
+
+            if True:
+                # add Poisson noise of level in background annulus
+                # above the overall background level
+                bkg_var = bkg_var + np.maximum(bkg_2dfit, 0)
+            else:
+                # otherwise, measure the actual variance in the pixel
+                # values in the background annulus (after subtraction
+                # of the polynomial fit to the background) and adopt
+                # that value if it is higher than [bkg_var]
+                __, __, bkg_std_annulus = sigma_clipped_stats(D[mask_bkg])
+                #bkg_var = np.maximum(bkg_var, bkg_std_annulus**2)
+                # or add in quadrature
+                bkg_var = np.sqrt(bkg_var**2 + bkg_std_annulus**2)
 
 
             if show:
@@ -5461,7 +5564,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
 
     # [mask_inner] - the central pixels within about 1xFWHM
     # (assuming a Gaussian shape) of the object center (where P values
-    # are higher than 0.01 of the central P value); 
+    # are higher than 0.01 times the central P value); 
     # [mask_outer] is the region outside of that
     P_max = np.amax(P)
     mask_inner = (P >= 0.01*P_max)
@@ -5518,6 +5621,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
         
         log.info('no. of rejected pixels: {}'.format(np.sum(~mask_use)))
         log.info('np.amax((D - flux_opt * P)**2 / V): {}'.format(np.amax(sigma2)))
+        log.info('flux_opt: {:.1f} +- {:.1f}'.format(flux_opt, fluxerr_opt))
         
         ds9_arrays(data=D, psf=P, bkg_var=bkg_var, variance=V,
                    fluxoptP = flux_opt*P, data_min_fluxoptP=(D - flux_opt * P),
@@ -5525,7 +5629,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
                    mask_use=mask_use.astype(int))
 
 
-    return flux_opt, fluxerr_opt
+    return flux_opt, fluxerr_opt, bkg_2dfit
     
 
 ################################################################################
@@ -5996,13 +6100,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     # fix pixels using function [fixpix]
+    mask_value = get_par(set_zogy.mask_value,tel)
     if imtype=='new':
-        data_wcs = fixpix (data_wcs, satlevel=satlevel,
-                           data_bkg_std=data_bkg_std, data_mask=data_mask,
-                           imtype=imtype, header=header,
-                           mask_value=get_par(set_zogy.mask_value,tel),
-                           timing=get_par(set_zogy.timing,tel),
-                           base=base, keep_tmp=get_par(set_zogy.keep_tmp,tel))
+        if get_par(set_zogy.interp_sat,tel):
+            data_wcs = fixpix (data_wcs, satlevel=satlevel,
+                               data_bkg_std=data_bkg_std, data_mask=data_mask,
+                               imtype=imtype, header=header,
+                               mask_value=mask_value,
+                               timing=get_par(set_zogy.timing,tel),
+                               base=base, keep_tmp=get_par(set_zogy.keep_tmp,tel),
+                               along_row=get_par(set_zogy.interp_along_row,tel),
+                               interp_func=get_par(set_zogy.interp_func,tel),
+                               interp_dpix=get_par(set_zogy.interp_dpix,tel))
 
     if remap:
 
@@ -6012,17 +6121,21 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         data_ref_bkg_std_remap *= gain
         # fix pixels using function [fixpix] also in remapped
         # reference image; already done for ML/BG reference images
-        if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+        if (get_par(set_zogy.interp_sat,tel) and 
+            tel not in ['ML1', 'BG2', 'BG3', 'BG4']):
 
-            data_ref_remap = fixpix (data_ref_remap, satlevel=satlevel,
-                                     data_bkg_std=data_ref_bkg_std_remap,
-                                     data_mask=data_ref_remap_mask,
-                                     imtype=imtype, header=header,
-                                     mask_value=get_par(set_zogy.mask_value,tel),
-                                     timing=get_par(set_zogy.timing,tel),
-                                     base=base,
-                                     keep_tmp=get_par(set_zogy.keep_tmp,tel))
-            
+            data_ref_remap = fixpix (
+                data_ref_remap, satlevel=satlevel,
+                data_bkg_std=data_ref_bkg_std_remap,
+                data_mask=data_ref_remap_mask, imtype=imtype, header=header,
+                mask_value=mask_value,
+                timing=get_par(set_zogy.timing,tel), base=base,
+                keep_tmp=get_par(set_zogy.keep_tmp,tel),
+                along_row=get_par(set_zogy.interp_along_row,tel),
+                interp_func=get_par(set_zogy.interp_func,tel),
+                interp_dpix=get_par(set_zogy.interp_dpix,tel))
+
+
             if False:
                 ds9_arrays (data_ref_remap=data_ref_remap)
             
@@ -6079,8 +6192,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         psfex_bintable = '{}_psf.fits'.format(base)
         fakestar_flux_in, __ = get_psfoptflux (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xcoords_fake,
-            ycoords_fake, satlevel=satlevel, inject_fake=True,
-            nsigma_fake=nsigma_fake_in, imtype=imtype)
+            ycoords_fake, inject_fake=True, nsigma_fake=nsigma_fake_in,
+            imtype=imtype, set_zogy=set_zogy, tel=tel)
 
 
         # create table_fake to be used later to merge with full-source
@@ -6169,16 +6282,39 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         psfex_bintable = '{}_psf.fits'.format(base)
         results = get_psfoptflux (
-            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin,
-            ywin, satlevel=satlevel, replace_satdata=False, psffit=mypsffit,
-            moffat=False, imtype=imtype, D_objmask=objmask)
-
+            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
+            psffit=mypsffit, imtype=imtype, D_objmask=objmask,
+            set_zogy=set_zogy, tel=tel)
 
         if mypsffit:
             (flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf,
              xerr_psf, yerr_psf) = results
         else:
             flux_opt, fluxerr_opt = results
+
+
+        # if required, replace saturated+connected pixels with PSF
+        # profile for the saturated objects
+        if get_par(set_zogy.replace_sat_psf,tel):
+
+            # mask with objects identified as saturated
+            value_sat = mask_value['saturated']
+            mask_sat = (table_sex['FLAGS_MASK'] & value_sat == value_sat)
+            xwin_sat = table_sex['X_POS'][mask_sat]
+            ywin_sat = table_sex['Y_POS'][mask_sat]
+            sat_nmax = get_par(set_zogy.replace_sat_nmax,tel)
+            get_psfoptflux (psfex_bintable, data_wcs, data_bkg_std**2, data_mask,
+                            xwin_sat, ywin_sat, imtype=imtype, D_objmask=objmask,
+                            replace_sat_psf=True, replace_sat_nmax=sat_nmax,
+                            set_zogy=set_zogy, tel=tel)
+
+            # save data_wcs after modification in [get_psfoptflux] if
+            # temporary files are kept
+            if get_par(set_zogy.keep_tmp,tel):
+                fits_updated = '{}_updated.fits'.format(base)
+                fits.writeto(fits_updated, data_wcs, header, overwrite=True)
+
+
             
             
         if get_par(set_zogy.make_plots,tel):
@@ -6211,8 +6347,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # '__' is to disregard the 2nd output array from [get_psfoptflux]
             limflux_array, __ = get_psfoptflux (
                 psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
-                ylim, satlevel=satlevel, get_limflux=True, limflux_nsigma=nsigma,
-                imtype=imtype)
+                ylim, get_limflux=True, limflux_nsigma=nsigma,
+                imtype=imtype, set_zogy=set_zogy, tel=tel)
 
             limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
                 limflux_array.astype(float), mask_value=0)
@@ -6772,8 +6908,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # now that calibration is done, create limiting magnitude image
     # if it does not exist yet or redo is True
     fits_limmag = '{}_limmag.fits'.format(base)
-    if ((not os.path.isfile(fits_limmag) or redo) and 'PC-ZP' in header and
-        'AIRMASSC' in header):
+    if ((not os.path.isfile(fits_limmag) or redo) and
+        'PC-ZP' in header and 'AIRMASSC' in header):
 
         # create error image from positive background-subtracted
         # data_wcs and background STD image
@@ -6843,7 +6979,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # size than the new image
             nx = int(xsize / subsize)
             ny = int(ysize / subsize)
-            
+
+
         data_area_ap = ndimage.zoom(area_ap.reshape((nx,ny)).transpose(),
                                     subsize, order=2, mode='nearest')
 
@@ -6851,6 +6988,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # False and reference image has a different size than the new
         # image, pad it
         if data_area_ap.shape != data_wcs_copy.shape:
+
+            #log.info ('data_area_ap.shape: {}, data_wcs_copy.shape: {}'
+            #          .format(data_area_ap.shape, data_wcs_copy.shape))
 
             if remap:
 
@@ -7740,7 +7880,8 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, get_altaz=False):
 
 def fixpix (data, satlevel=60000., data_bkg_std=None, data_mask=None,
             imtype=None, header=None, mask_value=None, timing=True, base=None,
-            keep_tmp=False):
+            keep_tmp=False, along_row=True, interp_func='spline',
+            interp_dpix=5):
 
     """input data is assumed to be background subtracted"""
 
@@ -7766,34 +7907,36 @@ def fixpix (data, satlevel=60000., data_bkg_std=None, data_mask=None,
     
     # determine pixels to be replaced, starting with saturated ones
     value_sat = mask_value['saturated']
-    mask_2replace = (data_mask & value_sat == value_sat)
-    #value_satcon = mask_value['saturated-connected']
-    #mask_2replace = ((data_mask & value_sat == value_sat) |
-    #                 (data_mask & value_satcon == value_satcon))
+    #mask_2replace = (data_mask & value_sat == value_sat)
+    value_satcon = mask_value['saturated-connected']
+    mask_2replace = ((data_mask & value_sat == value_sat) |
+                     (data_mask & value_satcon == value_satcon))
 
-    # consider pixels with values higher than 2/3 of the saturation
-    # level to be saturated-connected pixels
-    mask_connected = (data >= 0.67*satlevel)
-    # grow mask_2replace to include these
-    mask_2replace = ndimage.morphology.binary_propagation (
-        mask_2replace, mask=mask_connected)
+    if False:
+    
+        # consider pixels with values higher than 2/3 of the saturation
+        # level to be saturated-connected pixels
+        mask_connected = (data >= 0.67*satlevel)
+        # grow mask_2replace to include these
+        mask_2replace = ndimage.morphology.binary_propagation (
+            mask_2replace, mask=mask_connected)
 
-    # add one more line of pixels
-    struct = np.ones((3,3), dtype=bool)
-    mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct)
+        # add one more line of pixels
+        struct = np.ones((3,3), dtype=bool)
+        mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct)
+
 
     # do not consider saturated(-connected) pixels on the edge
     mask_2replace &= ~mask_edge
 
     # fix saturated and saturated-connected pixels with function
-    # [inter_pix] that interpolates these pixels with a spline fit
-    # using [dpix] on either side
+    # [inter_pix] that interpolates these pixels with a spline or
+    # gauss fit using [dpix] on either side
     if data_bkg_std is not None:
         data_err = np.sqrt(np.abs(data_fixed) + data_bkg_std**2)
     else:
         if header is not None:
             # get readnoise from header
-            # ***check!!!***
             #rdnoise = header['RDNOISE']
             rdnoise = read_header(header, ['rdnoise'])
         else:
@@ -7801,22 +7944,25 @@ def fixpix (data, satlevel=60000., data_bkg_std=None, data_mask=None,
             
         data_err = np.sqrt(np.abs(data_fixed)+rdnoise**2)
         
-        
-    data_fixed = inter_pix (data_fixed, data_err,
-                            mask_2replace, dpix=10, k=3)
+
+    data_fixed = inter_pix (data_fixed, data_err, mask_2replace, k=3,
+                            dpix=interp_dpix, along_row=along_row,
+                            interp_func=interp_func)
 
 
-    # add a couple more pixels to look for negative values
-    struct = np.ones((5,5), dtype=bool)
-    mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct)
+    if False:
     
-    # set values in [data_fixed[mask_2replace]] that turn out to be
-    # lower than zero (e.g. due to spline fit starting on a wing of a
-    # star) equal to the median of the surrounding pixels
-    mask_neg = (mask_2replace & (data_fixed < 0))
-    size_filter = 5
-    data_fixed = fill_mask(data_fixed, size_filter, mask_2fill=mask_neg,
-                           mask_valid=~mask_edge, use_median=True, smooth=False)
+        # add a couple more pixels to look for negative values
+        struct = np.ones((5,5), dtype=bool)
+        mask_2replace = ndimage.binary_dilation(mask_2replace, structure=struct)
+        
+        # set values in [data_fixed[mask_2replace]] that turn out to be
+        # lower than zero (e.g. due to spline fit starting on a wing of a
+        # star) equal to the median of the surrounding pixels
+        mask_neg = (mask_2replace & (data_fixed < 0))
+        size_filter = 5
+        data_fixed = fill_mask(data_fixed, size_filter, mask_2fill=mask_neg,
+                               mask_valid=~mask_edge, use_median=True, smooth=False)
 
 
     if False:
@@ -7853,9 +7999,10 @@ def fixpix (data, satlevel=60000., data_bkg_std=None, data_mask=None,
         
 ################################################################################
 
-def inter_pix (data, data_std, mask_2replace, dpix=10, k=3):
-    
-    """Function to replace mask pixels with spline fit along row"""
+def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
+               interp_func='spline'):
+
+    """Function to replace mask pixels with spline fit along row or column"""
 
     #data_replaced = np.copy(data)
     data_replaced = np.copy(data)
@@ -7866,11 +8013,15 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3):
         data_std *= np.ones(np.shape(data))
         
     # label consecutive pixels in x as distinct region
-    regions, nregions = ndimage.label(mask_2replace, 
-                                      structure=[[0,0,0],[1,1,1],[0,0,0]])
+    if along_row:
+        struct = [[0,0,0],[1,1,1],[0,0,0]]
+    else:
+        struct = [[0,1,0],[0,1,0],[0,1,0]]
+    
+    regions, nregions = ndimage.label(mask_2replace, structure=struct)
     # determine slices corresponding to these regions
     obj_slices = ndimage.find_objects(regions)
-    
+
     # iterate over regions to replace
     ymax, xmax = np.shape(data)
     
@@ -7879,31 +8030,48 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3):
         y_slice = obj_slices[i][0]
         x_slice = obj_slices[i][1]
         
-        i_start = max(x_slice.start-dpix, 0)
-        i_stop = min(x_slice.stop+dpix+1, xmax)
-        
-        x_row = np.arange(i_start, i_stop)
-        #print ('x_row: {}'.format(x_row))
-        y_index = y_slice.start
-        mask_row = mask_2replace[y_index, x_row]
-        #print ('mask_row: {}'.format(mask_row))
-        data_row = data_replaced[y_index, x_row]
-        #print ('data_row: {}'.format(data_row))
-        data_std_row = data_std[y_index, x_row]
-        #print ('data_std_row: {}\n'.format(data_std_row))
+        # _absc and _ordi refer to abscissa and ordinate of the spline
+        # fit to be performed; depending on the input [along_row] the
+        # abscissa and/or ordinate is along the x- and/or y-axis of
+        # [data]
+        if along_row:
+            absc_slice = x_slice
+            absc_max = xmax
+            ordi_slice = y_slice
+        else:
+            absc_slice = y_slice
+            absc_max = ymax
+            ordi_slice = x_slice
+
+        i_start = max(absc_slice.start-dpix, 0)
+        i_stop = min(absc_slice.stop+dpix, absc_max)
+        indx_absc = np.arange(i_start, i_stop)
+        indx_ordi = ordi_slice.start
+
+        if along_row:
+            indx_x = indx_absc
+            indx_y = indx_ordi
+        else:
+            indx_x = indx_ordi
+            indx_y = indx_absc
+
+
+        mask_absc = mask_2replace[indx_y, indx_x]
+        data_absc = data_replaced[indx_y, indx_x]
+        data_std_absc = data_std[indx_y, indx_x]
 
         # data to fit
-        mask_fit = (~mask_row & (data_row>=0))
+        mask_fit = (~mask_absc & (data_absc>=0))
         if np.sum(mask_fit) < 2:
             continue
 
-        x_fit = x_row[mask_fit]
-        y_fit = data_row[mask_fit]
-        w_fit = 1./data_std_row[mask_fit]
+        x_fit = indx_absc[mask_fit]
+        y_fit = data_absc[mask_fit]
+        w_fit = 1./data_std_absc[mask_fit]
 
         try:
 
-            if True:
+            if interp_func == 'spline':
                 # spline fit       
                 fit = interpolate.UnivariateSpline(x_fit, y_fit, w=w_fit, k=k, 
                                                    check_finite=True)
@@ -7913,21 +8081,23 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3):
                 params = Parameters()
                 params.add('amp', value=np.amax(y_fit), min=0, #max=1.5e5,
                            vary=True)
-                params.add('mean', value=np.mean(x_row[mask_row]),
-                           min=x_row[5], max=x_row[-5], vary=True)
+                hdpix = int(dpix/2)
+                params.add('mean', value=np.mean(indx_absc[mask_absc]),
+                           min=indx_absc[hdpix], max=indx_absc[-hdpix],
+                           vary=True)
                 params.add('sigma', value=3., min=2, max=20, vary=True)
                 params.add('a0', value=np.amin(y_fit), min=0, vary=True)
                 #params.add('a1', value=0, vary=True)
 
                 # do leastsq polynomial fit including z_err
-                yerr_fit = data_std_row[mask_fit]
+                yerr_fit = data_std_absc[mask_fit]
                 result = minimize (gauss2min, params, method='Least_squares',
                                    args=(x_fit, y_fit, yerr_fit,), max_nfev=100)
 
                 p = list(result.params.valuesdict().values())
                 fit = lambda x: gauss1d(p, x)
 
-                #print(fit_report(result))
+                #log.info (fit_report(result))
 
 
         except Exception as e:
@@ -7938,25 +8108,40 @@ def inter_pix (data, data_std, mask_2replace, dpix=10, k=3):
 
         else:
             # replace masked entries with interpolated values
-            x_fill = x_row[mask_row]
-            data_replaced[y_index, x_fill] = fit(x_fill)
+            absc_fill = indx_absc[mask_absc]
+            fit_fill = np.maximum(fit(absc_fill), 0)
+            if along_row:
+                data_replaced[indx_ordi, absc_fill] = fit_fill
+            else:
+                data_replaced[absc_fill, indx_ordi] = fit_fill
+
 
             if False:
             
-                ycoord = y_index+1
-                xcoord = np.median(x_row)+1
-            
-                if np.sqrt((xcoord-2490)**2 + (ycoord-9470)**2) < 100:
+                if along_row:
+                    ycoord = indx_ordi + 1
+                    xcoord = np.median(indx_absc)+1
+                else:
+                    xcoord = indx_ordi + 1
+                    ycoord = np.median(indx_absc)+1
+
+                log.info ('xcoord: {}, ycoord: {}'.format(xcoord, ycoord))
+
+                if True or np.sqrt((xcoord-10387)**2 + (ycoord-10212)**2) < 100:
                     
-                    plt.errorbar (x_row, data_row, data_std_row,
+                    plt.errorbar (indx_absc+1, data_absc, data_std_absc,
                                   linestyle='None', ecolor='k', capsize=2)
-                    plt.plot(x_row, data_row, 'o', color='tab:blue',
+                    plt.plot(indx_absc+1, data_absc, 'o', color='tab:blue',
                              markersize=5, markeredgecolor='k')
-                    plt.plot(x_row[mask_row], data_row[mask_row], 'ro',
+                    plt.plot(indx_absc[mask_absc]+1, data_absc[mask_absc], 'ro',
                              markersize=5, markeredgecolor='k')
-                    plt.plot(x_row, fit(x_row), 'g-')
-                    plt.title('y_index: {}'.format(y_index))
+                    indx_plot = np.linspace(indx_absc[0], indx_absc[-1], num=100)
+                    plt.plot(indx_plot+1, fit(indx_plot), 'g-')
+                    plt.xlabel('pixel position')
+                    plt.ylabel('pixel value')
+                    plt.title('xcoord, ycoord: {}, {}'.format(xcoord, ycoord))
                     plt.show()
+                    plt.close()
 
 
     return data_replaced
@@ -8105,8 +8290,9 @@ def get_back_orig (data, header, objmask, imtype, clip=True, fits_mask=None):
         log_timing_memory (t0=t, label='get_back')
 
 
-    ds9_arrays(data=data, mask_reject=mask_reject, mini_median=mini_median,
-               mini_median_filt=mini_median_filt)
+    if False:
+        ds9_arrays(data=data, mask_reject=mask_reject, mini_median=mini_median,
+                   mini_median_filt=mini_median_filt)
 
     # mini_median_filt and mini_std_filt are float64 (which is what
     # sigma_clipped_stats returns); return them as float32 below to
