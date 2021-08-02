@@ -219,6 +219,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # check that image is not in compressed format
                 header_temp = read_hdulist (image_fits, get_data=False,
                                             get_header=True)
+                #if ('TTYPE1' in header_temp and
+                #    'COMPRESSED' in header_temp['TTYPE1']):
                 if header_temp['NAXIS'] != 2:
                     msg = 'input images need to be uncompressed'
                     log.critical(msg)
@@ -7228,8 +7230,10 @@ def prep_plots (table, header, base):
 
 
     # filter arrays by FLAG
-    index = ((table['E_FLUX_AUTO']>0) & (table['FLAGS']==0) &
-             (table['FLAGS_MASK']==0))
+    index = ((table['E_FLUX_AUTO']>0) & (table['FLAGS']==0))
+    if 'FLAGS_MASK' in table.colnames:
+        index &= (table['FLAGS_MASK']==0)
+        
     class_star = table['CLASS_STAR'][index]
     flux_auto = table['E_FLUX_AUTO'][index] * gain
     fluxerr_auto = table['E_FLUXERR_AUTO'][index] * gain
@@ -11485,7 +11489,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # considerable
     if data_cal is not None:
         fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
-        fits.writeto (fits_calcat_field, data_cal, overwrite=True)
+        data_cal.write (fits_calcat_field, overwrite=True)
 
 
     # update header of input image
@@ -12294,9 +12298,10 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
 
 
             # best to ensure that edge pixels are set to zero
-            value_edge = get_par(set_zogy.mask_value['edge'],tel)
-            mask_edge = (data_mask & value_edge == value_edge)
-            data[mask_edge] = 0
+            if fits_mask is not None:
+                value_edge = get_par(set_zogy.mask_value['edge'],tel)
+                mask_edge = (data_mask & value_edge == value_edge)
+                data[mask_edge] = 0
 
             # save to fits; this image will be used to feed to
             # SExtractor in the next pass
