@@ -36,14 +36,37 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
 #===============================================================================
+# Replacement of saturated pixels to avoid artefacts in image subtraction
+#===============================================================================
+
+# perform interpolation to replace saturated+connected pixels
+interp_sat = True
+# interpolating function; 'spline' (cubic) or 'gauss'
+interp_func = 'spline'
+# along pixel row (True) or column (False)
+interp_along_row = True
+# number of pixels to use on either side of saturated pixels
+interp_dpix = 7
+
+# replace saturated+connected pixels with PSF values; if [interp_sat]
+# is also set, this PSF replacement will have precedence; only pixels
+# within the PSF footprint will be replaced
+replace_sat_psf = False
+# maximum number of saturated pixels in object before PSF replacement
+# is applied; if object is very saturated, PSF replacement will be
+# less reliable
+replace_sat_nmax = float('inf')
+
+
+#===============================================================================
 # Injection of fake stars/transients into new image
 #===============================================================================
 nfakestars = 0           # number of fake stars to be added to each subimage;
                          # first star is at the center, the rest (if any) is
                          # randomly distributed
 fakestar_radec = (199.7506, -21.0621) # [deg] if defined, the first fake star is
-                          # inserted at these coordinates
-fakestar_s2n = 20.       # required signal-to-noise ratio of the fake stars
+                         # inserted at these coordinates
+fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
 
 
 #===============================================================================
@@ -109,7 +132,7 @@ key_rdnoise = 'RDNOISE'
 #===============================================================================
 # Initial seeing estimate
 #===============================================================================
-fwhm_imafrac = 0.9       # fraction of image area that will be used
+fwhm_imafrac = 0.90      # fraction of image area that will be used
                          # for initial seeing estimate
 fwhm_detect_thresh = 20  # detection threshold for fwhm SExtractor run
 fwhm_class_sort = False  # sort objects according to CLASS_STAR (T)
@@ -136,6 +159,7 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
 size_vignet = 99         # size of the square VIGNETs saved in the SExtractor
+#size_vignet = {'ML1': 99, 'BG': 49}  # size of the square VIGNETs saved in the SExtractor
                          # LDAC catalog used by PSFEx; its value should be set to
                          # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * maximum
                          # expected FWHM in any of the images.
@@ -243,7 +267,7 @@ mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
 dir_numpy = 'NumpyFiles'
 
 # switch to keep intermediate/temporary files
-keep_tmp = False
+keep_tmp = True
 
 # switch on/off different functions
 redo_new = False         # execute SExtractor, astrometry.net, PSFEx, optimal flux
