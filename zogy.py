@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.6'
+__version__ = '1.0.7'
 
 
 ################################################################################
@@ -728,6 +728,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                     plt.show()
                 plt.close()
 
+
             plot (x_fratio, y_fratio, (0,xsize_new,0,ysize_new), 'x (pixels)',
                   'y (pixels)', '{}_xy.pdf'.format(base_newref), annotate=False)
             plot (dx, dy, (-1,1,-1,1), 'dx (pixels)', 'dy (pixels)',
@@ -989,9 +990,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             zp = header_new['PC-ZP']
             airm = header_new['AIRMASSC']
+            ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
             data_limmag = apply_zp((get_par(set_zogy.transient_nsigma,tel) *
                                     data_Fpsferr_full), zp, airm, exptime,
-                                   filt).astype('float32')
+                                   filt, ext_coeff).astype('float32')
 
 
         # add header keyword(s):
@@ -1108,7 +1110,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             exptime, filt = read_header(header_new, keywords)
             zeropoint = header_new['PC-ZP']
             airmass = header_new['AIRMASSC']
-            [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt)
+            ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
+            [lmag] = apply_zp([lflux], zeropoint, airmass, exptime, filt,
+                              ext_coeff)
             header_trans['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
                                      'lim. mag'.format(
                                          get_par(set_zogy.transient_nsigma,tel)))
@@ -1480,7 +1484,9 @@ def merge_fakestars (table, table_fake, cat_type, header):
     airmass = header['AIRMASSC']
 
     flux_fake_in = table_fake['E_FLUX_FAKE_IN'][index_fake]
-    mag_fake_in = apply_zp (flux_fake_in, zeropoint, airmass, exptime, filt)
+    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
+    mag_fake_in = apply_zp (flux_fake_in, zeropoint, airmass, exptime, filt,
+                            ext_coeff)
     table['MAG_FAKE_IN'][index] = mag_fake_in
 
     
@@ -3314,18 +3320,19 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     fluxerr_peak = data_Fpsferr[table_trans['Y_PEAK']-1, table_trans['X_PEAK']-1]
     del data_Fpsf, data_Fpsferr
     
+    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
     mag_peak, magerr_peak = apply_zp (
-        np.abs(flux_peak), zp, airmass_trans, exptime, filt,
+        np.abs(flux_peak), zp, airmass_trans, exptime, filt, ext_coeff,
         fluxerr=np.abs(fluxerr_peak))
     
     mag_psf_D, magerr_psf_D = apply_zp (
         np.abs(table_trans['E_FLUX_PSF_D']), zp, airmass_trans, exptime, filt,
-        fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']))
+        ext_coeff, fluxerr=np.abs(table_trans['E_FLUXERR_PSF_D']))
 
     if False:
         mag_opt_D, magerr_opt_D = apply_zp (
-            np.abs(table_trans['E_FLUX_OPT_D']), zp, airmass_trans, exptime, filt,
-            fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']))
+            np.abs(table_trans['E_FLUX_OPT_D']), zp, airmass_trans, exptime,
+            filt, ext_coeff, fluxerr=np.abs(table_trans['E_FLUXERR_OPT_D']))
 
 
     log.info ('[get_trans] time after converting flux to mag: {}'
@@ -3963,18 +3970,20 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     # image but not in the new image, are first converted to positive
     # fluxes. That it was a negative flux object is still clear from
     # the sign of Scorr_peak.
+    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
     flux_peak = np.abs(flux_peak)
-    mag_peak, magerr_peak = apply_zp (flux_peak, zp, airmass_trans, exptime, 
-                                      filt, fluxerr=np.abs(fluxerr_peak))
-
+    mag_peak, magerr_peak = apply_zp (flux_peak, zp, airmass_trans, exptime,
+                                      filt, ext_coeff,
+                                      fluxerr=np.abs(fluxerr_peak))
+    
     flux_psf_D = np.abs(flux_psf_D)
     mag_psf_D, magerr_psf_D = apply_zp (flux_psf_D, zp, airmass_trans, exptime, 
-                                        filt,
+                                        filt, ext_coeff,
                                         fluxerr=np.abs(fluxerr_psf_D))
     if False:
         flux_opt_D = np.abs(flux_opt_D)
         mag_opt_D, magerr_opt_D = apply_zp (flux_opt_D, zp, airmass_trans,
-                                            exptime, filt,
+                                            exptime, filt, ext_coeff,
                                             fluxerr=np.abs(fluxerr_opt_D))
 
     log.info ('[get_trans] time after converting flux to mag: {}'
@@ -6777,7 +6786,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # infer limiting magnitudes from limiting flux using zeropoint
         # and median airmass
-        [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt)
+        ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
+        [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt,
+                            ext_coeff)
         log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
 
         # add header keyword(s):
@@ -6787,7 +6798,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
         
 
-        header['PC-EXTCO'] = (get_par(set_zogy.ext_coeff,tel)[filt], 
+        header['PC-EXTCO'] = (ext_coeff,
                               '[mag] filter extinction coefficient (k)')
         header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration '
                              'stars')
@@ -6829,6 +6840,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # convert fluxes to magnitudes and add to catalog
         colnames = table_sex.colnames
+        ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
         for col in colnames:
             if 'E_FLUX_' in col and 'RADIUS' not in col and 'FLUX_MAX' not in col:
                 col_flux = col
@@ -6838,7 +6850,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
                 mag_tmp, magerr_tmp = apply_zp(
                     table_sex[col_flux], zp, airmass_sex, exptime, filt,
-                    fluxerr=table_sex[col_fluxerr])
+                    ext_coeff, fluxerr=table_sex[col_fluxerr])
 
                 if col_mag in colnames:
                     del table_sex[col_mag, col_magerr]
@@ -6858,7 +6870,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 else:
                     flux_max = 10**(-0.4*table_sex['MU_MAX']) * pixscale**2
                 
-                mag_tmp = apply_zp(flux_max, zp, airmass_sex, exptime, filt)
+                mag_tmp = apply_zp(flux_max, zp, airmass_sex, exptime, filt,
+                                   ext_coeff)
                 table_sex['MU_MAX'] = mag_tmp
 
 
@@ -7038,8 +7051,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         exptime, filt = read_header(header, ['exptime', 'filter'])
         zp = header['PC-ZP']
         airm = header['AIRMASSC']
+        ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
         data_limmag = apply_zp((get_par(set_zogy.source_nsigma,tel) * data_err),
-                               zp, airm, exptime, filt).astype('float32')
+                               zp, airm, exptime, filt, ext_coeff
+                               ).astype('float32')
 
         # set limiting magnitudes at edges to zero; ; only consider
         # 'real' edge pixels for reference image
@@ -7676,7 +7691,8 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
 
 ################################################################################
 
-def apply_zp (flux, zp, airmass, exptime, filt, fluxerr=None, zp_std=None):
+def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff,
+              fluxerr=None, zp_std=None):
 
     """Function that converts the array [flux] into calibrated magnitudes
     using [zp] (a scalar), [airmass] (scalar or array with the same
@@ -7686,9 +7702,6 @@ def apply_zp (flux, zp, airmass, exptime, filt, fluxerr=None, zp_std=None):
     errors. The output will be numpy arrays with the same number of
     elements as the input flux."""
     
-    if get_par(set_zogy.timing,tel):
-        t = time.time()
-
     log.info('executing apply_zp ...')
 
     # make sure input fluxes are numpy arrays
@@ -7704,7 +7717,7 @@ def apply_zp (flux, zp, airmass, exptime, filt, fluxerr=None, zp_std=None):
     # N.B.: airmass correction is relative to airmass at which
     # atmospheric extinction was already included in the calibration
     # catalog
-    mag = zp + mag_inst - airmass * get_par(set_zogy.ext_coeff,tel)[filt]
+    mag = zp + mag_inst - airmass * ext_coeff
     # set magnitudes of sources with non-positive fluxes to -1
     mag[~mask_pos] = -1
     
@@ -7723,8 +7736,6 @@ def apply_zp (flux, zp, airmass, exptime, filt, fluxerr=None, zp_std=None):
         # set errors of sources with non-positive fluxes to -1
         magerr[~mask_pos] = -1
         
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='apply_zp')
 
     if fluxerr is not None:
         return mag, magerr
@@ -11417,15 +11428,15 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                              'total number of astrometric stars in FOV')
 
         # Limit to brightest stars ([nbright] is defined above) in the field
-        index_sort_ast = np.argsort(mag_ast)
-        ra_ast_bright = ra_ast[index_sort_ast][0:nbright]
-        dec_ast_bright = dec_ast[index_sort_ast][0:nbright]
+        #index_sort_ast = np.argsort(mag_ast)
+        #ra_ast_bright = ra_ast[index_sort_ast][0:nbright]
+        #dec_ast_bright = dec_ast[index_sort_ast][0:nbright]
 
         # calculate array of offsets between astrometry comparison
         # stars and any non-saturated SExtractor source
         newra_bright = newra[mask_use][index_sort][-nbright:]
         newdec_bright = newdec[mask_use][index_sort][-nbright:]        
-        __, __, __, dra_array, ddec_array = get_matches (
+        __, indx_ast, __, dra_array, ddec_array = get_matches (
             newra_bright, newdec_bright, ra_ast, dec_ast, dist_max=2)
 
 
@@ -11456,6 +11467,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         header['A-DDESTD'] = (ddec_std, '[arcsec] dDEC sigma (STD) offset')
 
         if get_par(set_zogy.make_plots,tel):
+
+            # plot of dra vs. ddec in arcseconds, including histograms
             dr = np.sqrt(dra_std**2+ddec_std**2)
             dr = max(dr, 0.05)
             limits = 5. * np.array([-dr,dr,-dr,dr])
@@ -11466,8 +11479,57 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                 dra_array[mask_nonzero], ddec_array[mask_nonzero], limits,
                 xlabel='delta RA [arcsec]', ylabel='delta DEC [arcsec]',
                 label=[label1,label2], labelpos=[(0.77,0.9),(0.77,0.85)],
-                filename='{}_dRADEC.pdf'.format(base), title=base)
+                filename='{}_dRADEC.pdf'.format(base),
+                title=base.split('/')[-1])
             
+            # plot of dra vs. color and ddec vs. color, to check for
+            # offset dependence on stellar color
+            col = ['g', 'r']
+            if (col[0] in data_cal.dtype.names and
+                col[1] in data_cal.dtype.names):
+                
+                col_array = data_cal[col[0]][indx_ast]-data_cal[col[1]][indx_ast]
+                
+                fig, (ax0, ax1) = plt.subplots(2, 1, sharex=True, sharey=False)
+                fig.subplots_adjust(hspace=0, wspace=0)
+                fig.suptitle(base.split('/')[-1], fontsize=10)
+
+                # dRA subplot
+                ax0.plot(col_array, dra_array, 'o', color='tab:blue',
+                         markersize=5, markeredgecolor='k')
+                ax0.set_ylabel('delta RA [arcsec]')
+                # 1st degree polynomial fit to determin slope
+                p_ra, V_ra = np.polyfit(col_array, dra_array, 1, cov=True)
+                label_ra = '{:.3f} +- {:.3f}'.format(p_ra[0], np.sqrt(V_ra[0,0]))
+                ax0.annotate(label_ra, xy=(0,0), xytext=(0.77,0.85),
+                             textcoords='subfigure fraction', fontsize=11)
+
+                # dDEC subplot
+                ax1.plot(col_array, ddec_array, 'o', color='tab:blue',
+                         markersize=5, markeredgecolor='k')
+                ax1.set_ylabel('delta DEC [arcsec]')
+                ax1.set_xlabel('{} - {} colour'.format(col[0], col[1]))
+
+                # 1st degree polynomial fit to determin slope
+                p_dec, V_dec = np.polyfit(col_array, ddec_array, 1, cov=True)
+                label_dec = '{:.3f} +- {:.3f}'.format(p_dec[0],
+                                                      np.sqrt(V_dec[0,0]))
+                ax1.annotate(label_dec, xy=(0,0), xytext=(0.77,0.85),
+                             textcoords='subfigure fraction', fontsize=11)
+                
+                plt.savefig('{}_dRADEC_vs_color.pdf'.format(base))
+                if get_par(set_zogy.show_plots,tel): plt.show()
+                plt.close()
+
+                # also save fits file with calibration info and
+                # offsets for ADC analysis
+                table_cal_offsets = Table(data_cal[indx_ast])
+                table_cal_offsets['DRA'] = dra_array
+                table_cal_offsets['DDEC'] = ddec_array
+                table_cal_offsets.write ('{}_dRADEC_calcat.fits'.format(base),
+                                         format='fits', overwrite=True)
+
+
     else:
         log.info('Warning: calibration catalog {} not found!'
                  .format(get_par(set_zogy.cal_cat,tel)))
@@ -11489,7 +11551,10 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # considerable
     if data_cal is not None:
         fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
-        data_cal.write (fits_calcat_field, overwrite=True)
+        #data_cal.writeto (fits_calcat_field, overwrite=True)
+        table_calcat_field = Table(data_cal)
+        table_calcat_field.write (fits_calcat_field, format='fits',
+                                  overwrite=True)
 
 
     # update header of input image
