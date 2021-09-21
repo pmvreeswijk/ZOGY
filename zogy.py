@@ -11466,7 +11466,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                             '[arcsec] dDEC median offset to astrom. catalog')
         header['A-DDESTD'] = (ddec_std, '[arcsec] dDEC sigma (STD) offset')
 
-        if get_par(set_zogy.make_plots,tel):
+        if True or get_par(set_zogy.make_plots,tel):
 
             # plot of dra vs. ddec in arcseconds, including histograms
             dr = np.sqrt(dra_std**2+ddec_std**2)
