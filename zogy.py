@@ -11500,9 +11500,13 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                 ax0.set_ylabel('delta RA [arcsec]')
                 # 1st degree polynomial fit to determin slope
                 p_ra, V_ra = np.polyfit(col_array, dra_array, 1, cov=True)
-                label_ra = '{:.3f} +- {:.3f}'.format(p_ra[0], np.sqrt(V_ra[0,0]))
-                ax0.annotate(label_ra, xy=(0,0), xytext=(0.77,0.85),
-                             textcoords='subfigure fraction', fontsize=11)
+                label_ra = 'slope={:.3f}$\pm${:.3f}'.format(p_ra[0],
+                                                            np.sqrt(V_ra[0,0]))
+                ax0.annotate(label_ra, xy=(1,1), xycoords='axes fraction',
+                             fontsize=10, ha='right', va='top')
+                # plot fit
+                xp = np.linspace(np.amin(col_array), np.amax(col_array))
+                ax0.plot (xp, xp*p_ra[0]+p_ra[1], color='k')
 
                 # dDEC subplot
                 ax1.plot(col_array, ddec_array, 'o', color='tab:blue',
@@ -11512,11 +11516,14 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
                 # 1st degree polynomial fit to determin slope
                 p_dec, V_dec = np.polyfit(col_array, ddec_array, 1, cov=True)
-                label_dec = '{:.3f} +- {:.3f}'.format(p_dec[0],
-                                                      np.sqrt(V_dec[0,0]))
-                ax1.annotate(label_dec, xy=(0,0), xytext=(0.77,0.85),
-                             textcoords='subfigure fraction', fontsize=11)
-                
+                label_dec = 'slope={:.3f}$\pm${:.3f}'.format(p_dec[0],
+                                                             np.sqrt(V_dec[0,0]))
+                ax1.annotate(label_dec, xy=(1,1), xycoords='axes fraction',
+                             fontsize=10, ha='right', va='top')
+                # plot fit
+                ax1.plot (xp, xp*p_dec[0]+p_dec[1], color='k')
+
+
                 plt.savefig('{}_dRADEC_vs_color.pdf'.format(base))
                 if get_par(set_zogy.show_plots,tel): plt.show()
                 plt.close()
