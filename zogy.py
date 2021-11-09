@@ -991,7 +991,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             zp = header_new['PC-ZP']
             airm = header_new['AIRMASSC']
             ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-            data_limmag = apply_zp((get_par(set_zogy.transient_nsigma,tel) *
+            data_tlimmag = apply_zp((get_par(set_zogy.transient_nsigma,tel) *
                                     data_Fpsferr_full), zp, airm, exptime,
                                    filt, ext_coeff).astype('float32')
 
@@ -1182,24 +1182,24 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
         # try to write scaled uint8 or int16 limiting magnitude image
-        limmag_range = abs(np.amax(data_limmag)-np.amin(data_limmag))
+        limmag_range = abs(np.amax(data_tlimmag)-np.amin(data_tlimmag))
 
         # if range less than 7.5 (roughly corrsponding to steps of
         # about 0.03 mag in the output image) then save as 'uint8'
         # leading to an fpacked image size of about 15MB; otherwise
         # use float32 which can be compressed to ~45MB using q=1
-        fits_limmag = '{}_trans_limmag.fits'.format(base_newref)
+        fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
         header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
         if limmag_range <= 7.5:
             data_type = 'uint8'
-            hdu = fits.PrimaryHDU(data_limmag, header_tmp)
+            hdu = fits.PrimaryHDU(data_tlimmag, header_tmp)
             hdu.scale(data_type, 'minmax')
-            hdu.writeto(fits_limmag, overwrite=True)
+            hdu.writeto(fits_tlimmag, overwrite=True)
             del hdu
         else:
-            fits.writeto(fits_limmag, data_limmag, header_tmp, overwrite=True)
+            fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
 
-        del data_limmag
+        del data_tlimmag
             
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_fits, label='writing D, Scorr, Fpsf and '
@@ -7708,7 +7708,7 @@ def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff,
     flux = np.asarray(flux)
     if fluxerr is not None:
         fluxerr = np.asarray(fluxerr)
-    
+
     # instrumental magnitudes 
     mag_inst = np.zeros(flux.shape)
     mask_pos = (flux > 0.)
