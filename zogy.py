@@ -87,7 +87,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.7'
+__version__ = '1.0.8'
 
 
 ################################################################################
@@ -1181,24 +1181,32 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         mem_use (label='just after updating headers')
 
 
-        # try to write scaled uint8 or int16 limiting magnitude image
-        limmag_range = abs(np.amax(data_tlimmag)-np.amin(data_tlimmag))
+        if False:
+            # try to write scaled uint8 or int16 limiting magnitude image
+            limmag_range = abs(np.amax(data_tlimmag)-np.amin(data_tlimmag))
 
-        # if range less than 7.5 (roughly corrsponding to steps of
-        # about 0.03 mag in the output image) then save as 'uint8'
-        # leading to an fpacked image size of about 15MB; otherwise
-        # use float32 which can be compressed to ~45MB using q=1
+            # if range less than 7.5 (roughly corrsponding to steps of
+            # about 0.03 mag in the output image) then save as 'uint8'
+            # leading to an fpacked image size of about 15MB; otherwise
+            # use float32 which can be compressed to ~45MB using q=1
+            fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
+            header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+            if limmag_range <= 7.5:
+                data_type = 'uint8'
+                hdu = fits.PrimaryHDU(data_tlimmag, header_tmp)
+                hdu.scale(data_type, 'minmax')
+                hdu.writeto(fits_tlimmag, overwrite=True)
+                del hdu
+            else:
+                fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
+
+
+        # do not try to write scaled uint8 image (see block above);
+        # keep precision here and let fpack do the compression to some
+        # selected q-level 
         fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
         header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        if limmag_range <= 7.5:
-            data_type = 'uint8'
-            hdu = fits.PrimaryHDU(data_tlimmag, header_tmp)
-            hdu.scale(data_type, 'minmax')
-            hdu.writeto(fits_tlimmag, overwrite=True)
-            del hdu
-        else:
-            fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
-
+        fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
         del data_tlimmag
             
         if get_par(set_zogy.timing,tel):
@@ -7069,24 +7077,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                   .format(np.median(area_ap)))
 
 
-        # try to write scaled uint8 or int16 limiting magnitude image
-        limmag_range = abs(np.amax(data_limmag)-np.amin(data_limmag))
-
-        # if range less than 7.5 (roughly corrsponding to steps of
-        # about 0.03 mag in the output image) then save as 'uint8'
-        # leading to an fpacked image size of about 15MB; otherwise
-        # use float32 which can be compressed to ~45MB using q=1
+        # write limiting magnitude image
         header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        if limmag_range <= 7.5:
-            data_type = 'uint8'
-            hdu = fits.PrimaryHDU(data_limmag, header)
-            hdu.scale(data_type, 'minmax')
-            hdu.writeto(fits_limmag, overwrite=True)
-            del hdu
-        else:
-            fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
-
+        fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
         del data_limmag
+
 
     else:
         log.warning ('limiting magnitude image is not made for {}'
@@ -7097,14 +7092,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # and photometric calibration
     with fits.open('{}.fits'.format(base), 'update', memmap=True) as hdulist:
         hdulist[0].header = header
-        
-    
+
+
     # merge fake stars and catalog
     if imtype=='new' and get_par(set_zogy.nfakestars,tel)>0:
         table_merged = merge_fakestars (table_sex, table_fake, 'new', header)
         table_merged.write(sexcat, format='fits', overwrite=True)
 
-        
 
     # ------------------------
     # preparation of subimages
