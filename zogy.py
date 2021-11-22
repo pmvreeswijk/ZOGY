@@ -995,7 +995,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                     data_Fpsferr_full), zp, airm, exptime,
                                    filt, ext_coeff).astype('float32')
 
+        # do not try to write scaled uint8 image (see block above);
+        # keep precision here and let fpack do the compression to some
+        # selected q-level 
+        fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
+        fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
+        del data_tlimmag
+            
 
+            
         # add header keyword(s):
         header_trans['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
         header_trans['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
@@ -1177,38 +1185,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             hdulist[0].header = header_tmp
         with fits.open(fits_Fpsferr, 'update', memmap=True) as hdulist:
             hdulist[0].header = header_tmp
+        with fits.open(fits_tlimmag, 'update', memmap=True) as hdulist:
+            hdulist[0].header = header_tmp
             
         mem_use (label='just after updating headers')
 
-
-        if False:
-            # try to write scaled uint8 or int16 limiting magnitude image
-            limmag_range = abs(np.amax(data_tlimmag)-np.amin(data_tlimmag))
-
-            # if range less than 7.5 (roughly corrsponding to steps of
-            # about 0.03 mag in the output image) then save as 'uint8'
-            # leading to an fpacked image size of about 15MB; otherwise
-            # use float32 which can be compressed to ~45MB using q=1
-            fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
-            header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-            if limmag_range <= 7.5:
-                data_type = 'uint8'
-                hdu = fits.PrimaryHDU(data_tlimmag, header_tmp)
-                hdu.scale(data_type, 'minmax')
-                hdu.writeto(fits_tlimmag, overwrite=True)
-                del hdu
-            else:
-                fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
-
-
-        # do not try to write scaled uint8 image (see block above);
-        # keep precision here and let fpack do the compression to some
-        # selected q-level 
-        fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
-        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
-        del data_tlimmag
-            
         if get_par(set_zogy.timing,tel):
             log_timing_memory (t0=t_fits, label='writing D, Scorr, Fpsf and '
                                'Fpsferr fits images')
@@ -8009,7 +7990,7 @@ def fixpix (data, satlevel=60000., data_bkg_std=None, data_mask=None,
 ################################################################################
 
 def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
-               interp_func='spline'):
+               interp_func='spline', order=2, fit_neg_values=False):
 
     """Function to replace mask pixels with spline fit along row or column"""
 
@@ -8070,7 +8051,12 @@ def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
         data_std_absc = data_std[indx_y, indx_x]
 
         # data to fit
-        mask_fit = (~mask_absc & (data_absc>=0))
+        mask_fit = ~mask_absc
+        # also avoid negative values, depending on the input
+        # [fit_neg_values]
+        if not fit_neg_values:
+            mask_fit &= (data_absc>=0)
+
         if np.sum(mask_fit) < 2:
             continue
 
@@ -8084,7 +8070,7 @@ def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
                 # spline fit       
                 fit = interpolate.UnivariateSpline(x_fit, y_fit, w=w_fit, k=k, 
                                                    check_finite=True)
-            else:
+            elif interp_func == 'gauss':
                 
                 # alternatively, fit a 1d gauss
                 params = Parameters()
@@ -8108,6 +8094,16 @@ def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
 
                 #log.info (fit_report(result))
 
+            elif interp_func == 'poly':
+                
+                p = np.polyfit(x_fit, y_fit, order)
+                fit = lambda x: np.polyval(p, x)
+
+            else:
+                log.error ('interpolating function [interp_func] in function '
+                           '[inter_pix] needs to be either \'spline\', \'gauss\''
+                           'or \'poly\'')
+
 
         except Exception as e:
             log.exception(traceback.format_exc())
@@ -8115,6 +8111,8 @@ def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
                           'slice {} failed; pixel values not updated'
                           .format(i, obj_slices[i]))
 
+
+            
         else:
             # replace masked entries with interpolated values
             absc_fill = indx_absc[mask_absc]
@@ -8125,19 +8123,22 @@ def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
                 data_replaced[absc_fill, indx_ordi] = fit_fill
 
 
+        finally:
+
             if False:
-            
+                
                 if along_row:
                     ycoord = indx_ordi + 1
                     xcoord = np.median(indx_absc)+1
                 else:
                     xcoord = indx_ordi + 1
                     ycoord = np.median(indx_absc)+1
-
-                log.info ('xcoord: {}, ycoord: {}'.format(xcoord, ycoord))
-
-                if True or np.sqrt((xcoord-10387)**2 + (ycoord-10212)**2) < 100:
                     
+                log.info ('xcoord: {}, ycoord: {}'.format(xcoord, ycoord))
+                
+                #if True or np.sqrt((xcoord-10387)**2 + (ycoord-10212)**2) < 100:
+                if True:
+
                     plt.errorbar (indx_absc+1, data_absc, data_std_absc,
                                   linestyle='None', ecolor='k', capsize=2)
                     plt.plot(indx_absc+1, data_absc, 'o', color='tab:blue',
