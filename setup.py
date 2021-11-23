@@ -9,6 +9,6 @@ setup(
     python_requires='>=2.7',
     license='MIT',
     packages=find_packages(),
-    install_requires=['numpy', 'astropy', 'matplotlib', 'scipy', 'pyfftw',
+    install_requires=['numpy', 'astropy=4.3.1', 'matplotlib', 'scipy', 'pyfftw',
                       'lmfit', 'sip_tpv', 'scikit-image']
 )
