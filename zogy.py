@@ -6436,8 +6436,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         header['AIRMASSC'] = (float(airmass_center), 'airmass at image center')
 
-        log.info('median airmass calibration stars: {}'.format(airmass_sex_median))
-        log.info('airmass at image center: {}'.format(airmass_center))
+        log.info('median airmass calibration stars: {:.3f}'
+                 .format(airmass_sex_median))
+        log.info('airmass at image center: {:.3f}'.format(airmass_center))
 
         
         # determine image zeropoint if ML/BG calibration catalog exists
@@ -11481,8 +11482,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
             # offset dependence on stellar color
             col = ['g', 'r']
             if (col[0] in data_cal.dtype.names and
-                col[1] in data_cal.dtype.names):
-                
+                col[1] in data_cal.dtype.names and np.sum(mask_nonzero) >= 10):
+
                 col_array = data_cal[col[0]][indx_ast]-data_cal[col[1]][indx_ast]
                 
                 fig, (ax0, ax1) = plt.subplots(2, 1, sharex=True, sharey=False)
