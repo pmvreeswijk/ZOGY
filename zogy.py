@@ -38,7 +38,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields
 import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
-from astropy.table import Table, vstack
+from astropy.table import Table, vstack, unique
 from astropy.stats import sigma_clipped_stats
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
