@@ -5916,11 +5916,21 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     else:
         data_mask = None
         fits_mask = input_fits.replace('.fits', '_mask.fits')
-        
+
     # create new mask or modify an existing one
     data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
 
-    
+    # as pointed out by PLirat through GitHub (see email from 23 Dec
+    # 2021), if [fits_mask] is not provided, then an error occurs
+    # below when remapping the reference image mask because the fits
+    # file itself is required in [help_swarp] (and also in
+    # [run_sextractor] if fake stars are being added), which was not
+    # created before; added these lines as suggested by PLirat:
+    if fits_mask is None:
+        header_mask = read_hdulist (input_fits, get_data=False, get_header=True)
+        fits.writeto (fits_mask, data_mask, header_mask, overwrite=True)
+
+
     # check if background was already subtracted from input_fits
     if 'BKG-SUB' in header:
         bkg_sub = header['BKG-SUB']
