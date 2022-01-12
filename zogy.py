@@ -2802,8 +2802,8 @@ def get_index_around_xy(ysize, xsize, ycoord, xcoord, size):
 
 def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
-               header_new, header_ref, header_trans,
-               fits_new_psf, fits_ref_psf, nthreads=1, keep_all=False):
+               header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
+               nthreads=1, keep_all=False):
 
     """Function that selects transient candidates from the significance
     array (data_Scorr), and determines all regions with peak Scorr
@@ -3106,7 +3106,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         # use [get_psfoptflux] to perform a PSF fit to D
         results = get_psfoptflux (
             fits_new_psf, data_D, data_D_var, data_newref_mask,
-            table_trans['X_POS'], table_trans['Y_POS'], psffit=psffit,
+            table_trans['X_PEAK'], table_trans['Y_PEAK'], psffit=psffit,
             moffat=moffat, gauss=gauss, psfex_bintable_ref=fits_ref_psf,
             data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
             header_new=header_new, header_ref=header_ref,
@@ -3115,12 +3115,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         return results
 
 
-    if False:
-        # determine optimal flux in D, directly added as columns to table_trans 
-        colnames = ['E_FLUX_OPT_D', 'E_FLUXERR_OPT_D']
-        table_trans.add_columns(help_psffit_D (False, False, False), names=colnames)
 
-    
     # PSF fit to D, directly added as columns to table_trans
     colnames = ['E_FLUX_OPT_D', 'E_FLUXERR_OPT_D', 'E_FLUX_PSF_D',
                 'E_FLUXERR_PSF_D', 'X_PSF_D', 'Y_PSF_D', 'CHI2_PSF_D',
