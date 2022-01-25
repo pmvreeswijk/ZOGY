@@ -4831,7 +4831,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     list2return = [flux_opt, fluxerr_opt]
 
     # if specified, add combined flags_mask of central PSF area
-    if not get_flags_mask_central:
+    if get_flags_mask_central:
         list2return += [flags_mask_central]
 
     # PSF fit arrays
