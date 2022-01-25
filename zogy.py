@@ -4268,7 +4268,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     imtype=None, Scorr_peak=None, inject_fake=False,
                     nsigma_fake=10., D_objmask=None, remove_psf=False,
                     replace_sat_psf=False, replace_sat_nmax=100,
-                    set_zogy=None, tel=None, fwhm=None, diff=True):
+                    set_zogy=None, tel=None, fwhm=None, diff=True,
+                    get_flags_mask_central=False):
 
     """Function that returns the optimal flux and its error (using the
        function [flux_optimal] of a source at pixel positions [xcoords],
@@ -4312,6 +4313,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     ncoords = len(xcoords)
     flux_opt = np.zeros(ncoords)
     fluxerr_opt = np.zeros(ncoords)
+
+    if get_flags_mask_central:
+        flags_mask_central = np.zeros(ncoords, dtype='uint8')
+
     if psffit:
         flux_psf = np.zeros(ncoords)
         fluxerr_psf = np.zeros(ncoords)
@@ -4578,7 +4583,16 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # [flux_optimal] and used in case saturated pixels are
         # replaced by the PSF
         bkg_2dfit_sub = np.zeros(D_sub.shape)
-            
+
+
+        # define central mask of object using the PSF
+        mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+
+        # if flags_mask_central is specified, calculate the combined
+        # flags_mask of the central object area
+        if get_flags_mask_central:
+            flags_mask_cental[i] = np.sum(np.unique(D_mask_sub[mask_central]))
+
 
         # determine optimal or psf or limiting flux
         if get_limflux:
@@ -4605,13 +4619,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # pixels, cosmic rays, saturation, edge pixels, etc.
             mask_use = (D_mask_sub==0)
             
-            # if the fraction of good pixels around the source is less
-            # than set_zogy.source_minpixfrac, then continue with next
-            # source; optimal flux will be zero and source will not be
-            # included in output catalog - may result in very
-            # saturated stars not ending up in output catalog
-            mask_central = (P_shift >= 0.01 * np.amax(P_shift))
-
             if mask_use.shape != mask_central.shape:
                 log.warning ('mask_use.shape: {} not equal to '
                              'mask_central.shape: {} for object at x,y: '
@@ -4627,6 +4634,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 else:
                     frac_tmp = 0
                     
+                # if the fraction of good pixels around the source is less
+                # than set_zogy.source_minpixfrac, then continue with next
+                # source; optimal flux will be zero and source will not be
+                # included in output catalog - may result in very
+                # saturated stars not ending up in output catalog
                 if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
                     # too many bad pixel objects to warn about
                     #log.warning ('fraction of useable pixels around source '
@@ -4814,22 +4826,31 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         log_timing_memory (t0=t, label='get_psfoptflux')
 
 
-    list2return = [[flux_opt, fluxerr_opt]]
+    # always return optimal flux, which can refer to a limiting flux
+    # or flux of an artificial/fake object that was added
+    list2return = [flux_opt, fluxerr_opt]
+
+    # if specified, add combined flags_mask of central PSF area
+    if not get_flags_mask_central:
+        list2return += [flags_mask_central]
+
+    # PSF fit arrays
     if psffit:
         x_psf = xcoords + xshift_psf
         y_psf = ycoords + yshift_psf
-        list2return.append([flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf, 
-                            xerr_psf, yerr_psf])
+        list2return += [flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf,
+                        xerr_psf, yerr_psf]
 
+    # Moffat/Gauss arrays
     if moffat or gauss:
-        list2return.append([x_moffat, xerr_moffat, y_moffat, yerr_moffat,
-                            fwhm_moffat, elong_moffat, chi2_moffat])
-        
+        list2return += [x_moffat, xerr_moffat, y_moffat, yerr_moffat,
+                        fwhm_moffat, elong_moffat, chi2_moffat]
+
     #list2return = [elem for sublist in list2return for elem in sublist] 
-    list2return = list(itertools.chain.from_iterable(list2return))
+    #list2return = list(itertools.chain.from_iterable(list2return))
 
     return list2return
-        
+
 
 ################################################################################
 
