@@ -4591,7 +4591,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # if flags_mask_central is specified, calculate the combined
         # flags_mask of the central object area
         if get_flags_mask_central:
-            flags_mask_cental[i] = np.sum(np.unique(D_mask_sub[mask_central]))
+            flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
 
 
         # determine optimal or psf or limiting flux
