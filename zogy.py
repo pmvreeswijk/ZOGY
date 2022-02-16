@@ -30,6 +30,14 @@ logFormatter = logging.Formatter(logfmt, datefmt)
 logging.Formatter.converter = time.gmtime #convert time in logger to UTC
 log = logging.getLogger()
 
+
+# setting environment variable OMP_NUM_THREADS to number of threads;
+# needs to be done before numpy is imported
+cpus_per_task = os.environ.get('SLURM_CPUS_PER_TASK')
+if cpus_per_task is not None:
+    os.environ['OMP_NUM_THREADS'] = str(cpus_per_task)
+
+
 import numpy as np
 from numpy.polynomial.polynomial import polyvander2d, polygrid2d, polyval2d
 
@@ -87,7 +95,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.8'
+__version__ = '1.0.9'
 
 
 ################################################################################
@@ -134,7 +142,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                         new_fits_mask=None, ref_fits_mask=None,
                         set_file='set_zogy', logfile=None,
                         redo_new=None, redo_ref=None,
-                        verbose=None, nthreads=1, telescope='ML1',
+                        verbose=None, nthreads=None, telescope='ML1',
                         keep_tmp=None):
 
 
@@ -161,8 +169,16 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     global tel
     tel = telescope
-
     log.info ('telescope:       {}'.format(tel))
+
+
+    # if input [nthreads] is not set, use the value of environment
+    # variable 'OMP_NUM_THREADS', otherwise set it to 1
+    if nthreads is None:
+        nthreads = int(os.environ['OMP_NUM_THREADS'])
+
+    log.info ('nthreads:        {}'.format(nthreads))
+    
 
     # import settings file as set_zogy such that all parameters defined there
     # can be referred to as set_zogy.[parameter]
@@ -4854,22 +4870,19 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 ################################################################################
 
-def coords2sub (xcoords, ycoords, data_shape):
+def coords2sub (xcoords, ycoords):
 
-    """Function to convert pixel coordinates to subimage index for
-    MeerLICHT/BlackGEM images. The input coordinates can be scalars,
-    numpy arrays, lists or tuples, with the output corresponding to
-    the input type.
+    """Function to convert pixel coordinates to subimage index. The input
+    coordinates can be scalars, numpy arrays, lists or tuples, with
+    the output corresponding to the input type.
 
-    Should the coordinates be off the image, i.e. lower than 0.5 or
-    greater than or equal to 10560.5, None is returned for those
-    coordinates.
+    Should the coordinates be off the image, None is returned for
+    those coordinates.
 
     """
 
-    # set image size, number of channels and channel size for
-    # MeerLICHT/BlackGEM CCD
-    ysize, xsize = data_shape
+    # set image size, number of channels and channel size
+    ysize, xsize = get_par(set_zogy.shape_new,tel)
     dx, dy = [get_par(set_zogy.subimage_size,tel)] * 2
 
     # if input coordinates are scalars, convert them to lists
@@ -6612,7 +6625,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                     xcoords_sex[mask_zp], ycoords_sex[mask_zp],
                     flux_opt[mask_zp], fluxerr_opt[mask_zp],
                     ra_cal, dec_cal, mag_cal, exptime, filt)
-                
+
+
                 # determine single zeropoint for entire image
                 zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
                                                  filt, imtype, data_wcs.shape,
@@ -6637,15 +6651,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
                     for i_chan in range(zp_chan.size):
                         header['PC-ZP{}'.format(i_chan+1)] = (
-                            zp_chan.ravel()[i_chan], '[mag] channel {} zeropoint'
+                            zp_chan[i_chan], '[mag] channel {} zeropoint'
                             .format(i_chan+1))
                     for i_chan in range(zp_chan.size):
                         header['PC-ZPS{}'.format(i_chan+1)] = (
-                            zp_std_chan.ravel()[i_chan], '[mag] channel {} sigma '
+                            zp_std_chan[i_chan], '[mag] channel {} sigma '
                             '(STD) zeropoint'.format(i_chan+1))
                     for i_chan in range(zp_chan.size):
                         header['PC-NCC{}'.format(i_chan+1)] = (
-                            ncal_chan.ravel()[i_chan], 'channel {} number of '
+                            ncal_chan[i_chan], 'channel {} number of '
                             'photcal stars used'.format(i_chan+1))
 
 
@@ -7534,7 +7548,7 @@ def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
     # find calibration sources matching SExtractor coordinates using
     # [get_matches]
     index_sex, index_cal = get_matches (ra_sex, dec_sex, ra_cal, dec_cal,
-                                        dist_max=3, return_offsets=False)
+                                        dist_max=2, return_offsets=False)
     x_array = xcoords_sex[index_sex]
     y_array = ycoords_sex[index_sex]
 
@@ -7580,17 +7594,21 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
         nmax = get_par(set_zogy.phot_ncal_max,tel)
         if np.sum(zp_array != 0) >= 5:
 
-            __, zp_median, zp_std = sigma_clipped_stats (zp_array[0:nmax]
+            # pick the brightest [nmax] calibration stars uniformly
+            # spread across the image
+            index_bright = uniform_subset (x_array, y_array, nmax, nregions=nmax)
+
+            __, zp_median, zp_std = sigma_clipped_stats (zp_array[index_bright]
                                                          .astype(float))
 
             # make histrogram plot if needed
             if get_par(set_zogy.make_plots,tel):
-                clipped_stats (zp_array[0:nmax], clip_zeros=True,
+                clipped_stats (zp_array[index_bright], clip_zeros=True,
                                make_hist=get_par(set_zogy.make_plots,tel),
                                name_hist='{}_zp_hist.pdf'.format(base),
                                hist_xlabel='{} zeropoint (mag)'.format(filt))
 
-            nmatch = len(zp_array[0:nmax])
+            nmatch = len(zp_array[index_bright])
             
         else:
             log.warning ('could not determine median and/or std for lack of '
@@ -7604,7 +7622,12 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
         # MeerLICHT/BlackGEM CCD
         zp_median, zp_std, nmatch = zps_medarray (x_array, y_array, zp_array,
                                                   1320, 5280, (2,8), nval_min=5)
+        # arrays need to be flattened to get 1D array with index = nchan-1
+        zp_median = zp_median.ravel()
+        zp_std = zp_std.ravel()
+        nmatch = nmatch.ravel()
 
+        
     elif zp_type == 'background':
 
         # determine zeropoints on the scale of the input boxsize
@@ -7618,6 +7641,12 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
                                                   boxsize, boxsize,
                                                   (nysubs, nxsubs), nval_min=3)
 
+        if False:
+            # arrays need to be transposed to get the mini-images arrays
+            zp_median = zp_median.T
+            zp_std = zp_std.T
+            nmatch = nmatch.T
+        
 
     if get_par(set_zogy.verbose,tel) and zp_type=='single':
         log.info('zp_median: {:.3f}; zp_std: {:.3f}; nmatch: {}'
@@ -7634,13 +7663,13 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
 
 def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
 
-    """Function that returns three arrays with shape [array_shape] with
-    the clipped median, standard deviation and number of zeropoint
-    values [zps] over rectangles with size [dx] x [dy] and shape
-    [array_shape]. This is used to calculate the median zeropoints
-    over the MeerLICHT/BlackGEM channels, or to create a "mini" image
-    with the median zeropoints over some box size, similar to the mini
-    background and standard deviation images.
+    """Function that returns three arrays, each with shape [array_shape],
+    with the clipped median, standard deviation and number of
+    zeropoint values [zps] over rectangles with size [dx] x [dy] and
+    shape [array_shape]. This is used to calculate the median
+    zeropoints over the MeerLICHT/BlackGEM channels, or to create a
+    "mini" image with the median zeropoints over some box size,
+    similar to the mini background and standard deviation images.
 
     """
 
@@ -7659,7 +7688,7 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
     # coordinates/zeropoint arrays
     ncoords = np.size(xcoords)
     sub_array = np.zeros(ncoords).astype(int)
-    
+
     # determine to which subimage the coordinates belong
     x = (xcoords-0.5).astype(int)
     y = (ycoords-0.5).astype(int)
@@ -7671,6 +7700,13 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
         zps_nstars[nsub] = np.sum(mask_sub)
 
 
+    # define number of brightest stars to pick to be twice that of
+    # [nval_min]
+    nval_bright = 2 * nval_min
+    if nval_bright % 2 == 0:
+        nval_bright += 1
+
+
     # loop subimages and determine median zeropoint
     for nsub in range(nsubs):
 
@@ -7680,15 +7716,28 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
         # only determine median when sufficient number of values
         # [nval_min] are available; otherwise leave it at zero
         if np.sum(mask) >= nval_min:
+
+
+            if False:
+                # pick the brightest [nval_bright] calibration stars
+                # uniformly spread across the subimage; forget about
+                # this for now, as with only few stars available this
+                # can increase the scatter wildly
+                index_bright = uniform_subset (xcoords[mask], ycoords[mask],
+                                               nval_bright, nregions=nval_bright)
+                mean, median, std = sigma_clipped_stats (zps[mask][index_bright]
+                                                         .astype(float))
+
+
             mean, median, std = sigma_clipped_stats (zps[mask].astype(float))
             zps_median[nsub] = median
             zps_std[nsub] = std
             
-    # return median values with shape [array_shape] with subimage
-    # number increasing fastests in y
-    return (zps_median.reshape(array_shape).T,
-            zps_std.reshape(array_shape).T,
-            zps_nstars.reshape(array_shape).T)
+            
+    # return median values with shape [array_shape]
+    return (zps_median.reshape(array_shape),
+            zps_std.reshape(array_shape),
+            zps_nstars.reshape(array_shape))
 
 
 ################################################################################
@@ -10531,7 +10580,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     # use [get_matches] to find matches between new and ref coordinates
     # of PSF stars
     index_new, index_ref = get_matches (ra_new, dec_new, ra_ref, dec_ref,
-                                        dist_max=3, return_offsets=False)
+                                        dist_max=2, return_offsets=False)
 
     x_new_match = x_new[index_new]
     y_new_match = y_new[index_new]
@@ -11210,21 +11259,28 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         column_sort = 'E_FLUX_APER_R5xFWHM'
 
     index_sort = np.argsort(data_sexcat[column_sort][mask_use])
+    # sorting is done by flux, so reverse [index_sort] to have the
+    # brightest objects first
+    index_sort = index_sort[::-1]
 
     # select the brightest objects
     nbright = get_par(set_zogy.ast_nbright,tel)
+    index_bright = uniform_subset (data_sexcat['X_POS'][mask_use][index_sort],
+                                   data_sexcat['Y_POS'][mask_use][index_sort],
+                                   nbright)
+
     sexcat_bright = '{}_cat_bright.fits'.format(base)
-    #fits.writeto(sexcat_bright, data_sexcat[:][mask_use][index_sort][-nbright:],
+    #fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][-nbright:],
     #             overwrite=True)
-    fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][-nbright:],
+    fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][index_bright],
                  overwrite=True)
 
     # create ds9 regions text file to show the brightest stars
     if get_par(set_zogy.make_plots,tel):
         result = prep_ds9regions(
             '{}_cat_bright_ds9regions.txt'.format(base),
-            data_sexcat['X_POS'][mask_use][index_sort][-nbright:],
-            data_sexcat['Y_POS'][mask_use][index_sort][-nbright:],
+            data_sexcat['X_POS'][mask_use][index_sort][index_bright],
+            data_sexcat['Y_POS'][mask_use][index_sort][index_bright],
             radius=5., width=2, color='green',
             value=np.arange(1,nbright+1))
 
@@ -11237,6 +11293,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                  .replace('[','').replace(']','').replace(' ',''))
 
     cmd = ['solve-field', '--no-plots',
+           #'--config', '/idia/users/pmv/astrometry/astrometry.cfg',
            #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'X_POS',
            '--y-column', 'Y_POS',
@@ -11295,7 +11352,23 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
         # read .match file, which describes the quad match that solved the
         # image, before it is deleted
-        data_match = read_hdulist ('{}.match'.format(base))
+        table_match = Table.read('{}.match'.format(base))
+
+        # calculate median x- and y-position of the calibration stars
+        # recorded by Astrometry.net, to see if they are well spread
+        # across the entire image
+        filename_xyls = '{}-indx.xyls'.format(base)
+        if os.path.exists(filename_xyls):
+
+            table_xyls = Table.read(filename_xyls)
+            log.info ('median normalized x-coord. of Anet index stars in FOV: '
+                      '{:.2f} +- {:.2f}'
+                      .format(np.median(table_xyls['X'])/width,
+                              np.std(table_xyls['X'])/width))
+            log.info ('median normalized y-coord. of Anet index stars in FOV: '
+                      '{:.2f} +- {:.2f}'
+                      .format(np.median(table_xyls['Y'])/height,
+                              np.std(table_xyls['Y'])/height))
 
     else:
         msg = ('solve-field (Astrometry.net) failed with exit code {}'
@@ -11319,13 +11392,23 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 
     # add specific keyword indicating index file of match
-    if data_match['HEALPIX'][0]!=-1:
-        anet_index = 'index-{}-{:02d}.fits'.format(data_match['INDEXID'][0],
-                                                   data_match['HEALPIX'][0])
+    if table_match['HEALPIX'][0] > 0:
+        anet_index = 'index-{}-{:02d}.fits'.format(table_match['INDEXID'][0],
+                                                   table_match['HEALPIX'][0])
     else:
-        anet_index = 'index-{}.fits'.format(data_match['INDEXID'][0])
+        anet_index = 'index-{}.fits'.format(table_match['INDEXID'][0])
 
-    header_wcs['A-INDEX'] = (anet_index, 'name of index file WCS solution')
+
+    header_wcs['A-INDEX'] = (anet_index, 'name of A.net index file WCS solution')
+
+    # add number of calibration stars in index file
+    header_wcs['A-NINDEX'] = (table_match['NINDEX'][0], 'number of stars in '
+                              'A.net index file in FOV')
+
+    # add number of matching quads
+    header_wcs['A-NQUADS'] = (table_match['QMATCHED'][0], 'number of '
+                              'matching A.net quads used for WCS')
+
 
     # and pixelscale
     cd1_1 = header_wcs['CD1_1']  # CD1_1 = CDELT1 *  cos (CROTA2)
@@ -11449,25 +11532,25 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         header['A-TNAST'] = (n_aststars,
                              'total number of astrometric stars in FOV')
 
-        # Limit to brightest stars ([nbright] is defined above) in the field
-        #index_sort_ast = np.argsort(mag_ast)
-        #ra_ast_bright = ra_ast[index_sort_ast][0:nbright]
-        #dec_ast_bright = dec_ast[index_sort_ast][0:nbright]
 
         # calculate array of offsets between astrometry comparison
         # stars and any non-saturated SExtractor source
-        newra_bright = newra[mask_use][index_sort][-nbright:]
-        newdec_bright = newdec[mask_use][index_sort][-nbright:]        
+        newra_bright = newra[mask_use][index_sort][index_bright]
+        newdec_bright = newdec[mask_use][index_sort][index_bright]        
         __, indx_ast, __, dra_array, ddec_array = get_matches (
             newra_bright, newdec_bright, ra_ast, dec_ast, dist_max=2)
 
 
-        n_aststars_used = np.shape(dra_array)[0]
+        # this is the number of matches that Anet could find
+        # between brightest stars detected and the number of stars
+        # in the index file for this field
+        n_aststars_used = table_match['NMATCH'][0]
+
         log.info('number of astrometric stars used: {}'.format(n_aststars_used))
         header['A-NAST'] = (n_aststars_used,
-                            'number of brightest stars used for WCS')
+                            'number of brightest matching stars used for WCS')
         header['A-NAMAX'] = (get_par(set_zogy.ast_nbright,tel),
-                             'input max. number of stars to use for WCS')
+                             'input max. no. of stars detected to use for WCS')
 
         # calculate means, stds and medians
         dra_mean, dra_median, dra_std = sigma_clipped_stats(
@@ -11479,7 +11562,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                  .format(dra_mean, dra_std, dra_median))
         log.info('ddec_mean [arcsec]: {:.3f}, ddec_std: {:.3f}, ddec_median: '
                  '{:.3f}'.format(ddec_mean, ddec_std, ddec_median))
-        
+
+
         # add header keyword(s):
         header['A-DRA'] = (dra_median,
                            '[arcsec] dRA median offset to astrom. catalog')
@@ -11487,6 +11571,16 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         header['A-DDEC'] = (ddec_median,
                             '[arcsec] dDEC median offset to astrom. catalog')
         header['A-DDESTD'] = (ddec_std, '[arcsec] dDEC sigma (STD) offset')
+
+
+        # this is the number of matches found above between
+        # brightest stars detected and the total number of catalog
+        # stars in this field
+        n_aststars_offset = np.shape(dra_array)[0]
+        header['A-NA-OFF'] = (n_aststars_offset, 'number of matching stars '
+                              'used in offset calc.')
+
+
 
         if True or get_par(set_zogy.make_plots,tel):
 
@@ -11613,7 +11707,43 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         log_timing_memory (t0=t, label='run_wcs')
 
     return
-        
+
+
+################################################################################
+
+def uniform_subset (xcoords, ycoords, nselect, nregions=128):
+
+    """Subdivide input coordinates over [nregions] of equal surface and
+    return the indices of the first ~[nselect]/[nregions] entries for
+    each region."""
+
+    xmin = min(xcoords)
+    xmax = max(xcoords)
+    ymin = min(ycoords)
+    ymax = max(ycoords)
+    xsize = xmax - xmin
+    ysize = ymax - ymin
+    size_region = int(np.sqrt(xsize*ysize/nregions))
+    n_perpix = nselect / (xsize*ysize)
+
+    indices_out = []
+    for x in np.arange(xmin, xmax, size_region):
+        dx = min(size_region, xmax-x)
+        for y in np.arange(ymin, ymax, size_region):
+            dy = min(size_region, ymax-y)
+            indices_tmp = np.nonzero((xcoords>=x) & (xcoords<(x+size_region)) &
+                                     (ycoords>=y) & (ycoords<(y+size_region)))[0]
+            n = max(int(dx*dy*n_perpix+0.5),1)
+            indices_out += list(indices_tmp[0:n])
+
+
+    # shuffling the indices in place
+    rng = np.random.default_rng()
+    rng.shuffle(indices_out)
+
+
+    return indices_out[0:nselect]
+
 
 ################################################################################
 
@@ -12682,7 +12812,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     if limit_ldac:
 
         mem_use ('before limiting LDAC')
-        
+
         with fits.open(cat_in, mode='update') as hdulist:
             data_ldac = hdulist[-1].data
             # SExtractor flags 0 or 1 and S/N larger than value
@@ -12691,37 +12821,50 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             # in the psfex.config file: SAMPLE_FLAGMASK = 0x00fe
             # (=254) or '0b11111110'
             s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
-            mask_ok = ((data_ldac['FLAGS']<=1) & 
-                       (data_ldac['SNR_WIN']>=s2n) &
-                       (data_ldac['IMAFLAGS_ISO']==0))
+            index_ok = np.nonzero((data_ldac['FLAGS']<=1) & 
+                                  (data_ldac['SNR_WIN']>=s2n) &
+                                  (data_ldac['IMAFLAGS_ISO']==0))[0]
 
 
-            mem_use ('after mask_ok filter')
-            
-            mask_sum = np.sum(mask_ok)
+            mem_use ('after index_ok filter')
+
             log.info ('number of PSF stars available with FLAGS<=1, SNR>{} '
-                      'and IMAFLAGS_ISO==0: {}'.format(s2n, mask_sum))
+                      'and IMAFLAGS_ISO==0: {}'.format(s2n, len(index_ok)))
 
-            # to limit the number of PSF stars to a reasonable number
-            # in crowded fields, pick a random set of [nlimit] stars
-            # if there are at least that number available
-            nlimit = 20000
-            if mask_sum > nlimit:
-                index_keep = (np.random.rand(nlimit) * mask_sum).astype(int)
-                log.info ('using random subset of {} of these'
-                          .format(len(index_keep)))
-            else:
-                index_keep = np.arange(mask_sum)
 
-            hdulist[2].data = data_ldac[mask_ok][index_keep]
-            
-            
+            # select random set of PSF stars, not more than [nlimit],
+            # uniformly spread across the image
+            nlimit = 10000
+            # shuffle indices
+            rng = np.random.default_rng()
+            rng.shuffle(index_ok)
+            index_uniform = uniform_subset (data_ldac['XWIN_IMAGE'][index_ok],
+                                            data_ldac['YWIN_IMAGE'][index_ok],
+                                            nlimit)
+            hdulist[2].data = data_ldac[index_ok][index_uniform]
+
+
+            if False:
+                # old method
+                nlimit = 20000
+                nok = len(index_ok)
+                if nok > nlimit:
+                    index_keep = (np.random.rand(nlimit) * nok).astype(int)
+                    log.info ('using random subset of {} of these'
+                              .format(len(index_keep)))
+                else:
+                    index_keep = np.arange(nok)
+                    
+                hdulist[2].data = data_ldac[index_ok][index_keep]
+
+
+
         if get_par(set_zogy.make_plots,tel):
             result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
-                                     data_ldac['XWIN_IMAGE'][mask_ok],
-                                     data_ldac['YWIN_IMAGE'][mask_ok],
+                                     data_ldac['XWIN_IMAGE'][index_ok][index_uniform],
+                                     data_ldac['YWIN_IMAGE'][index_ok][index_uniform],
                                      radius=5., width=2, color='red')
-                
+
         if get_par(set_zogy.timing,tel):
             log_timing_memory (
                 t0=t,label='limiting entries in LDAC input catalog for PSFEx')
@@ -13566,14 +13709,14 @@ def main():
                         help='if name is provided, an output logfile is created')
     parser.add_argument('--redo_new', default=None,
                         help='force re-doing new-image source-extractor and '
-                        'astrometry.net parts even when products already present)')
+                        'astrometry.net parts even when products already present')
     parser.add_argument('--redo_ref', default=None,
                         help='force re-doing ref-image source-extractor and '
-                        'astrometry.net parts even when products already present)')
+                        'astrometry.net parts even when products already present')
     parser.add_argument('--verbose', default=None,
                         help='increase verbosity level')
-    parser.add_argument('--nthreads', type=int, default=1,
-                        help='number of threads (CPUs) to use')
+    parser.add_argument('--nthreads', type=int, default=None,
+                        help='number of threads (CPUs) to use (default: None)')
     parser.add_argument('--telescope', type=str, default='ML1', help='telescope')
     parser.add_argument('--keep_tmp', default=None,
                         help='keep intermediate/temporary files')
