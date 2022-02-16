@@ -188,7 +188,7 @@ cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
            .format(os.environ['ZOGYHOME']),
            }
 
-ast_nbright = 1000       # brightest no. of objects in the field to
+ast_nbright = 1500       # brightest no. of objects in the field to
                          # use for astrometric solution and crosscheck
                          # of positions obtained against calibration
                          # catalog
