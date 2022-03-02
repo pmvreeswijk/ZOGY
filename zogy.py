@@ -2870,7 +2870,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     # read a few header keywords 
-    pixscale = header['A-PSCALE']
+    pixscale = read_header(header, ['pixscale'])
+
     # for the FWHM, use the average of fwhm_new and fwhm_ref
     fwhm = (header_new['S-FWHM'] + header_ref['S-FWHM']) / 2
 
