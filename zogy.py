@@ -5486,7 +5486,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
         dDdx = D - np.roll(D,1,axis=1)
         dDdxy = D - np.roll(D,1,axis=(0,1))
         V_ast = np.abs(dx2) * dDdx**2 + np.abs(dy2) * dDdy**2 + np.abs(dxy) * dDdxy**2
-        
+
     if mask_use is None: 
         # if input mask [mask_use] was not provided, create it with same
         # shape as D with all elements set to True.
@@ -5499,7 +5499,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
 
     # initialize bkg_2dfit
     bkg_2dfit = np.zeros(D.shape)
-        
+
     if fit_bkg:
 
         # image size
@@ -5546,7 +5546,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
 
             if False:
                 for i_order in range(bkg_order+1):
-                    
+
                     coeffs, chi2red = polyfit2d (
                         xx[mask_bkg]/f_norm, yy[mask_bkg]/f_norm,
                         D[mask_bkg], order=i_order, verbose=show,
@@ -5615,13 +5615,13 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
             # improved variance (see Eq. 13 from Horne 1986)
             V = bkg_var + np.abs(flux_opt) * P
 
-            
+
         if add_V_ast:
             V += V_ast
-                        
+
         # optimal flux
         flux_opt, fluxerr_opt = get_optflux (P[mask_use], D[mask_use], V[mask_use])
-                    
+
         #print ('i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt,
         #       abs(flux_opt_old-flux_opt)/flux_opt,
         # abs(flux_opt_old-flux_opt)/fluxerr_opt)
@@ -5943,20 +5943,21 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     if fits_mask is not None:
         # read in mask image
         data_mask = read_hdulist (fits_mask, dtype='uint8')
+        # create new mask or modify an existing one
+        data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
+
     else:
         data_mask = None
         fits_mask = input_fits.replace('.fits', '_mask.fits')
+        # create new mask or modify an existing one
+        data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
 
-    # create new mask or modify an existing one
-    data_mask = create_modify_mask (data_wcs, satlevel, data_mask=data_mask)
-
-    # as pointed out by PLirat through GitHub (see email from 23 Dec
-    # 2021), if [fits_mask] is not provided, then an error occurs
-    # below when remapping the reference image mask because the fits
-    # file itself is required in [help_swarp] (and also in
-    # [run_sextractor] if fake stars are being added), which was not
-    # created before; added these lines as suggested by PLirat:
-    if fits_mask is None:
+        # as pointed out by PLirat through GitHub (see email from 23 Dec
+        # 2021), if [fits_mask] is not provided, then an error occurs
+        # below when remapping the reference image mask because the fits
+        # file itself is required in [help_swarp] (and also in
+        # [run_sextractor] if fake stars are being added), which was not
+        # created before; added these lines as suggested by PLirat:
         header_mask = read_hdulist (input_fits, get_data=False, get_header=True)
         fits.writeto (fits_mask, data_mask, header_mask, overwrite=True)
 
@@ -7935,7 +7936,8 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, get_altaz=False):
 
     location = EarthLocation(lat=lat, lon=lon, height=height)
     coords = SkyCoord(ra, dec, frame='icrs', unit='deg')
-    coords_altaz = coords.transform_to(AltAz(obstime=Time(obsdate), location=location))
+    coords_altaz = coords.transform_to(AltAz(obstime=Time(obsdate),
+                                             location=location))
 
     if get_altaz:
         return coords_altaz.secz, coords_altaz.alt.deg, coords_altaz.az.deg
