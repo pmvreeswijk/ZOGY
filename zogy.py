@@ -95,7 +95,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.9'
+__version__ = '1.0.10'
 
 
 ################################################################################
@@ -1763,7 +1763,7 @@ def get_ML_prob_real_old (fits_table, model, use_30x30=True, factor_norm=255.):
 ################################################################################
 
 def orient_data (data, header, header_out=None, MLBG_rot90_flip=False,
-                 tel=None):
+                 pixscale=0.564, tel=None):
 
     """Function to remap [data] from the CD matrix defined in [header] to
     the CD matrix taken from [header_out].  If the latter is not
@@ -1805,11 +1805,9 @@ def orient_data (data, header, header_out=None, MLBG_rot90_flip=False,
     # up, East left
     if header_out is not None:
         CD_out = read_CD_matrix (header_out)    
-
     else:
-        # define de CD matrix with North up and East left, using the
-        # pixel scale from the input [header]
-        pixscale = read_header(header, ['pixscale'])
+        # define the CD matrix with North up and East left, using the
+        # input pixel scale
         cdelt = pixscale/3600
         CD_out = np.array([[-cdelt, 0], [0, cdelt]])
 
@@ -3440,7 +3438,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                         #    MLBG_rot90_flip=True, tel=tel)
                         data_thumbnail[i_pos] = orient_data (
                             data_thumbnail[i_pos], header_new,
-                            MLBG_rot90_flip=True, tel=tel)
+                            MLBG_rot90_flip=True, pixscale=pixscale_new, tel=tel)
 
                         
                 except Exception as e:
@@ -4094,7 +4092,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
                         #    MLBG_rot90_flip=True, tel=tel)
                         data_thumbnails[i_tn][i_pos] = orient_data (
                             data_thumbnails[i_tn][i_pos], header_new,
-                            MLBG_rot90_flip=True, tel=tel)
+                            MLBG_rot90_flip=True, pixscale=pixscale_new, tel=tel)
 
                         
                 except Exception as e:
@@ -4494,8 +4492,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # [psf_ima_ref] needs to be rotated to the orientation of
             # the new image
             psf_ima_ref = orient_data (psf_ima_ref, header_ref,
-                                       header_out=header_new,
-                                       tel=tel)
+                                       header_out=header_new, tel=tel)
 
 
             # setting image standard deviations and flux ratios to
@@ -5027,8 +5024,7 @@ def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
         # remap [psf_ima_sub] from the ref frame to the new frame
         # using the function [orient_data]
         psf_ima_config = orient_data (psf_ima_config, header,
-                                      header_out=header_new,
-                                      tel=tel)
+                                      header_out=header_new, tel=tel)
 
 
     if False:
