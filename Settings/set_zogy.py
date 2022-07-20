@@ -176,6 +176,8 @@ skip_wcs = False         # skip Astrometry.net step if image already
                          # contains a reliable WCS solution
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
+# Astrometry.net configuration file
+astronet_config = '/etc/astrometry.cfg'
 # only search in Astrometry.net index files within this radius of the
 # header RA and DEC [deg]
 astronet_radius = 30.

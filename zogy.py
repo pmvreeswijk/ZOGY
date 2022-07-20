@@ -670,6 +670,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             header_trans['SWARP-V'] = (version.strip(), 'SWarp version used')
 
 
+
     if new and ref:
         # get x, y and fratios from matching PSFex stars across entire
         # frame the "_subs" output arrays are the values to be used for
@@ -1968,9 +1969,9 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
         # formats are identical to one another - this is used to read
         # specific extensions from e.g. the calibration catalog.
         if type(ext_name_indices) in [list, range, np.ndarray]:
-            
+
             for i_ext, ext in enumerate(ext_name_indices):
-                
+
                 # get header from first extension as they should be
                 # all identical, except for NAXIS2 (nrows)
                 if get_header and i_ext==0:
@@ -1995,7 +1996,7 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
                         # these are incorrectly converted; therefore the
                         # conversion to a Table above
                         data = np.concatenate([data, data_temp])
-                        
+
         else:
             # otherwise read the extension defined by [ext_name_indices]
             # or simply the last extension
@@ -2003,17 +2004,17 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
                 ext = ext_name_indices
             else:
                 ext = n_exts-1
-                
+
             if get_data:
                 data = hdulist[ext].data
                 # convert to [dtype] if it is defined
                 if dtype is not None:
                     data = data.astype(dtype, copy=False)
-                    
+
             if get_header:
                 header = hdulist[ext].header
 
-                    
+
     if columns is not None:
         # only return defined columns
         return [data[col] for col in columns if col in data.dtype.names]
@@ -2029,7 +2030,7 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
             if get_header:
                 return header
             else:
-                return 
+                return
 
 
 ################################################################################
@@ -11292,7 +11293,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                  .replace('[','').replace(']','').replace(' ',''))
 
     cmd = ['solve-field', '--no-plots',
-           #'--config', '/idia/users/pmv/astrometry/astrometry.cfg',
+           '--config', get_par(set_zogy.astronet_config,tel),
            #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'X_POS',
            '--y-column', 'Y_POS',
@@ -11580,8 +11581,10 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                               'used in offset calc.')
 
 
+        # check if original ML/BG filename contains 'adc'
+        is_adcfile = 'ORIGFILE' in header and 'adc' in header['ORIGFILE'].lower()
 
-        if True or get_par(set_zogy.make_plots,tel):
+        if get_par(set_zogy.make_plots,tel) or is_adcfile:
 
             # plot of dra vs. ddec in arcseconds, including histograms
             dr = np.sqrt(dra_std**2+ddec_std**2)
@@ -11596,7 +11599,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                 label=[label1,label2], labelpos=[(0.77,0.9),(0.77,0.85)],
                 filename='{}_dRADEC.pdf'.format(base),
                 title=base.split('/')[-1])
-            
+
             # plot of dra vs. color and ddec vs. color, to check for
             # offset dependence on stellar color
             col = ['g', 'r']
