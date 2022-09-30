@@ -95,7 +95,7 @@ from meerCRAB_code import prediction_phase
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.10'
+__version__ = '1.0.11'
 
 
 ################################################################################
@@ -6312,10 +6312,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         errxywin = table_sex['XYCOV_POS']
 
 
-        # read object mask image
+        # read object mask image (since Sep 2022 this is a uint8 image
+        # with ones indicating the objects; previous to that it was a
+        # float32 image with zeros indicating the objects)
         fits_objmask = '{}_objmask.fits'.format(base)
-        data_objmask = read_hdulist(fits_objmask, dtype='float32')
-        objmask = (np.abs(data_objmask)==0)
+        objmask = read_hdulist(fits_objmask).astype('bool')
 
 
         psfex_bintable = '{}_psf.fits'.format(base)
@@ -11410,10 +11411,12 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                               'matching A.net quads used for WCS')
 
 
-    # and pixelscale
+    # and pixelscale; see Eq. 189 of Calabretta and Greisen
+    # (previously the signs in the sin of CD1_2 and CD2_1 below were
+    # switched around)
     cd1_1 = header_wcs['CD1_1']  # CD1_1 = CDELT1 *  cos (CROTA2)
-    cd1_2 = header_wcs['CD1_2']  # CD1_2 = CDELT2 *  sin (CROTA2)
-    cd2_1 = header_wcs['CD2_1']  # CD2_1 = CDELT1 * -sin (CROTA2)
+    cd1_2 = header_wcs['CD1_2']  # CD1_2 = CDELT2 * -sin (CROTA2)
+    cd2_1 = header_wcs['CD2_1']  # CD2_1 = CDELT1 *  sin (CROTA2)
     cd2_2 = header_wcs['CD2_2']  # CD2_2 = CDELT2 *  cos (CROTA2)
 
 
@@ -11423,11 +11426,17 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 
     # and rotation with the angle between the North and the second
-    # axis (y-axis) of the image, counted positive to the East
-    anet_rot_x = np.arctan2(-cd2_1, cd1_1) * (180./np.pi)
-    anet_rot_y = np.arctan2( cd1_2, cd2_2) * (180./np.pi)
+    # axis (y-axis) of the image, counted positive to the East; the
+    # minus sign is added because the signs were switched around in
+    # the CD matrix previously, leading to a different convention of
+    # the angle direction, which is kept the same for the moment;
+    # without the minus sign in front, the angle would be from the
+    # y-axis to North instead
+    anet_rot_x = -np.arctan2( cd2_1, cd1_1) * (180./np.pi)
+    anet_rot_y = -np.arctan2(-cd1_2, cd2_2) * (180./np.pi)
     anet_rot = np.average([anet_rot_x, anet_rot_y])
 
+    
     # add header keywords
     header_wcs['A-PSCALE'] = (anet_pixscale,
                               '[arcsec/pix] pixel scale WCS solution')
@@ -11437,11 +11446,11 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                               '[arcsec/pix] Y-axis pixel scale WCS solution')
 
     header_wcs['A-ROT'] = (anet_rot,
-                           '[deg] rotation WCS solution (E of N for "up")')
+                           '[deg] rotation WCS solution (from N to y-axis)')
     header_wcs['A-ROTX'] = (anet_rot_x,
-                            '[deg] X-axis rotation WCS (E of N for "up")')
+                            '[deg] X-axis rotation WCS (from N to y-axis)')
     header_wcs['A-ROTY'] = (anet_rot_y,
-                            '[deg] Y-axis rotation WCS (E of N for "up")')
+                            '[deg] Y-axis rotation WCS (from N to y-axis)')
 
     # convert SIP header keywords from Astrometry.net to PV keywords
     # that swarp, scamp (and sextractor) understand using this module
@@ -11666,9 +11675,9 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     ra_center, dec_center = wcs.all_pix2world(width/2+0.5, height/2+0.5, 1)
     log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
     header['RA-CNTR'] = (float(ra_center), 
-                         'RA (ICRS) at image center (astrometry.net)')
+                         '[deg] RA (ICRS) at image center (astrometry.net)')
     header['DEC-CNTR'] = (float(dec_center), 
-                          'DEC (ICRS) at image center (astrometry.net)')
+                          '[deg] DEC (ICRS) at image center (astrometry.net)')
 
 
     # write data_cal with selection of calibration stars in this field
@@ -12584,14 +12593,21 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
                               'background full image')
 
 
+    # save object mask created by source extractor, which is a float32
+    # image with zeros indicating the objects, as an uint8 image with
+    # ones indicating the objects
+    fits_objmask = '{}_objmask.fits'.format(base)
+    if os.path.exists(fits_objmask):
+        data_objmask = read_hdulist(fits_objmask, dtype='float32')
+        objmask = (np.abs(data_objmask)==0)
+        fits.writeto(fits_objmask, objmask.astype('uint8'), overwrite=True)
+
+
     # remove file(s) if not keeping intermediate/temporary files
     if not get_par(set_zogy.keep_tmp,tel):
 
         if 'image_fraction' in locals():
             remove_files ([image_fraction], verbose=True)
-
-        #if 'fits_objmask' in locals():
-        #    remove_files ([fits_objmask])
 
         if fraction < 1:
             remove_files ([cat_out], verbose=True)
