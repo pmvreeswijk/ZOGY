@@ -4283,11 +4283,12 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     limflux_nsigma=5., psfex_bintable_ref=None,
                     data_new_bkg_std=None, data_ref_bkg_std=None,
                     header_new=None, header_ref=None, header_trans=None,
-                    imtype=None, inject_fake=False,
+                    imtype=None, Scorr_peak=None, inject_fake=False,
                     nsigma_fake=10., D_objmask=None, remove_psf=False,
                     replace_sat_psf=False, replace_sat_nmax=100,
                     set_zogy=None, tel=None, fwhm=None, diff=True,
                     get_flags_mask_central=False, nthreads=1):
+
 
     """Function that returns the optimal flux and its error (using the
        function [flux_optimal] of a source at pixel positions [xcoords],
