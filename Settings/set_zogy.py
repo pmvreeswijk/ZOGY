@@ -73,8 +73,13 @@ fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
 # Machine Learning - trained on MeerLICHT data!
 #===============================================================================
 ML_calc_prob = True
-ML_model = ('{}/meerCRAB_model/NET3_threshold_9_NRD'
-            .format(os.environ['MEERCRABHOME']))
+# version to use: 1=Zafiirah; 2=Diederik
+ML_version = 2
+# list of ML_models, where the model used is determined by [ML_version]:
+# ML_model = ML_models[ML_version - 1]
+ML_models = ['{}/meerCRAB_model/NET3_threshold_9_NRD'
+             .format(os.environ['MEERCRABHOME']),
+             '{}/CalFiles/model270123.h5'.format(os.environ['ZOGYHOME'])]
 
 
 #===============================================================================
@@ -91,7 +96,6 @@ bkg_boxsize = 60         # size of region used to determine
                          # background (both methods)
 bkg_filtersize = 3       # size of filter used for smoothing the above
                          # regions (both methods)
-bkg_phototype = 'local'  # use local or global background for photometry
 
 
 # these parameters are related to MeerLICHT/BlackGEM images only
@@ -183,12 +187,15 @@ astronet_config = '/etc/astrometry.cfg'
 astronet_radius = 30.
 pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
                            # be within this fraction of the assumed pixscale
+
 # calibration catalog used for both astrometry and photometry
-cal_cat = {'ML1': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
-           .format(os.environ['ZOGYHOME']),
-           'BG': '{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
-           .format(os.environ['ZOGYHOME']),
-           }
+cal_cat = ('{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+           .format(os.environ['ZOGYHOME']))
+# upcoming new catalog
+#cal_cat = ('{}/CalFiles/GaiaDR3_calcat_MLBG_HPlevel3_highPM.fits'
+#           .format(os.environ['ZOGYHOME']))
+#cal_cat = ('{}/CalFiles/GaiaDR3_calcat_MLBG_HPlevel3_highPM_glimit12-17_HPfine11.fits'
+#           .format(os.environ['ZOGYHOME']))
 
 ast_nbright = 1500       # brightest no. of objects in the field to
                          # use for astrometric solution and crosscheck
@@ -200,10 +207,39 @@ ast_filter = 'r'         # magnitude column to sort in brightness
 #===============================================================================
 # Photometry
 #===============================================================================
-# aperture radii in units of FWHM
-apphot_radii = [0.66, 1.5, 5] # list of radii in units of FWHM used
-                              # for aperture photometry in SExtractor
 
+# if force_phot_gaia is True, forced photometry will be performed on
+# all sources from the input catalog - provided in parameter gaia_cat
+# - whose positions are within the input image(s); proper motion is
+# taken into account if columns pmra and pmdec are available in
+# gaia_cat and adopting gaia_epoch for the input catalog EPOCH. For
+# quicker reading, the catalog is assumed to be split into multiple
+# extensions, where the extensions contain the entries corresponding
+# to healpixel of level [gaia_hplevel], where nside=2**level and
+# n_healpix = 12*nside**2 = 12*4**level. The output catalog will
+# contain the same number of entries as the number of sources in
+# gaia_cat within the image(s).
+#
+# if force_phot_gaia is False, the number of sources is determined by
+# the significant sources detected by Source Extractor, where the
+# threshold can be adjusted in the configuration file (see sex_cfg
+# further below)
+force_phot_gaia = False
+#gaia_cat = '/users/pmv/Gaia/DR3/Gaia_DR3_all_HPlevel3_highPM.fits'
+gaia_cat = ('{}/CalFiles/Gaia_DR3_all_HPlevel3_highPM.fits'
+            .format(os.environ['ZOGYHOME']))
+gaia_hplevel = 3
+gaia_epoch = 2016
+
+
+# aperture and sky background annulus radii in units of FWHM
+apphot_radii = [0.66, 1.5, 5] # aperture photometry radii in units of FWHM
+apphot_sky_inout = [4, 5]     # sky background annulus radii in units of FWHM
+
+# use local or global background for photometry
+bkg_phototype = 'local'
+
+                              
 # PSF fitting
 psffit = False                # perform PSF fitting using own function
 psffit_sex = False            # perform PSF fitting using SExtractor
