@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 setup(
     name='zogy',
-    version='1.0.10',
+    version='1.1.0',
     description='a Python implementation of proper image subtraction (ZOGY 2016, ApJ, 830, 27)',
     url='https://github.com/pmvreeswijk/ZOGY',
     author='Paul Vreeswijk, Kerry Paterson',
@@ -10,5 +10,6 @@ setup(
     license='MIT',
     packages=find_packages(),
     install_requires=['numpy', 'astropy', 'matplotlib', 'scipy', 'pyfftw',
-                      'lmfit', 'sip_tpv', 'scikit-image']
+                      'lmfit', 'sip_tpv', 'scikit-image', 'healpy', 'photutils',
+                      'tensorflow']
 )
