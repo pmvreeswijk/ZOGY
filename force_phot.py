@@ -21,9 +21,7 @@ logFormatter = logging.Formatter(logfmt, datefmt)
 logging.Formatter.converter = time.gmtime #convert time in logger to UTC
 log = logging.getLogger()
 
-from zogy import get_par, read_hdulist, get_psfoptflux
-from zogy import get_airmass, apply_zp, mem_use, get_Xchan_bool, mini2back
-from zogy import get_index_around_xy, orient_data
+import zogy
 import set_zogy
 set_zogy.verbose=False
 
@@ -435,7 +433,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     log.info ('sorting by FILENAME')
     index_sort = np.argsort(table['FILENAME'])
 
-    mem_use('at end of [force_phot]')
+    zogy.mem_use ('at end of [force_phot]')
 
     # return table
     return table[index_sort]
@@ -603,7 +601,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     if thumbnails:
         size_tn = size_thumbnails
     else:
-        size_tn = get_par(set_zogy.size_thumbnails,tel)
+        size_tn = zogy.get_par(set_zogy.size_thumbnails,tel)
 
     for col in colnames:
         if 'THUMBNAIL' in col:
@@ -750,7 +748,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
 
 
-    mem_use('at end of [get_rows]')
+    zogy.mem_use ('at end of [get_rows]')
 
     return table
 
@@ -842,7 +840,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     if ref:
         data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
     else:
-        data_shape = get_par(set_zogy.shape_new,tel)
+        data_shape = zogy.get_par(set_zogy.shape_new,tel)
 
     ysize, xsize = data_shape
     
@@ -926,7 +924,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         # object mask - not always available, so first check if it
         # exists
         if os.path.exists(fits_objmask):
-            objmask = read_hdulist (fits_objmask, dtype=bool)
+            objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
 
         else:
             # if it does not exist, create an object masking depending
@@ -943,15 +941,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
         # read reduced image; need to use astropy method, as otherwise
-        # this will lead to an exception in [get_psfoptflux] as
+        # this will lead to an exception in [zogy.get_psfoptflux] as
         # (probably) the shape attribute is not available when data is
         # read through fitsio.FITS
-        data = read_hdulist (fits_red)
+        data = zogy.read_hdulist (fits_red)
 
         # corresponding mask may not be available, so first check if
         # it exists
         if fits_mask is not None and os.path.exists(fits_mask):
-            data_mask = read_hdulist (fits_mask)
+            data_mask = zogy.read_hdulist (fits_mask)
             # mask can be read using fitsio.FITS, but only little bit
             # faster than astropy.io.fits
             #data_mask = FITS(fits_mask)[-1][:,:]
@@ -967,22 +965,23 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     
         try:
             # determine optimal fluxes at pixel coordinates
-            flux_opt, fluxerr_opt = get_psfoptflux (
+            flux_opt, fluxerr_opt = zogy.get_psfoptflux (
                 psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                 ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
                 set_zogy=set_zogy, tel=tel)
         
         except Exception as e:
-            log.error ('exception was raised while executing [get_psfoptflux]; '
-                       'skipping extraction of {} magnitudes for {}: {}'
-                       .format(label, basename, e))
+            log.error ('exception was raised while executing '
+                       '[zogy.get_psfoptflux]; skipping extraction of {} '
+                       'magnitudes for {}: {}'.format(label, basename, e))
             return table
 
 
         if zp is not None:
             # infer calibrated magnitudes using the zeropoint
-            mag_opt, magerr_opt = apply_zp (flux_opt, zp, airmass, exptime, filt,
-                                            ext_coeff, fluxerr=fluxerr_opt)
+            mag_opt, magerr_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
+                                                 filt, ext_coeff,
+                                                 fluxerr=fluxerr_opt)
             mask_pos = (flux_opt > 0)
             mag_opt[~mask_pos] = 99
             magerr_opt[~mask_pos] = 99
@@ -1084,9 +1083,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
                 # infer calibrated magnitudes using the zeropoint
                 if zp is not None:
-                    mag_ap, magerr_ap = apply_zp (flux_ap, zp, airmass, exptime,
-                                                  filt, ext_coeff,
-                                                  fluxerr=fluxerr_ap)
+                    mag_ap, magerr_ap = zogy.apply_zp (flux_ap, zp, airmass,
+                                                       exptime, filt, ext_coeff,
+                                                       fluxerr=fluxerr_ap)
                     mask_pos = (flux_ap > 0)
                     mag_ap[~mask_pos] = 99
                     magerr_ap[~mask_pos] = 99
@@ -1167,7 +1166,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         # centre was used
         airmassc = header['AIRMASSC']
         Fpsferr = (10**(-0.4*(tlimmags - zp + airmassc * ext_coeff))
-                   * exptime / get_par(set_zogy.transient_nsigma,tel))
+                   * exptime / zogy.get_par(set_zogy.transient_nsigma,tel))
 
 
         # read off transient S/N from Scorr image
@@ -1176,8 +1175,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         if zp is not None:
             # infer calibrated magnitudes using the zeropoint
-            mag_zogy, magerr_zogy = apply_zp (np.abs(Fpsf), zp, airmass, exptime,
-                                              filt, ext_coeff, fluxerr=Fpsferr)
+            mag_zogy, magerr_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
+                                                   exptime, filt, ext_coeff,
+                                                   fluxerr=Fpsferr)
             mask_zero = (Fpsf==0)
             mag_zogy[mask_zero] = 99
             magerr_zogy[mask_zero] = 99
@@ -1247,10 +1247,11 @@ def get_thumbnail (data, data_shape, xcoords, ycoords, size_tn, key_tn, header,
     for i_pos in range(ncoords):
 
         # get index around x,y position using function
-        # [get_index_around_xy]
+        # [zogy.get_index_around_xy]
         x = xcoords[i_pos]
         y = ycoords[i_pos]
-        index_full, index_tn = (get_index_around_xy(ysize, xsize, y, x, size_tn))
+        index_full, index_tn = (zogy.get_index_around_xy(ysize, xsize, y, x,
+                                                         size_tn))
 
         try:
 
@@ -1258,8 +1259,8 @@ def get_thumbnail (data, data_shape, xcoords, ycoords, size_tn, key_tn, header,
 
             # orient the thumbnails in North-up, East left
             # orientation
-            data_tn[i_pos] = orient_data (data_tn[i_pos], header,
-                                          MLBG_rot90_flip=True, tel=tel)
+            data_tn[i_pos] = zogy.orient_data (data_tn[i_pos], header,
+                                               MLBG_rot90_flip=True, tel=tel)
 
 
         except Exception as e:
@@ -1321,14 +1322,14 @@ def get_keys (header, ra_in, dec_in, tel):
     if 'R-V' in header or 'R-COMB-M' in header:
         airmass = 1.0
     else:
-        lat = get_par(set_zogy.obs_lat,tel)
-        lon = get_par(set_zogy.obs_lon,tel)
-        height = get_par(set_zogy.obs_height,tel)
-        airmass = get_airmass(ra_in, dec_in, obsdate, lat, lon, height)
+        lat = zogy.get_par(set_zogy.obs_lat,tel)
+        lon = zogy.get_par(set_zogy.obs_lon,tel)
+        height = zogy.get_par(set_zogy.obs_height,tel)
+        airmass = zogy.get_airmass(ra_in, dec_in, obsdate, lat, lon, height)
 
 
     # extinction coefficient
-    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]       
+    ext_coeff = zogy.get_par(set_zogy.ext_coeff,tel)[filt]       
 
 
     return exptime, filt, zp, airmass, ext_coeff
@@ -1341,19 +1342,19 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
     # background STD
     fits_bkg_std = '{}_bkg_std.fits.fz'.format(basename)
     if os.path.exists(fits_bkg_std):
-        data_bkg_std = read_hdulist (fits_bkg_std, dtype='float32')
+        data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
         # only little bit faster with fitsio.FITS
         #data_bkg_std = FITS(fits_bkg_std)[-1][:,:]
     else:
         # if it does not exist, create it from the background mesh
         fits_bkg_std_mini = '{}_bkg_std_mini.fits'.format(basename)
-        data_bkg_std_mini, header_mini = read_hdulist (
+        data_bkg_std_mini, header_mini = zogy.read_hdulist (
             fits_bkg_std_mini, get_header=True, dtype='float32')
 
         if 'BKG-SIZE' in header_mini:
             bkg_size = header_mini['BKG-SIZE']
         else:
-            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+            bkg_size = zogy.get_par(set_zogy.bkg_boxsize,tel)
 
 
         if len(xcoords) == 1:
@@ -1366,14 +1367,16 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
         else:
             # determine full bkg_std image from mini image
             
-            # determine whether interpolation is allowed across different
-            # channels in [mini2back] using function get_Xchan_bool
-            chancorr = get_par(set_zogy.MLBG_chancorr,tel)
-            interp_Xchan_std = get_Xchan_bool (tel, chancorr, imtype, std=True)
-            data_bkg_std = mini2back (
+            # determine whether interpolation is allowed across
+            # different channels in [zogy.mini2back] using function
+            # [zogy.get_Xchan_bool]
+            chancorr = zogy.get_par(set_zogy.MLBG_chancorr,tel)
+            interp_Xchan_std = zogy.get_Xchan_bool (tel, chancorr, imtype,
+                                                    std=True)
+            data_bkg_std = zogy.mini2back (
                 data_bkg_std_mini, data_shape, order_interp=1,
                 bkg_boxsize=bkg_size, interp_Xchan=interp_Xchan_std,
-                timing=get_par(set_zogy.timing,tel))
+                timing=zogy.get_par(set_zogy.timing,tel))
 
             
     return data_bkg_std
@@ -1425,8 +1428,9 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
 
         # get index around x,y position using function
         # [zogy.get_index_around_xy]
-        index_full, index_tn = (get_index_around_xy(ysize, xsize, ycoords[m],
-                                                    xcoords[m], size_4fwhm))
+        index_full, index_tn = (zogy.get_index_around_xy(ysize, xsize,
+                                                         ycoords[m], xcoords[m],
+                                                         size_4fwhm))
 
         if np.sum(data_mask[index_full]) != 0:
 
@@ -2372,5 +2376,5 @@ if __name__ == "__main__":
 
 
     # list memory used
-    mem_use('at very end')
+    zogy.mem_use ('at very end')
     
