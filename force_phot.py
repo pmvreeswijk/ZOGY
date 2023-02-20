@@ -21,9 +21,9 @@ logFormatter = logging.Formatter(logfmt, datefmt)
 logging.Formatter.converter = time.gmtime #convert time in logger to UTC
 log = logging.getLogger()
 
-from zogy import find_stars, get_par, read_hdulist, get_psfoptflux
+from zogy import get_par, read_hdulist, get_psfoptflux
 from zogy import get_airmass, apply_zp, mem_use, get_Xchan_bool, mini2back
-from zogy import get_index_around_xy, get_matches, orient_data
+from zogy import get_index_around_xy, orient_data
 import set_zogy
 set_zogy.verbose=False
 
