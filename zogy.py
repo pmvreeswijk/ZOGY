@@ -43,6 +43,7 @@ from numpy.polynomial.polynomial import polyvander2d, polygrid2d, polyval2d
 
 from numpy.lib.recfunctions import append_fields, drop_fields
 #from numpy.lib.recfunctions import rename_fields, stack_arrays
+
 import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
@@ -93,10 +94,20 @@ matplotlib.use('Agg')
 # needed for Zafiirah's machine learning package MeerCRAB
 from meerCRAB_code import prediction_phase
 
+# import forced photometry
+import force_phot
+
+# healpy 
+import healpy as hp
+
+# tensorflow
+import tensorflow as tf
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.0.11'
+__version__ = '1.1.0'
 
 
 ################################################################################
@@ -376,8 +387,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     def sex_wcs (base, sexcat, sex_params, pixscale, fwhm, update_vignet, imtype,
                  fits_mask, ra, dec, xsize, ysize, header):
 
-        # switch to rerun some parts (source extractor,
-        # astrometry.net, psfex) even if those were executed before
+        # redo boolean to determine whether to rerun some parts
+        # (source extractor, astrometry.net, psfex) even if those were
+        # executed done
         redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
                 (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
 
@@ -1160,8 +1172,18 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             try:
                 ML_processed = False
-                ML_model = get_par(set_zogy.ML_model,tel)
-                ML_prob_real = get_ML_prob_real (dict_thumbnails, ML_model)
+                # vetting training version to be used
+                ML_version = get_par(set_zogy.ML_version,tel)
+                # and the corresponding model
+                ML_model = get_par(set_zogy.ML_models,tel)[ML_version-1]
+                # depending on version, execute a different function
+                if ML_version == 1:
+                    ML_prob_real = get_ML_prob_real_Zafiirah (dict_thumbnails,
+                                                              ML_model)
+                else:
+                    ML_prob_real = get_ML_prob_real_Diederik (dict_thumbnails,
+                                                              ML_model)
+
             except Exception as e:
                 #log.exception(traceback.format_exc())
                 log.exception('exception was raised during [get_ML_prob_real]: '
@@ -1173,14 +1195,16 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 header_trans['MC-P'] = (ML_processed, 'successfully '
                                         'processed by MeerCRAB?')
                 # set version by hand
-                ML_version = prediction_phase.__version__
+                #ML_version = prediction_phase.__version__
                 header_trans['MC-V'] = (ML_version, 'MeerCRAB version used')
                 header_trans['MC-MODEL'] = (ML_model.split('/')[-1],
                                             'MeerCRAB training model used')
 
+
             # if exception occurred in [get_ML_prob_real], leave
             if not ML_processed:
                 return header_new, header_trans
+
 
 
         # write full ZOGY output images to fits
@@ -1627,9 +1651,152 @@ def show_sub (nsub):
 
 
 ################################################################################
+    
+def robust_Z_norm (ims):
+    """
+    Applies robust Z norming to images
+    
+    Parameters
+    ----------
+    ims : numpy array with shape (batch, dim1, dim2, channels)
+      Images to be normalized 
 
-def get_ML_prob_real (dict_thumbnails, model, use_30x30=True,
-                      factor_norm=255.):
+    Returns
+    ---------
+    numpy array with shape (batch, dim1, dim2, channels)
+      array of normalized images
+    """
+
+
+    org_shape = ims.shape # save original shape
+    # Flatten and calculate median and median absolute deviation per image
+    flat = ims.reshape((org_shape[0],org_shape[1]*org_shape[2],org_shape[3]))
+    med = np.median(flat, axis = 1).reshape(org_shape[0],1,org_shape[3])
+    mad = np.median(np.abs(flat-med), axis = 1).reshape(org_shape[0],1,
+                                                        org_shape[3])
+    # Apply robust Z score formula according to:
+    # "https://cloudxlab.com/assessment/displayslide/6286/robust-z-score-method"
+    return ((0.6745*(flat-med))/ mad).reshape(org_shape)
+
+
+################################################################################
+
+def central_crop (ims, new_size):
+    """
+    Crops center of images
+  
+    Parameters
+    ----------
+    ims : numpy array with shape (batch, dim1, dim2, channels)
+      Images to be normalised
+    new_size : int
+      new size of sides of images after cropping
+
+    Returns
+    ---------
+    numpy array wih shape (batch, new_size, new_size, channels)
+      cropped array 
+    """
+    # Run through image axis
+    for i in range(1,3):
+        rel_side = ims.shape[i]
+        if rel_side > new_size:
+            border = (rel_side - new_size)//2
+            # Slice along relevant axis
+            ims = ims.take(indices = range(border,border+new_size), axis = i)
+
+    return ims
+
+
+################################################################################
+
+def get_probability (events, model_file, normed_size = 40):
+    """
+    Predicts probability of event being real according to supplied model file
+
+    Parameters
+    ----------
+    events : numpy array with shape (batch, dim1, dim2, channels)
+      Events on which prediction should be applied. dim1 and dim2 must be at
+      least larger than normed_size (default 40) 
+    model_file :  str
+      location of tensorflow model file
+    normed_size : int
+      Size of images used in the normalization, defaults to 40. Can be same size
+      as input of model
+  
+    Returns
+    ---------
+    numpy array with shape (batch)
+      array of values between 0 and 1 giving probability of corresponding event
+      in input array being real
+  """
+    # Import model and extract input shape
+    model = tf.keras.models.load_model(model_file)
+    input_shape = model.layers[0].input_shape[0]
+
+    # Run checks on inputs
+    if input_shape[1] != input_shape[2]:
+        raise Exception("Model input does not meet expectation of square images")
+    if input_shape[1] > normed_size:
+        raise Exception("normed_size should not be smaller than size of expected "
+                        "model input")
+    if events.shape[3] != input_shape[3]:
+        raise Exception(f"Incorrect number of image channels given. Expected "
+                        "{input_shape[3]}")
+    if events.shape[1] < normed_size or events.shape[2] <normed_size:
+        raise Exception(f"Input images too small, must be at least be size "
+                        "defined by normed_size ({normed_size}x{normed_size})")
+
+    # Norm events after cropping center to relevant size
+    normed_events = robust_Z_norm(central_crop(events, normed_size))
+
+    # Run prediction and output array
+    return model.predict(central_crop(normed_events, input_shape[1]),
+                         verbose = False)[:,0]
+
+
+################################################################################
+
+def get_ML_prob_real_Diederik (dict_thumbnails, model):
+    
+    """function based on training by Diederik de Vries and Fiorenzo
+    Stoppa of the 2nd vetting data set collected during 2022.  The
+    functions above and used here, [robust_Z_norm], [central_crop] and
+    [get_probability], were provided by Diederik. Similarly to
+    [get_ML_prob_real_Zafiirah], it calculates the probability that a transient
+    candidate is real, using the thumbnail files recorded in
+    [dict_thumbnails] in combination with the trained model [model].
+
+    """
+
+    # initially list with data to be stacked after the loop
+    list_2stack = []
+
+    # loop [dict_thumbnails] and read corresponding numpy files
+    for key in dict_thumbnails.keys():
+
+        # data_thumbnail will have shape (nrows, 100, 100)
+        data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')
+
+        # add them to list to stack
+        list_2stack.append(data_thumbnail)
+
+
+    # stack data_thumbnail along last axis; shape expected in
+    # [get_probability] is (nrows, size, size, 4) where size needs to
+    # be at least 40
+    data_stack = np.stack(list_2stack, axis=-1)
+
+
+    # obtain and return probabilities
+    return get_probability(data_stack, model)
+
+
+################################################################################
+
+def get_ML_prob_real_Zafiirah (dict_thumbnails, model, use_30x30=True,
+                               factor_norm=255.):
 
     """function based on Zafiirah's Jupyter notebook (see
     https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
@@ -1656,7 +1823,8 @@ def get_ML_prob_real (dict_thumbnails, model, use_30x30=True,
     # thumbnail images are 100x100 pixels, need to extract the central
     # 30x30 pixels for most of Zafiirah's models
     if use_30x30:
-        index = (slice(None, None), slice(35,65), slice(35,65))
+        # first slice/dimension is nrows
+        index = (slice(None,None), slice(35,65), slice(35,65))
     else:
         index = (slice(None,None), slice(None,None), slice(None,None))
 
@@ -1698,66 +1866,6 @@ def get_ML_prob_real (dict_thumbnails, model, use_30x30=True,
     ML_real_prob, __ = prediction_phase.realbogus_prediction(
         model_name, data_stack, id_trans, prob_thresh, model_path=model_path)
 
-
-    return ML_real_prob
-
-
-################################################################################
-
-def get_ML_prob_real_old (fits_table, model, use_30x30=True, factor_norm=255.):
-    
-    """function based on Zafiirah's Jupyter notebook (see
-    https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
-    function [realbogus_prediction] to calculate the probability that
-    a transient candidate is real, using the image thumbnails in
-    [fits_table] in combination with the trained model [model]. Most
-    models require the central 30x30 pixels to be used rather than the
-    full (100x100) thumbnails. The normalisation factor 255 is the one
-    applied by Zafiirah to the thumbnails during the ML training.
-
-    """
-
-
-    # read fits table
-    table = Table.read(fits_table)
-
-    # split set_zogy.ML_model parameter into model path and name
-    model_path, model_name = os.path.split(model)
-    # model_path input into [realbogus_prediction] requires trailing /
-    model_path += '/'
-
-    # above image cubes are 100x100 pixels, need to extract the
-    # central 30x30 pixels for most models
-    if use_30x30:
-        index = (slice(None,None), slice(35,65), slice(35,65))
-    else:
-        index = (slice(None,None), slice(None,None), slice(None,None))
-
-
-    # stack the 30x30 data arrays into an array with
-    # shape (nrows in table, 30, 30, 3 or 4)
-    if 'NRDS' in model_name:
-        # all 4 thumbnails are used
-        data_stack = np.stack((table['THUMBNAIL_RED'][index],
-                               table['THUMBNAIL_REF'][index],
-                               table['THUMBNAIL_D'][index],
-                               table['THUMBNAIL_SCORR'][index]), axis=3)
-    else:
-        # 3 thumbnails are used:
-        data_stack = np.stack((table['THUMBNAIL_RED'][index],
-                               table['THUMBNAIL_REF'][index],
-                               table['THUMBNAIL_D'][index]), axis=3)
-
-    # normalise
-    data_stack /= factor_norm
-
-    # generate some transient ID (not important but required)
-    id_trans = np.arange(len(table))
-    # threshold (not important but required)
-    prob_thresh = 0.5
-
-    ML_real_prob, __ = prediction_phase.realbogus_prediction(
-        model_name, data_stack, id_trans, prob_thresh, model_path=model_path)
 
     return ML_real_prob
 
@@ -2067,6 +2175,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         if header_toadd is not None:
             header += header_toadd
 
+        log.info ('cat_type: {}: data.dtype.names: {}'
+                  .format(cat_type, data.dtype.names))
+
     else:
 
         # if no [cat_in] is provided, just define the header using
@@ -2079,7 +2190,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     # column unit (and the desired format - commented out)
     thumbnail_fmt = '{}E'.format(size_thumbnails**2)
     formats = {
-        'NUMBER':         ['J', ''     ], #, 'uint16'],
+        'NUMBER':         ['J', ''     ], #, 'int32'],
         'X_POS':          ['E', 'pix'  ], #, 'flt32' ],
         'Y_POS':          ['E', 'pix'  ], #, 'flt32' ],
         'XVAR_POS':       ['E', 'pix^2'], #, 'flt16' ],
@@ -2108,31 +2219,31 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'FLAGS_MASK_SCORR': ['I', ''     ], #, 'uint8' ],
         'FWHM':           ['E', 'pix'  ], #, 'flt16' ],
         'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
-        'E_FLUX_APER':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_APER': ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_APER':    ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_APER': ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_APER':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_APER':    ['E', 'mag'  ], #, 'flt16' ],
-        'BACKGROUND':     ['E', 'e-'   ], #, 'flt16' ],
-        #'E_FLUX_MAX':     ['E', 'e-/s' ], #, 'flt16' ],
-        'E_FLUX_AUTO':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_AUTO': ['E', 'e-/s' ], #, 'flt16' ],
+        'BACKGROUND':     ['E', 'electron'   ], #, 'flt16' ],
+        #'E_FLUX_MAX':     ['E', 'electron/s' ], #, 'flt16' ],
+        'E_FLUX_AUTO':    ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_AUTO': ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_AUTO':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_AUTO':    ['E', 'mag'  ], #, 'flt16' ],
         'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_ISO':     ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_ISO':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_ISO':     ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_ISO':  ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_ISO':        ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_ISO':     ['E', 'mag'  ], #, 'flt16' ],
         'ISOAREA':        ['I', 'pix^2'], #, 'flt16' ],
         'MU_MAX':         ['E', 'mag/pix^2'], #, 'flt16' ],
         'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_PETRO':   ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_PETRO':['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PETRO':   ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_PETRO':['E', 'electron/s' ], #, 'flt16' ],
         'MAG_PETRO':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PETRO':   ['E', 'mag'  ], #, 'flt16' ],
         'PETRO_RADIUS':   ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_OPT':     ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_OPT':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_OPT':     ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_OPT':  ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_OPT':        ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_OPT':     ['E', 'mag'  ], #, 'flt16' ],
         # transient:
@@ -2141,12 +2252,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'RA_PEAK':        ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PEAK':       ['D', 'deg'  ], #, 'flt64' ],
         'SNR_ZOGY':       ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_ZOGY':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_ZOGY': ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_ZOGY':    ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_ZOGY': ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_ZOGY':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_ZOGY':    ['E', 'mag'  ], #, 'flt16' ],
-        #'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
-        #'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
+        #'E_FLUX_OPT_D':   ['E', 'electron/s' ], #, 'flt32' ],
+        #'E_FLUXERR_OPT_D':['E', 'electron/s' ], #, 'flt16' ],
         #'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
         #'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
         'X_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
@@ -2155,8 +2266,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'YERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
         'RA_PSF_D':       ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PSF_D':      ['D', 'deg'  ], #, 'flt64' ],        
-        'E_FLUX_PSF_D':   ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_PSF_D':['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PSF_D':   ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_PSF_D':['E', 'electron/s' ], #, 'flt16' ],
         'MAG_PSF_D':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PSF_D':   ['E', 'mag'  ], #, 'flt16' ],
         'CHI2_PSF_D':     ['E', ''     ], #, 'flt32' ],
@@ -2182,44 +2293,69 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         'X_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
         'Y_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
         'SNR_FAKE_IN':    ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_FAKE_IN': ['E', 'e-/s' ], #, 'flt32' ],
+        'E_FLUX_FAKE_IN': ['E', 'electron/s' ], #, 'flt32' ],
         'MAG_FAKE_IN':    ['E', 'mag'  ], #, 'flt32' ],
-        'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
-        'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
-        'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
+        'THUMBNAIL_RED':  [thumbnail_fmt, 'electron' ], #, 'flt16' ],
+        'THUMBNAIL_REF':  [thumbnail_fmt, 'electron' ], #, 'flt16' ],
+        'THUMBNAIL_D':    [thumbnail_fmt, 'electron' ], #, 'flt16' ],
         'THUMBNAIL_SCORR':[thumbnail_fmt, 'sigma'], #, 'flt16' ]
+        #
+        'SOURCE_ID':      ['K', ''     ], #, 'int64'],
+        'LIMMAG_OPT':     ['E', 'mag'  ], #, 'flt32' ],
+        'SNR_OPT':        ['E', ''     ], #, 'flt32' ],
     }
 
-    
+    keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
+                           'BACKGROUND', 'MAG_APER', 'MAGERR_APER',
+                           'E_FLUX_OPT', 'E_FLUXERR_OPT',
+                           'MAG_OPT', 'MAGERR_OPT', 'LIMMAG_OPT']
+
+
     if cat_type is None:
         # if no [cat_type] is provided, define the keys to record from
         # the data columns
         if cat_in is not None:
             keys_to_record = data.dtype.names
 
+
     elif cat_type == 'ref':
-        keys_to_record = ['NUMBER', 'X_POS', 'Y_POS',
-                          'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
-                          'RA', 'DEC',
-                          'CXX', 'CYY', 'CXY', 'A', 'B', 'THETA',
-                          'ELONGATION', 'FWHM', 'CLASS_STAR',
-                          'FLAGS', 'FLAGS_MASK',
-                          'BACKGROUND',
-                          'MAG_APER', 'MAGERR_APER',  
-                          'MAG_AUTO', 'MAGERR_AUTO', 'KRON_RADIUS',
-                          'MAG_ISO', 'MAGERR_ISO', 'ISOAREA',
-                          'MU_MAX', 'FLUX_RADIUS',
-                          'MAG_PETRO', 'MAGERR_PETRO', 'PETRO_RADIUS',
-                          'E_FLUX_OPT', 'E_FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']  
+
+        if get_par(set_zogy.force_phot_gaia,tel):
+            # in case of force photometry on Gaia input catalog
+            keys_to_record = keys_to_record_gaia
+        else:
+            # in case of original source extractor catalogs
+            keys_to_record = ['NUMBER', 'X_POS', 'Y_POS',
+                              'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
+                              'RA', 'DEC',
+                              'CXX', 'CYY', 'CXY', 'A', 'B', 'THETA',
+                              'ELONGATION', 'FWHM', 'CLASS_STAR',
+                              'FLAGS', 'FLAGS_MASK',
+                              'BACKGROUND',
+                              'MAG_APER', 'MAGERR_APER',  
+                              'MAG_AUTO', 'MAGERR_AUTO', 'KRON_RADIUS',
+                              'MAG_ISO', 'MAGERR_ISO', 'ISOAREA',
+                              'MU_MAX', 'FLUX_RADIUS',
+                              'MAG_PETRO', 'MAGERR_PETRO', 'PETRO_RADIUS',
+                              'E_FLUX_OPT', 'E_FLUXERR_OPT',
+                              'MAG_OPT', 'MAGERR_OPT']
+
 
     elif cat_type == 'new':
-        keys_to_record = ['NUMBER', 'X_POS', 'Y_POS', 
-                          'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
-                          'RA', 'DEC',
-                          'ELONGATION', 'FWHM', 'CLASS_STAR', 
-                          'FLAGS', 'FLAGS_MASK', 'BACKGROUND',
-                          'MAG_APER', 'MAGERR_APER',
-                          'E_FLUX_OPT', 'E_FLUXERR_OPT', 'MAG_OPT', 'MAGERR_OPT']
+
+        if get_par(set_zogy.force_phot_gaia,tel):
+            # in case of force photometry on Gaia input catalog
+            keys_to_record = keys_to_record_gaia
+        else:
+            keys_to_record = ['NUMBER', 'X_POS', 'Y_POS', 
+                              'XVAR_POS', 'YVAR_POS', 'XYCOV_POS', 
+                              'RA', 'DEC',
+                              'ELONGATION', 'FWHM', 'CLASS_STAR', 
+                              'FLAGS', 'FLAGS_MASK', 'BACKGROUND',
+                              'MAG_APER', 'MAGERR_APER',
+                              'E_FLUX_OPT', 'E_FLUXERR_OPT',
+                              'MAG_OPT', 'MAGERR_OPT']
+
 
     elif cat_type == 'trans':
         keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
@@ -2282,9 +2418,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         # split into the separate apertures, and the aperture sizes
         # enter in the new key name as well.
 
-        # if exposure time is non-zero, modify all 'e-/s' columns accordingly
+        # if exposure time is non-zero, modify all 'electron/s'
+        # columns accordingly
         if exptime != 0:
-            if formats[key][1]=='e-/s':
+            if formats[key][1]=='electron/s' or formats[key][1]=='e-/s':
                 data_key /= exptime
                 #key_new = 'E-{}'.format(key_new)
                 key_new = '{}'.format(key_new)
@@ -2313,8 +2450,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     columns = []
     for key in keys_to_record:
 
-        if (key=='E_FLUX_APER' or key=='E_FLUXERR_APER' or
-            key=='MAG_APER' or key=='MAGERR_APER'):
+        if 'APER' in key:
             # update column names of aperture fluxes to include radii
             # loop apertures
             for i_ap in range(len(apphot_radii)):
@@ -2326,8 +2462,6 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 else:
                     columns.append(get_col (key, key_new))
 
-            log.info ('key: {}, key_new: {}'.format(key, key_new))
-                    
         else:
 
             # check if key needs to be renamed
@@ -2341,7 +2475,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                     columns.append(get_col (key, key_new, data[key]))
             else:
                 columns.append(get_col (key, key_new))
-                
+
 
 
     # create hdu from columns
@@ -2490,31 +2624,31 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         'FLAGS_MASK_SCORR': ['I', ''     ], #, 'uint8' ],
         'FWHM':           ['E', 'pix'  ], #, 'flt16' ],
         'CLASS_STAR':     ['E', ''     ], #, 'flt16' ],
-        'E_FLUX_APER':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_APER': ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_APER':    ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_APER': ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_APER':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_APER':    ['E', 'mag'  ], #, 'flt16' ],
-        'BACKGROUND':     ['E', 'e-'   ], #, 'flt16' ],
-        #'E_FLUX_MAX':     ['E', 'e-/s' ], #, 'flt16' ],
-        'E_FLUX_AUTO':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_AUTO': ['E', 'e-/s' ], #, 'flt16' ],
+        'BACKGROUND':     ['E', 'electron'   ], #, 'flt16' ],
+        #'E_FLUX_MAX':     ['E', 'electron/s' ], #, 'flt16' ],
+        'E_FLUX_AUTO':    ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_AUTO': ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_AUTO':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_AUTO':    ['E', 'mag'  ], #, 'flt16' ],
         'KRON_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_ISO':     ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_ISO':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_ISO':     ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_ISO':  ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_ISO':        ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_ISO':     ['E', 'mag'  ], #, 'flt16' ],
         'ISOAREA':        ['I', 'pix^2'], #, 'flt16' ],
         'MU_MAX':         ['E', 'mag/pix^2'], #, 'flt16' ],
         'FLUX_RADIUS':    ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_PETRO':   ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_PETRO':['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PETRO':   ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_PETRO':['E', 'electron/s' ], #, 'flt16' ],
         'MAG_PETRO':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PETRO':   ['E', 'mag'  ], #, 'flt16' ],
         'PETRO_RADIUS':   ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_OPT':     ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_OPT':  ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_OPT':     ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_OPT':  ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_OPT':        ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_OPT':     ['E', 'mag'  ], #, 'flt16' ],
         # transient:
@@ -2523,12 +2657,12 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         'RA_PEAK':        ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PEAK':       ['D', 'deg'  ], #, 'flt64' ],
         'SNR_ZOGY':       ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_ZOGY':    ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_ZOGY': ['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_ZOGY':    ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_ZOGY': ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_ZOGY':       ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_ZOGY':    ['E', 'mag'  ], #, 'flt16' ],
-        #'E_FLUX_OPT_D':   ['E', 'e-/s' ], #, 'flt32' ],
-        #'E_FLUXERR_OPT_D':['E', 'e-/s' ], #, 'flt16' ],
+        #'E_FLUX_OPT_D':   ['E', 'electron/s' ], #, 'flt32' ],
+        #'E_FLUXERR_OPT_D':['E', 'electron/s' ], #, 'flt16' ],
         #'MAG_OPT_D':      ['E', 'mag'  ], #, 'flt32' ],
         #'MAGERR_OPT_D':   ['E', 'mag'  ], #, 'flt16' ],
         'X_PSF_D':        ['E', 'pix'  ], #, 'flt32' ],
@@ -2537,8 +2671,8 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         'YERR_PSF_D':     ['E', 'pix'  ], #, 'flt32' ],
         'RA_PSF_D':       ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PSF_D':      ['D', 'deg'  ], #, 'flt64' ],        
-        'E_FLUX_PSF_D':   ['E', 'e-/s' ], #, 'flt32' ],
-        'E_FLUXERR_PSF_D':['E', 'e-/s' ], #, 'flt16' ],
+        'E_FLUX_PSF_D':   ['E', 'electron/s' ], #, 'flt32' ],
+        'E_FLUXERR_PSF_D':['E', 'electron/s' ], #, 'flt16' ],
         'MAG_PSF_D':      ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PSF_D':   ['E', 'mag'  ], #, 'flt16' ],
         'CHI2_PSF_D':     ['E', ''     ], #, 'flt32' ],
@@ -2564,10 +2698,10 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         'X_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
         'Y_FAKE':         ['E', 'pix'  ], #, 'flt32' ],
         'S2N_FAKE_IN':    ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_FAKE_IN': ['E', 'e-/s' ], #, 'flt32' ],
-        'THUMBNAIL_RED':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
-        'THUMBNAIL_REF':  [thumbnail_fmt, 'e-' ], #, 'flt16' ],
-        'THUMBNAIL_D':    [thumbnail_fmt, 'e-' ], #, 'flt16' ],
+        'E_FLUX_FAKE_IN': ['E', 'electron/s' ], #, 'flt32' ],
+        'THUMBNAIL_RED':  [thumbnail_fmt, 'electron' ], #, 'flt16' ],
+        'THUMBNAIL_REF':  [thumbnail_fmt, 'electron' ], #, 'flt16' ],
+        'THUMBNAIL_D':    [thumbnail_fmt, 'electron' ], #, 'flt16' ],
         'THUMBNAIL_SCORR':[thumbnail_fmt, 'sigma'], #, 'flt16' ]
     }
 
@@ -2661,9 +2795,9 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
         # split into the separate apertures, and the aperture sizes
         # enter in the new key name as well.
         
-        # if exposure time is non-zero, modify all 'e-/s' columns accordingly
+        # if exposure time is non-zero, modify all 'electron/s' columns accordingly
         if exptime != 0:
-            if formats[key][1]=='e-/s':
+            if formats[key][1]=='electron/s' or formats[key][1]=='e-/s':
                 data_key /= exptime
                 #key_new = 'E-{}'.format(key_new)
                 key_new = '{}'.format(key_new)
@@ -5336,33 +5470,6 @@ def get_psfoptflux_single (i, xcoords, ycoords, data_psf, psf_size,
 
 ################################################################################
 
-def pool_func_lists (func, list_of_imagelists, *args, nproc=1):
-
-    try:
-        results = []
-        pool = Pool(nproc)
-        for nlist, filelist in enumerate(list_of_imagelists):
-            args_temp = [filelist]
-            for arg in args:
-                args_temp.append(arg[nlist])
-                
-            results.append(pool.apply_async(func, args_temp))
-
-        pool.close()
-        pool.join()
-        results = [r.get() for r in results]
-        #    log.info ('result from pool.apply_async: {}'.format(results))
-        return results
-        
-    except Exception as e:
-        #log.exception (traceback.format_exc())
-        log.exception ('exception was raised during [pool.apply_async({})]: '
-                       '{}'.format(func, e))
-        raise RuntimeError
-
-
-################################################################################
-
 def coords2sub (xcoords, ycoords):
 
     """Function to convert pixel coordinates to subimage index. The input
@@ -6396,7 +6503,7 @@ def get_Xchan_bool (tel, chancorr, imtype, std=False):
 
     else:
         # for bkg, allow interpolation for non-ML/BG images or if
-        # ML/BG channel correction factors were not applied or if this
+        # ML/BG channel correction factors were applied or if this
         # concerns the reference image
         if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or chancorr or
             imtype=='ref'):
@@ -6412,7 +6519,7 @@ def get_Xchan_bool (tel, chancorr, imtype, std=False):
 
 def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                              fits_mask=None, remap=False, nthreads=1):
-    
+
     log.info('executing prep_optimal_subtraction ...')
     t = time.time()
        
@@ -6766,860 +6873,270 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
 
-    # -------------------------------
-    # determination of optimal fluxes
-    # -------------------------------
+    # -----------------------
+    # photometric calibration
+    # -----------------------
 
-    # Get estimate of optimal flux for all sources in the new and ref
-    # image if not already done so.
+    # important header keywords needed in [phot_calibrate] and [apply_zp]
+    keywords = ['exptime', 'filter', 'obsdate']
+    exptime, filt, obsdate = read_header(header, keywords)
 
-    # [mypsffit] determines if PSF-fitting part is also performed;
-    # this is different from SExtractor PSF-fitting
-    mypsffit = get_par(set_zogy.psffit,tel)
+    # extinction coefficient
+    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
 
-    # first read SExtractor fits table
-    sexcat = '{}_cat.fits'.format(base)
-    table_sex = Table.read (sexcat)
-
-
-    # switch to rerun some parts (source extractor, astrometry.net,
-    # psfex) even if those were executed done
-    redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
-            (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
-    
-
-    if ('E_FLUX_OPT' not in table_sex.colnames or redo or
-        # also execute this block if PSF-RADP in header is not equal
-        # to psf_rad_phot in the settings file
-        not ('PSF-RADP' in header and
-             header['PSF-RADP'] == get_par(set_zogy.psf_rad_phot,tel))):
-    
-        
-        if get_par(set_zogy.timing,tel): t1 = time.time()
-        log.info('deriving optimal fluxes ...')
-    
-        # read in positions and their errors
-        xwin = table_sex['X_POS']
-        ywin = table_sex['Y_POS']
-        errx2win = table_sex['XVAR_POS']
-        erry2win = table_sex['YVAR_POS']
-        errxywin = table_sex['XYCOV_POS']
+    if get_par(set_zogy.verbose,tel):
+        log.info('exptime: {}, filter: {}, obsdate: {}, ext_coeff: {}'
+                 .format(exptime, filt, obsdate, ext_coeff))
 
 
-        # read object mask image (since Sep 2022 this is a uint8 image
-        # with ones indicating the objects; previous to that it was a
-        # float32 image with zeros indicating the objects)
-        fits_objmask = '{}_objmask.fits'.format(base)
-        objmask = read_hdulist(fits_objmask).astype('bool')
+    # read object mask image (since Sep 2022 this is a uint8 image
+    # with ones indicating the objects; previous to that it was a
+    # float32 image with zeros indicating the objects)
+    fits_objmask = '{}_objmask.fits'.format(base)
+    objmask = read_hdulist (fits_objmask, dtype=bool)
 
 
-        psfex_bintable = '{}_psf.fits'.format(base)
-        results = get_psfoptflux (
-            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
-            psffit=mypsffit, imtype=imtype, D_objmask=objmask,
-            set_zogy=set_zogy, nthreads=nthreads, tel=tel)
-
-        if mypsffit:
-            (flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf, chi2_psf,
-             xerr_psf, yerr_psf) = results
-        else:
-            flux_opt, fluxerr_opt = results
-
-
-        # if required, replace saturated+connected pixels with PSF
-        # profile for the saturated objects
-        if get_par(set_zogy.replace_sat_psf,tel):
-
-            # mask with objects identified as saturated
-            value_sat = mask_value['saturated']
-            mask_sat = (table_sex['FLAGS_MASK'] & value_sat == value_sat)
-            xwin_sat = table_sex['X_POS'][mask_sat]
-            ywin_sat = table_sex['Y_POS'][mask_sat]
-            sat_nmax = get_par(set_zogy.replace_sat_nmax,tel)
-            get_psfoptflux (psfex_bintable, data_wcs, data_bkg_std**2, data_mask,
-                            xwin_sat, ywin_sat, imtype=imtype, D_objmask=objmask,
-                            replace_sat_psf=True, replace_sat_nmax=sat_nmax,
-                            set_zogy=set_zogy, nthreads=nthreads, tel=tel)
-
-            # save data_wcs after modification in [get_psfoptflux] if
-            # temporary files are kept
-            if get_par(set_zogy.keep_tmp,tel):
-                fits_updated = '{}_updated.fits'.format(base)
-                fits.writeto(fits_updated, data_wcs, header, overwrite=True)
-
-
-            
-            
-        if get_par(set_zogy.make_plots,tel):
-            # make ds9 regions file with all detections
-            result = prep_ds9regions('{}_alldet_ds9regions.txt'.format(base),
-                                     xwin, ywin, radius=2., width=1,
-                                     color='blue', value=np.arange(1,len(xwin)+1))
-            # and with flux_opt/fluxerr_opt < 5.
-            index_nonzero = np.nonzero(fluxerr_opt)
-            mask_s2n_lt5 = np.zeros(flux_opt.shape, dtype='bool')
-            mask_s2n_lt5[index_nonzero] = (np.abs(flux_opt[index_nonzero]
-                                                  /fluxerr_opt[index_nonzero])<5)
-            mask_s2n_lt5 |= (flux_opt==0)
-            result = prep_ds9regions('{}_s2n_lt5_ds9regions.txt'.format(base),
-                                     xwin[mask_s2n_lt5], ywin[mask_s2n_lt5],
-                                     radius=2., width=1, color='red',
-                                     value=np.arange(1,np.sum(mask_s2n_lt5)+1)) 
-
-
-        # determine 5-sigma limiting flux using
-        # [get_psfoptflux] with [get_limflux]=True for random
-        # coordinates across the field
-        nlimits = 501
-        edge = 100
-        xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
-        ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
-        
-        def calc_limflux (nsigma):
-
-            # '__' is to disregard the 2nd output array from [get_psfoptflux]
-            limflux_array, __ = get_psfoptflux (
-                psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
-                ylim, get_limflux=True, limflux_nsigma=nsigma,
-                imtype=imtype, set_zogy=set_zogy, nthreads=nthreads, tel=tel)
-
-            limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
-                limflux_array.astype(float), mask_value=0)
-            
-            if get_par(set_zogy.verbose,tel):
-                log.info('{}-sigma limiting flux; mean: {:.2f}, std: {:.2f}, '
-                         'median: {:.2f}'.format(nsigma, limflux_mean,
-                                                 limflux_std, limflux_median))
-
-            return limflux_median
-
-        
-        # limiting flux in e- (not per second), with nsigma determined
-        # by [source_nsigma] in settings file
-        nsigma = get_par(set_zogy.source_nsigma,tel)
-        limflux = calc_limflux (nsigma)
-        
-        if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t1, label='deriving optimal fluxes')
-
-        if get_par(set_zogy.timing,tel): t2 = time.time()
-
-        # read a few extra header keywords needed in [collect_zps],
-        # [calc_zp] and [apply_zp]
-        keywords = ['exptime', 'filter', 'obsdate']
-        exptime, filt, obsdate = read_header(header, keywords)
-        if get_par(set_zogy.verbose,tel):
-            log.info('exptime: {}, filter: {}, obsdate: {}'
-                     .format(exptime, filt, obsdate))
-            
-
-        # now that [exptime] is known, add n-sigma limiting flux in e-/s to header
-        if imtype=='new':
-            header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
-        else:
-            # for reference image, do not apply S/N >= nsigma cut
-            # below to go as deep as possible and not discard any
-            # faint galaxies
-            header['NSIGMA'] = (0, '[sigma] source detection threshold')
-            
-        header['LIMEFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
-                              'limiting flux'.format(nsigma))
-
-        # get airmasses for SExtractor catalog sources
-        ra_sex = table_sex['RA']
-        dec_sex = table_sex['DEC']
-        flags_sex = table_sex['FLAGS']
-        xcoords_sex = table_sex['X_POS']
-        ycoords_sex = table_sex['Y_POS']
-        
-        lat = get_par(set_zogy.obs_lat,tel)
-        lon = get_par(set_zogy.obs_lon,tel)
-        height = get_par(set_zogy.obs_height,tel)
-        airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, 
-                                  lat, lon, height)
-        airmass_sex_median = float(np.median(airmass_sex))
-
-
-        # use WCS solution in input [header] to get RA, DEC of central pixel
+    # infer image central coordinates; this is used in forced
+    # photometry and also further down below (for airmass at image
+    # center and for the calibration catalog) RA-CNTR and DEC-CNTR
+    # should have been added to header in run_wcs
+    if 'RA-CNTR' in header and 'DEC-CNTR' in header:
+        ra_center = header['RA-CNTR']
+        dec_center = header['DEC-CNTR']
+    else:
+        # otherwise, use WCS solution in input [header] to get RA, DEC
+        # of central pixel
         wcs = WCS(header)
         ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
 
-        # RA-CNTR and DEC-CNTR are added to header in run_wcs
-        #log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
-        #header['RA-CNTR'] = (float(ra_center), 
-        #                     'RA (ICRS) at image center (astrometry.net)')
-        #header['DEC-CNTR'] = (float(dec_center), 
-        #                      'DEC (ICRS) at image center (astrometry.net)')
-        
-        # determine airmass at image center
-        airmass_center = get_airmass(ra_center, dec_center, obsdate,
-                                     lat, lon, height)
-        # in case of reference image and header airmass==1 (set to
-        # unity in refbuild module used for ML/BG) then force
-        # airmasses calculated above to be unity.  If the reference
-        # image is a combination of multiple images, the airmass
-        # calculation above will not be correct. It is assumed that
-        # the fluxes in the combined reference image have been scaled
-        # to an airmass of 1.
-        if imtype=='ref' and 'AIRMASS' in header:
-            if header['AIRMASS']==1:
-                airmass_sex[:] = 1
-                airmass_sex_median = 1
-                airmass_center = 1
 
-        header['AIRMASSC'] = (float(airmass_center), 'airmass at image center')
+    # half the field-of-view (FoV) in degrees
+    fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
 
-        log.info('median airmass calibration stars: {:.3f}'
-                 .format(airmass_sex_median))
-        log.info('airmass at image center: {:.3f}'.format(airmass_center))
 
-        
-        # determine image zeropoint if ML/BG calibration catalog exists
-        ncalstars=0
-        if (os.path.isfile(get_par(set_zogy.cal_cat,tel)) and
-            filt in 'ugqriz'):
-            
-            # add header keyword(s):
-            cal_name = get_par(set_zogy.cal_cat,tel).split('/')[-1]
-            header['PC-CAT-F'] = (cal_name, 'photometric catalog')
-            #caldate = time.strftime('%Y-%m-%d',
-            #time.gmtime(os.path.getmtime(set_zogy.cal_cat))
+    # add header keyword(s):
+    fits_cal = get_par(set_zogy.cal_cat,tel)
+    header['PC-CAT-F'] = (fits_cal.split('/')[-1], 'photometric catalog')
 
-            # only execute the following block if [fits_calcat_field]
-            # does not exist, which should have been already produced
-            # by [run_wcs]
-            fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
-            if not os.path.isfile(fits_calcat_field):
 
-                # determine cal_cat fits extensions to read using
-                # [get_zone_indices] (each 1 degree strip in declination is
-                # recorded in its own extension in the calibration catalog)
-                fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
-                zone_indices = get_zone_indices (dec_center, fov_half_deg,
-                                                 zone_size=60.)
-                #print ('dec_center: {}, zone_indices: {}'
-                #.format(dec_center, zone_indices))
+    # run [phot_calibrate]
+    if (os.path.isfile(fits_cal) and filt in 'ugqriz'):
 
-                # read specific extensions (=zone_indices+1) of
-                # calibration catalog
-                data_cal = read_hdulist (get_par(set_zogy.cal_cat,tel),
-                                         ext_name_indices=zone_indices+1)
+        pc_ok = True
+        zp, zp_std, ncal_used, airmass_cal = phot_calibrate (
+            fits_cal, header, exptime, filt, obsdate, base, ra_center,
+            dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask, imtype,
+            objmask, nthreads)
 
-                # use function [find_stars] to select stars in calibration
-                # catalog that are within the current field-of-view
-                index_field = find_stars (data_cal['ra'], data_cal['dec'],
-                                          ra_center, dec_center, fov_half_deg)
-                #index_field = np.where(mask_field)[0]
-                data_cal = data_cal[index_field]
-
-            else:
-                # read fits table containing calibration stars in this field
-                data_cal = read_hdulist (fits_calcat_field)
-
-
-            ncalstars = np.shape(data_cal)[0]
-            log.info('number of potential photometric calibration stars in FOV: '
-                     '{}'.format(ncalstars))
-            header['PC-TNCAL'] = (ncalstars, 'total number of photcal stars in '
-                                  'FOV')
-
-            # test: limit calibration catalog entries
-            if 'chi2' in data_cal.dtype.names:
-                mask_cal = (np.isfinite(data_cal['chi2']) &
-                            (data_cal['chi2'] <= 10.))
-                #data_cal = data_cal[:][mask_cal]
-                data_cal = data_cal[mask_cal]
-
-            ncalstars = np.shape(data_cal)[0]
-            log.info('number of phot.cal. stars in FOV after chi2 cut: {}'
-                     .format(ncalstars))
-
-            # requirements on presence of survey input filters for the
-            # calibration of a ML/BG filter:
-            #u: Gaia and (GALEX NUV or SM u or SM v or SDSS u)
-            #g: Gaia and (GALEX NUV or SM u or SM v or SDSS u or SDSS g)
-            #q: Gaia and (GALEX NUV or SM u or SM v or SDSS u or SDSS g or PS1 g or SM g)
-            #r: Gaia: 0
-            #i: Gaia and (2MASS J or PS1 z or PS1 y or SDSS z or SM z): 0
-            #z: Gaia and (2MASS J or PS1 y): 0
-
-            # prepare [filt_req] dictionary
-            filt_req = {}
-            # these filters are required for all filters, boolean AND
-            filt_req['all'] = ['Gaia2r_G', 'Gaia2r_Gbp', 'Gaia2r_Grp', '2MASS_J']
-            # these filters are required for specific filters, boolean OR
-            filt_req['u'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u']
-            filt_req['g'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g']
-            filt_req['q'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g',
-                             'PS1_g', 'SM_g']
-            filt_req['i'] = ['PS1_z', 'PS1_y', 'SDSS_z', 'SM_z']
-            filt_req['z'] = ['PS1_y']
-
-            # [mask_cal] is mask for entries in [data_cal] where all
-            # filters listed in [filt_req['all']] are present (True)
-            mask_cal = np.all([data_cal[col] for col in filt_req['all']], axis=0)
-            data_cal = data_cal[mask_cal]
-            
-            # loop the the filter keys of [filt_req]
-            if filt in filt_req:
-                # [mask_cal_filt] is mask for for entries in the
-                # updated [data_cal] for which all filters in
-                # [filt_req[current filter]] are present
-                mask_cal_filt = np.any([data_cal[col] for col in filt_req[filt]],
-                                       axis=0)
-                # if less than [set_zogy.phot_ncal_min] stars left,
-                # drop filter requirements and hope for the best!
-                if np.sum(mask_cal_filt) >= get_par(set_zogy.phot_ncal_min,tel):
-                    data_cal = data_cal[mask_cal_filt]
-                else:
-                    log.warning('less than {} calibration stars with '
-                                'default filter requirements'
-                                .format(get_par(set_zogy.phot_ncal_min,tel)))
-                    log.info('filter: {}, requirements (any one of these): {}'
-                             .format(filt, filt_req[filt]))
-                    log.info('dropping this specific requirement and hoping '
-                             'for the best')
-
-
-            # This is the number of photometric calibration stars
-            # after the chi2 and filter requirements cut.
-            ncalstars = np.shape(data_cal)[0]
-            log.info('number of photometric stars in FOV after filter cut: {}'
-                     .format(ncalstars))
-            header['PC-FNCAL'] = (ncalstars, 'number of photcal stars after '
-                                  'filter cut')
-
-            # pick only main sequence stars
-            if False:
-                if 'spectype' in data_cal.dtype.names:
-                    mask_cal = ['V' in data_cal['spectype'][i] and
-                                'IV' not in data_cal['spectype'][i] and
-                                'M' not in data_cal['spectype'][i]
-                                for i in range(np.shape(data_cal)[0])]
-                    #data_cal = data_cal[:][mask_cal]
-                    data_cal = data_cal[mask_cal]
-                
-
-            # only continue if calibration stars are present in the FOV
-            # and filter is present in calibration catalog
-            if ncalstars>0:
-                ra_cal = data_cal['ra']
-                dec_cal = data_cal['dec']
-                mag_cal = data_cal[filt]
-                magerr_cal = data_cal['err_{}'.format(filt)]
-                # discard SExtractor catalog entries with negative
-                # flux and FLAGS higher than 1
-                mask_zp = ((flux_opt>0.) & (flags_sex<=1))
-                log.info ('number of sextractor catalog entries left: {}'
-                          .format(np.sum(mask_zp)))
-
-                # collect individual zeropoints across entire image
-                x_array, y_array, zp_array = collect_zps (
-                    ra_sex[mask_zp], dec_sex[mask_zp], airmass_sex[mask_zp],
-                    xcoords_sex[mask_zp], ycoords_sex[mask_zp],
-                    flux_opt[mask_zp], fluxerr_opt[mask_zp],
-                    ra_cal, dec_cal, mag_cal, exptime, filt)
-
-
-                # determine single zeropoint for entire image
-                zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
-                                                 filt, imtype, data_wcs.shape,
-                                                 zp_type='single')
-
-                header['PC-NCAL'] = (ncal_used, 'number of brightest photcal '
-                                     'stars used')
-                
-                # for MeerLICHT and BlackGEM only
-                ncal_min_chan = 50
-                if (len(zp_array) >= ncal_min_chan and
-                    tel in ['ML1', 'BG2', 'BG3', 'BG4']):
-
-                    # calculate zeropoint for each channel - not
-                    # restricted anymore to brightest maximum number
-                    # defined by get_par(set_zogy.phot_ncal_max,tel)
-                    # which is used in the single-value ZP above
-                    zp_chan, zp_std_chan, ncal_chan = calc_zp (
-                        x_array, y_array, zp_array, filt, imtype,
-                        zp_type='channels')
-
-
-                    for i_chan in range(zp_chan.size):
-                        header['PC-ZP{}'.format(i_chan+1)] = (
-                            zp_chan[i_chan], '[mag] channel {} zeropoint'
-                            .format(i_chan+1))
-                    for i_chan in range(zp_chan.size):
-                        header['PC-ZPS{}'.format(i_chan+1)] = (
-                            zp_std_chan[i_chan], '[mag] channel {} sigma '
-                            '(STD) zeropoint'.format(i_chan+1))
-                    for i_chan in range(zp_chan.size):
-                        header['PC-NCC{}'.format(i_chan+1)] = (
-                            ncal_chan[i_chan], 'channel {} number of '
-                            'photcal stars used'.format(i_chan+1))
-
-
-                    # fit low-order 2D polynomial to zeropoint array;
-                    # normalize coordinates by image size to make it
-                    # easier on the polynomial fit
-                    order = 2
-                    ysize, xsize = data_wcs.shape
-                    f_norm = max(ysize, xsize)
-                    # subtract 1 from coordinate arrays to convert fit
-                    # to pixel indices rather than pixel coordinates,
-                    # and then normalize to have coordinate values
-                    # around 0-1
-                    coeffs = polyfit2d ((x_array-1)/f_norm, (y_array-1)/f_norm,
-                                        zp_array, order=order)
-
-                    # evaluate at image grid in pixel indices
-                    x = np.arange(xsize)
-                    y = np.arange(ysize)
-                    zp_2dfit = polygrid2d(x/f_norm, y/f_norm, coeffs).T
-
-                    # N.B.: polynomials were fit with normalized x and
-                    # y indices (using [f_norm]), so coeffients should
-                    # be scaled accordingly if original image pixel
-                    # indices are used to infer the polynomial fit
-                    # (most natural)
-                    xy = np.arange(order+1)
-                    coeffs_power = np.sum(np.meshgrid(xy,xy), axis=0)
-                    coeffs_scaled = coeffs / (float(f_norm)**coeffs_power)
-
-                    # record fit coefficients in header
-                    header['PC-ZPFDG'] = (order,
-                                          'zeropoint 2D polynomial fit degree')
-                    for nc, coeff in enumerate(coeffs_scaled.ravel()):
-                        if np.isfinite(coeff):
-                            value = coeff
-                        else:
-                            value = 'None'              
-                        header['PC-ZPF{}'.format(nc)] = (
-                            value, 'zeropoint 2D poly fit coefficient {}'.format(nc))
-
-                    
-                    if get_par(set_zogy.make_plots,tel):
-
-                        # save zeropoint arrays
-                        ascii.write([x_array, y_array, zp_array],
-                                    '{}_zp.dat'.format(base),
-                                    names=['x_array', 'y_array', 'zp_array'],
-                                    overwrite=True)
-
-                        # plot
-                        plt.imshow(zp_2dfit, origin='lower', aspect=1)
-                        plt.colorbar()
-                        plt.scatter(x_array, y_array, c=zp_array, marker='o',
-                                    edgecolor='k')
-                        plt.xlim(x.min(), x.max())
-                        plt.xlabel('X-axis')
-                        plt.ylim(y.min(), y.max())
-                        plt.ylabel('Y-axis')
-                        plt.title('polynomial fit (order={}) to image zeropoints'
-                                  .format(order))
-                        plt.savefig('{}_zp_2dfit.pdf'.format(base))
-                        plt.close()
-
-                        
-                    # determine median zeropoints on subimages to
-                    # check if they are constant across the image
-                    subsize = get_par(set_zogy.subimage_size,tel)
-                    zp_mini, zp_std_mini, ncal_mini = calc_zp (
-                        x_array, y_array, zp_array, filt, imtype,
-                        data_shape=data_wcs.shape, zp_type='background',
-                        boxsize=subsize)
-
-                    # if keeping intermediate/temporary files, save
-                    # these mini images
-                    if get_par(set_zogy.keep_tmp,tel):
-
-                        fits.writeto('{}_zp_subs.fits'.format(base),
-                                     zp_mini, overwrite=True)
-                        fits.writeto('{}_zp_std_subs.fits'.format(base),
-                                     zp_std_mini, overwrite=True)
-                        fits.writeto('{}_zp_ncal_subs.fits'.format(base),
-                                     ncal_mini.astype('int16'), overwrite=True)
-
-
-                    # add statistics of these arrays to header
-                    mask_use = ((zp_mini != 0) & (zp_std_mini != 0))
-                    n_zps = np.sum(mask_use)
-                    if n_zps >= 4:
-                        # discard the highest and lowest value in stats
-                        arr_sort = np.sort(zp_mini[mask_use])
-                        max_diff = np.abs(arr_sort[-2] - arr_sort[1])
-                        arr_sort = np.sort(zp_std_mini[mask_use])
-                        max_std = arr_sort[-2]
-                    else:
-                        log.warning ('too few subimages (<4) available to '
-                                     'determine maximum ZP difference and STD')
-                        max_diff = 'None'
-                        max_std = 'None'
-
-                        
-                    header['PC-TNSUB'] = (int(ysize/subsize)**2, 'total number '
-                                          'of subimages available')
-                    header['PC-NSUB'] = (n_zps, 'number of subimages used for '
-                                         'ZP statistics')
-                    header['PC-MZPD'] = (max_diff, '[mag] max. ZP '
-                                         'difference between subimages')
-                    header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma '
-                                         '(STD) of subimages')
-
-                elif tel in ['ML1', 'BG2', 'BG3', 'BG4']:
-
-                    # if less than [ncal_min_chan] stars are
-                    # available, set following header values to 'None'
-                    # because they are required to be present in the
-                    # header by the DataBase
-                    header['PC-MZPD'] = ('None', '[mag] max. ZP '
-                                         'difference between subimages')
-                    header['PC-MZPS'] = ('None', '[mag] max. ZP sigma '
-                                         '(STD) of subimages')
-
-
-
-            # end of block: if ncalstars > 0
-            header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_max,tel),
-                                  'input max. number of photcal stars to use')
-            header['PC-NCMIN'] = (get_par(set_zogy.phot_ncal_min,tel),
-                                  'input min. number of stars to apply filter '
-                                  'cut')
-
-            if get_par(set_zogy.timing,tel):
-                log_timing_memory (
-                    t0=t2, label='determining photometric calibration')
-
-        else:
-            log.info('Warning: photometric calibration catalog {} not found '
-                     'and/or filter not one of ugqriz'
-                     .format(get_par(set_zogy.cal_cat,tel)))
-            
-        # if there are no photometric calibration stars (either
-        # because no photometric calibration catalog was provided, or
-        # no matching calibration stars could be found in this
-        # particular field), use the default zeropoints defined in the
-        # Settings module
-        if ncalstars==0 or zp==0:
-            header['PC-P'] = (False, 'successfully processed by phot. '
-                              'calibration?')
-            zp = get_par(set_zogy.zp_default,tel)[filt]
-            zp_std = 0.
-        else:
-            header['PC-P'] = (True, 'successfully processed by phot. '
-                              'calibration?')
-
-
-        # infer limiting magnitudes from limiting flux using zeropoint
-        # and median airmass
-        ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-        [limmag] = apply_zp([limflux], zp, airmass_sex_median, exptime, filt,
-                            ext_coeff)
-        log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
-
-        # add header keyword(s):
-        header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
-                              '[mag] default filter zeropoint in settings file')
-        header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
-        header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
-        
-
-        header['PC-EXTCO'] = (ext_coeff,
-                              '[mag] filter extinction coefficient (k)')
-        header['PC-AIRM'] = (airmass_sex_median, 'median airmass of calibration '
-                             'stars')
-        header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
-                            .format(nsigma))
-
-
-        # conversion of catalog fluxes to magnitudes
-        # ==========================================
-        
-        # if 'E_FLUX_OPT' and 'E_FLUXERR_OPT' columns are already present
-        # in catalog, delete them; this could happen in case
-        # [set_zogy.redo] is set to True
-        if 'E_FLUX_OPT' in table_sex.colnames:
-            del table_sex['E_FLUX_OPT', 'E_FLUXERR_OPT']
-
-
-        # add optimal flux columns to table
-        table_sex['E_FLUX_OPT'] = flux_opt
-        table_sex['E_FLUXERR_OPT'] = fluxerr_opt
-
-
-        # split aperture flux with shape (nrows, napps) into separate
-        # columns
-        apphot_radii = get_par(set_zogy.apphot_radii,tel)
-        for col in table_sex.colnames:
-            if col=='E_FLUX_APER' or col=='E_FLUXERR_APER':
-                # update column names of aperture fluxes to include radii
-                # loop apertures
-                for i_ap in range(len(apphot_radii)):
-                    # rename column
-                    col_new = '{}_R{}xFWHM'.format(col, apphot_radii[i_ap])
-                    # append it to table_sex
-                    table_sex[col_new] = table_sex[col][:,i_ap]
-
-                # delete original column
-                del table_sex[col]
-
-
-        # convert fluxes to magnitudes and add to catalog
-        colnames = table_sex.colnames
-        ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-        for col in colnames:
-            if 'E_FLUX_' in col and 'RADIUS' not in col and 'FLUX_MAX' not in col:
-                col_flux = col
-                col_fluxerr = col.replace('E_FLUX', 'E_FLUXERR')
-                col_mag = col.replace('E_FLUX', 'MAG')
-                col_magerr = col.replace('E_FLUX', 'MAGERR')
-
-                mag_tmp, magerr_tmp = apply_zp(
-                    table_sex[col_flux], zp, airmass_sex, exptime, filt,
-                    ext_coeff, fluxerr=table_sex[col_fluxerr])
-
-                if col_mag in colnames:
-                    del table_sex[col_mag, col_magerr]
-
-                # add magnitude columns to table
-                table_sex[col_mag] = mag_tmp
-                table_sex[col_magerr] = magerr_tmp
-
-
-            # also convert MU_MAX in the ref catalog from e- to
-            # magnitudes (per pix**2); SExtractor calculation is as
-            # follows: -2.5 log10 (E_FLUX_MAX (in e-) / pixscale**2), so
-            # easiest to use E_FLUX_MAX to convert to magnitude
-            if 'MU_MAX' in col:
-                if 'E_FLUX_MAX' in colnames:
-                    flux_max = table_sex['E_FLUX_MAX']
-                else:
-                    flux_max = 10**(-0.4*table_sex['MU_MAX']) * pixscale**2
-                
-                mag_tmp = apply_zp(flux_max, zp, airmass_sex, exptime, filt,
-                                   ext_coeff)
-                table_sex['MU_MAX'] = mag_tmp
-
-
-        log.info ('table_sex column names: {}'.format(table_sex.colnames))
-                
-                
-        # discard sources with flux S/N below get_par(set_zogy.source_nsigma,tel)
-        # and with negative fluxes
-        def get_mask (flux, fluxerr, nsigma):
-            # mask with same size as flux array, initialized to False
-            mask_all = np.zeros(flux.size, dtype=bool)
-            # mask where fluxerr is not equal to zero
-            mask_ok = (fluxerr!=0)
-            # where fluxerr is not equal to zero, determine mask of
-            # sources with positive fluxes and flux errors and sources
-            # with significant S/N (flux/fluxerr > nsigma)
-            mask_all[mask_ok] = ((flux[mask_ok]>0) & (fluxerr[mask_ok]>0) &
-                                 ((flux[mask_ok]/fluxerr[mask_ok]) >= nsigma))
-            return mask_all
-
-
-        # filter out objects lower than S/N=nsigma according to
-        # SExtractor AUTO fluxes and errors, if available; if not, use
-        # the optimal fluxes and errors
-        if False and ('E_FLUX_AUTO' in table_sex.colnames and
-                      'E_FLUXERR_AUTO' in table_sex.colnames):
-            log.info ('discarding sources with S/N_AUTO < {}'.format(nsigma))
-            mask_nsigma = get_mask(table_sex['E_FLUX_AUTO'],
-                                   table_sex['E_FLUXERR_AUTO'], nsigma)
-        else:
-            log.info ('discarding sources with S/N_OPT < {}'.format(nsigma))
-            mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
-
-
-        # update header
-        header['NOBJECTS'] = (np.sum(mask_nsigma), 'number of >= {}-sigma '
-                              'objects'.format(nsigma))
-
-        # write updated fits table to file
-        table_sex = table_sex[mask_nsigma]
-        table_sex.write (sexcat, format='fits', overwrite=True)
-
-
-        if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t2, label='creating binary fits table '
-                               'including fluxopt')
-
-
-    # now that calibration is done, create limiting magnitude image
-    # if it does not exist yet or redo is True
-    fits_limmag = '{}_limmag.fits'.format(base)
-    if ((not os.path.isfile(fits_limmag) or redo) and
-        'PC-ZP' in header and 'AIRMASSC' in header):
-
-        # create error image from positive background-subtracted
-        # data_wcs and background STD image
-        index_neg = np.nonzero(data_wcs<0)
-        data_wcs_copy = np.copy(data_wcs)
-        data_wcs_copy[index_neg] = 0
-    
-        # create 1-sigma error image using:
-        #
-        #  noise = sqrt(flux_tot + area_ap * (rdnoise**2 + background))
-        #        ~ sqrt(area_ap * (flux/pixel + (rdnoise**2 + background))
-        #        = sqrt(area_ap * (data_wcs_copy + data_bkg_std**2)
-        #
-        # where area_ap is the effective aperture area used, flux is
-        # [data_wcs] and readnoise**2 + background is the same as
-        # [data_bkg_std]**2.
-        #
-        # N.B.: this is only valid if the flux in a particular pixel
-        # is the same as the average flux per pixel in the imaginary
-        # aperture of size area_ap centered on that pixel, which is
-        # fine for the background regions, but it will overestimate
-        # the noise at e.g. the centers of stars, where it is wrongly
-        # assumed the entire aperture contains the same flux per pixel
-        # as the flux at the center. Would have to convolve the noise
-        # image (data_wcs_copy + data_bkg_std**2) with the PSF and
-        # scale it to determine the proper limiting magnitude image
-
-        area_ap = np.zeros(nsubs)
-        for i in range(nsubs):
-            # The effective area is inferred from the
-            # PSF profile P (volume normalized to unity) as follows:
-            #
-            # var = 1 / sum(P**2/V)  - Eq. 9 from Horne (1986)
-            #
-            # assuming V is roughly equal for each pixel, then:
-            #
-            # 1 / sum(P**2/V) = V / sum(P**2) = area_ap * V
-            # so: area_ap = 1 / sum(P**2)
-            sum_P2 = np.sum(psf_orig[i]**2)
-            if sum_P2 != 0:
-                area_ap[i] = 1./sum_P2
-
-
-        # set zero values to median
-        mask_zero = (area_ap==0)
-        if np.all(mask_zero):
-            area_ap[:] = 1.
-        else:
-            area_ap[mask_zero] = np.median(area_ap)
-
-        # reshape, interpolate and grow area_ap array (1D) to size of
-        # data_wcs_copy; the reference image may not have the same
-        # size as the new image so that the [subimage_size] does not
-        # fit integer times into the image - in that case use the
-        # new-image size and pad the image to the actual size of the
-        # reference image
-        ysize, xsize = data_wcs_copy.shape
-        ysize_new, xsize_new = get_par(set_zogy.shape_new,tel)
-        subsize = get_par(set_zogy.subimage_size,tel)
-        if remap:
-            # remap is True, so the number of subimages is the same as
-            # for the new image
-            nx = int(xsize_new / subsize)
-            ny = int(ysize_new / subsize)
-        else:
-            # need to take care that ref image may have a different
-            # size than the new image
-            nx = int(xsize / subsize)
-            ny = int(ysize / subsize)
-
-
-        data_area_ap = ndimage.zoom(area_ap.reshape((nx,ny)).transpose(),
-                                    subsize, order=2, mode='nearest')
-
-        # if shape not that of input image [data_wcs], e.g. remap is
-        # False and reference image has a different size than the new
-        # image, pad it
-        if data_area_ap.shape != data_wcs_copy.shape:
-
-            #log.info ('data_area_ap.shape: {}, data_wcs_copy.shape: {}'
-            #          .format(data_area_ap.shape, data_wcs_copy.shape))
-
-            if remap:
-
-                # find x,y pixel position in [data_wcs] of origin
-                # (x,y)=(1,1) of new image
-                header_new = read_hdulist ('{}.fits'.format(base_new),
-                                           get_data=False, get_header=True)
-                wcs_new = WCS(header_new)
-                x0 = y0 = np.array([1])
-                ra0, dec0 = wcs_new.all_pix2world(x0, y0, 1)
-                wcs_ref = WCS(header)
-                x0_ref, y0_ref = wcs_ref.all_world2pix(ra0, dec0, 1)
-                # determine padding on 4 sides
-                nx_before = max(int(x0_ref[0])-1, 0)
-                ny_before = max(int(y0_ref[0])-1, 0)
-                nx_after = max(xsize - (int(x0_ref[0])+xsize_new-1), 0)
-                ny_after = max(ysize - (int(y0_ref[0])+ysize_new-1), 0)
-
-            else:
-
-                # subimages were extracted starting from image index
-                # (0,0), so pad only after up to the image size
-                ny_before = nx_before = 0
-                ny_after = ysize - ny*subsize
-                nx_after = xsize - nx*subsize
-                
-            # pad
-            pad_width = ((ny_before, ny_after), (nx_before, nx_after))
-            log.info ('shape of [data_area_ap]: {} not equal to shape of '
-                      '[data_wcs]: {}; padding it with pad_width: {}'
-                      .format(data_area_ap.shape, data_wcs_copy.shape, pad_width))
-            data_area_ap = np.pad (data_area_ap, pad_width, mode='edge')
-
-
-        # calculate error image
-        data_err = np.sqrt(data_area_ap * (data_wcs_copy + data_bkg_std**2))
-
-        # replace any zero values with a large value
-        mask_zero = (data_err==0)
-        data_err[mask_zero] = 100*np.median(data_bkg_std)
-
-        # apply the zeropoint
-        exptime, filt = read_header(header, ['exptime', 'filter'])
-        zp = header['PC-ZP']
-        airm = header['AIRMASSC']
-        ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-        data_limmag = apply_zp((get_par(set_zogy.source_nsigma,tel) * data_err),
-                               zp, airm, exptime, filt, ext_coeff
-                               ).astype('float32')
-
-        # set limiting magnitudes at edges to zero; ; only consider
-        # 'real' edge pixels for reference image
-        value_edge = get_par(set_zogy.mask_value['edge'],tel)
-        mask_edge = (data_mask == value_edge)
-        data_limmag[mask_edge] = 0
-        
-        del data_wcs_copy, data_err
-
-        log.info ('median effective aperture area for calculation of limiting '
-                  'magnitude image: {:.2f} pix, inferred from 1/sum(P**2)'
-                  .format(np.median(area_ap)))
-
-
-        # write limiting magnitude image
-        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
-        del data_limmag
-
+        if zp is None or ncal_used==0:
+            pc_ok = False
 
     else:
+        pc_ok = False
+        log.warning ('photometric calibration catalog {} not found '
+                     'and/or filter {} not one of ugqriz'
+                     .format(get_par(set_zogy.cal_cat,tel), filt))
+        
+
+    # if photometric calibration failed (either because no photometric
+    # calibration catalog could be found, or no matching calibration
+    # stars were present in this particular field), use the default
+    # zeropoints defined in the settings
+    if not pc_ok:
+        zp = get_par(set_zogy.zp_default,tel)[filt]
+        zp_std = 0
+
+
+    # add header keyword(s):
+    header['PC-P'] = (pc_ok, 'successfully processed by phot. calibration?')
+    header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
+                          '[mag] default filter zeropoint in settings file')
+    header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
+    header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
+    header['PC-EXTCO'] = (ext_coeff, '[mag] filter extinction coefficient (k)')
+    header['PC-AIRM'] = (np.median(airmass_cal),
+                         'median airmass of calibration stars')
+
+    # determine airmass at image center
+    lat = get_par(set_zogy.obs_lat,tel)
+    lon = get_par(set_zogy.obs_lon,tel)
+    height = get_par(set_zogy.obs_height,tel)
+    airmass_center = get_airmass(ra_center, dec_center, obsdate,
+                                 lat, lon, height)
+    # in case of reference image and header airmass==1 (set to
+    # unity in refbuild module used for ML/BG) then force
+    # airmasses calculated above to be unity.  If the reference
+    # image is a combination of multiple images, the airmass
+    # calculation above will not be correct. It is assumed that
+    # the fluxes in the combined reference image have been scaled
+    # to an airmass of 1.
+    if imtype=='ref' and 'AIRMASS' in header and header['AIRMASS']==1:
+        airmass_center = 1
+
+    log.info('airmass at image center: {:.3f}'.format(airmass_center))
+    header['AIRMASSC'] = (airmass_center, 'airmass at image center')
+
+
+    # -------------------------------------------
+    # determine image limiting flux and magnitude
+    # -------------------------------------------
+
+    # determine image limiting flux using [get_psfoptflux] with
+    # [get_limflux]=True for random coordinates across the field
+    nlimits = 501
+    edge = 100
+    xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
+    ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
+
+
+    # execute [get_psfoptflux]
+    nsigma = get_par(set_zogy.source_nsigma,tel)
+    psfex_bintable = '{}_psf.fits'.format(base)
+    limflux_array, __ = get_psfoptflux (
+        psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
+        ylim, get_limflux=True, limflux_nsigma=nsigma,
+        imtype=imtype, set_zogy=set_zogy, nthreads=nthreads, tel=tel)
+
+
+    # clipped statistics
+    limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
+        limflux_array.astype(float), mask_value=0)
+    if get_par(set_zogy.verbose,tel):
+        log.info('{}-sigma limiting flux; mean: {:.2f}, std: {:.2f}, '
+                 'median: {:.2f}'.format(nsigma, limflux_mean,
+                                         limflux_std, limflux_median))
+
+
+    # infer limiting magnitudes from limiting flux using zeropoint
+    # and median airmass
+    limflux = limflux_median
+    [limmag] = apply_zp([limflux], zp, np.median(airmass_cal), exptime, filt,
+                        ext_coeff)
+    log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
+
+
+    # add n-sigma limiting flux in e-/s and limiting magnitude to header
+    header['LIMEFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
+                          'limiting flux'.format(nsigma))
+    header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
+                        .format(nsigma))
+
+
+
+    # redo boolean to determine whether to rerun some parts
+    # (source extractor, astrometry.net, psfex) even if those were
+    # executed done
+    redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
+            (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
+
+
+    # ------------------------------------
+    # creation of limiting magnitude image
+    # ------------------------------------
+
+    # create limiting magnitude image if it does not exist yet or redo
+    # is True
+    fits_limmag = '{}_limmag.fits'.format(base)
+    if not os.path.isfile(fits_limmag) or redo:
+        
+        create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
+                             data_bkg_std, data_mask, nsubs, psf_orig, remap, zp,
+                             airmass_center)
+
+    else:
+
         log.warning ('limiting magnitude image is not made for {}'
                      .format(input_fits))
 
 
-    # update header of input fits image with keywords added by PSFEx
-    # and photometric calibration
+    # based on the settings parameter [force_phot_gaia], perform
+    # either forced photometry on the coordinates from an input (Gaia)
+    # catalog is performed, or optimal photometry for all sources
+    # detected already by source extractor
+    
+    if get_par(set_zogy.force_phot_gaia,tel):
+
+        # ------------------------------------------
+        # perform forced photometry on input catalog
+        # ------------------------------------------
+
+        # update header of input fits image with keywords added by
+        # PSFEx and [phot_calibrate]; the function [phot_calibrate]
+        # requires the zeropoint to be present in the header
+        with fits.open(input_fits, 'update', memmap=True) as hdulist:
+            hdulist[0].header = header
+
+
+        # perform forced photometry on input_fits at relevant
+        # positions in input catalog
+        obsdate = read_header(header, ['obsdate'])
+        table_cat = run_force_phot (
+            input_fits, get_par(set_zogy.gaia_cat,tel), obsdate,
+            ra_center, dec_center, fov_half_deg, fits_mask)
+
+
+        # write fits table to file
+        fits_cat = '{}_cat.fits'.format(base)
+        table_cat.write (fits_cat, format='fits', overwrite=True)
+
+
+    else:
+        
+        # -------------------------------
+        # determination of optimal fluxes
+        # -------------------------------
+
+        # get estimate of optimal flux for all sources in the new and
+        # ref image if not already done so
+
+
+        # read SExtractor fits table
+        fits_cat = '{}_cat.fits'.format(base)
+        table_cat = Table.read (fits_cat)
+
+
+        # do not bother to execute [infer_optimal_fluxmag] if
+        # 'E_FLUX_OPT' is already present in [fits_cat] and redo is
+        # False
+        psf_rad_phot = get_par(set_zogy.psf_rad_phot,tel)
+        if ('E_FLUX_OPT' in table_cat.colnames and not redo and
+            # and PSF-RADP in header is equal to psf_rad_phot in the
+            # settings file
+            ('PSF-RADP' in header and header['PSF-RADP'] == psf_rad_phot)):
+
+            pass
+
+        else:
+
+            # execute [infer_optimal_fluxmag]
+            table_cat = infer_optimal_fluxmag (
+                table_cat, header, exptime, filt, obsdate, base, data_wcs,
+                data_bkg_std, data_mask, imtype, objmask, zp, zp_std,
+                nthreads)
+
+
+            # merge fake stars and catalog
+            if imtype=='new' and get_par(set_zogy.nfakestars,tel)>0:
+                table_merged = merge_fakestars (table_cat, table_fake, 'new',
+                                                header)
+                table_merged.write(fits_cat, format='fits', overwrite=True)
+
+            else:
+                # write updated fits table to file
+                table_cat.write (fits_cat, format='fits', overwrite=True)
+
+
+
+
+    # update header of input fits image with keywords added by
+    # different functions
     with fits.open('{}.fits'.format(base), 'update', memmap=True) as hdulist:
         hdulist[0].header = header
-
-
-    # merge fake stars and catalog
-    if imtype=='new' and get_par(set_zogy.nfakestars,tel)>0:
-        table_merged = merge_fakestars (table_sex, table_fake, 'new', header)
-        table_merged.write(sexcat, format='fits', overwrite=True)
 
 
     # ------------------------
     # preparation of subimages
     # ------------------------
-
 
     # split full image into subimages to be used in run_ZOGY - this
     # needs to be done after determination of optimal fluxes as
@@ -7686,12 +7203,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         fftdata_bkg_std_sub[index_fft] = data_bkg_std[index_fftdata]
 
         # record the numpy filename in a dictionary
-        dict_fftdata[nsub] = save_npy_fits (fftdata_sub, '{}_fftdata_sub{}.npy'
-                                            .format(base, nsub))
+        dict_fftdata[nsub] = save_npy_fits(fftdata_sub, '{}_fftdata_sub{}.npy'
+                                           .format(base, nsub))
 
-        dict_fftdata_bkg_std[nsub] = save_npy_fits (fftdata_bkg_std_sub,
-                                                    '{}_fftdata_bkg_std_sub{}.npy'
-                                                    .format(base, nsub))
+        dict_fftdata_bkg_std[nsub] = save_npy_fits(fftdata_bkg_std_sub,
+                                                   '{}_fftdata_bkg_std_sub{}.npy'
+                                                   .format(base, nsub))
 
 
     if get_par(set_zogy.timing,tel):
@@ -7699,14 +7216,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     # call function [prep_plots] to make various plots
-    if get_par(set_zogy.make_plots,tel) and 'E_FLUX_AUTO' in table_sex.colnames:
+    if get_par(set_zogy.make_plots,tel) and 'E_FLUX_AUTO' in table_cat.colnames:
         # in case optimal flux block above was skipped, the SExtractor
         # catalogue with E_FLUX_OPT needs to be read in here to be able
         # to make the plots below
-        if 'E_FLUX_OPT' not in table_sex.colnames:
-            table_sex = Table.read(sexcat, memmap=True)
+        if 'E_FLUX_OPT' not in table_cat.colnames:
+            table_cat = Table.read(fits_cat, memmap=True)
 
-        prep_plots (table_sex, header, base)
+        prep_plots (table_cat, header, base)
 
 
     # remove file(s) if not keeping intermediate/temporary files
@@ -7724,6 +7241,756 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 ################################################################################
 
+def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
+                         data_bkg_std, data_mask, nsubs, psf_orig, remap, zp,
+                         airmass_center):
+
+
+    # create error image from positive background-subtracted
+    # data_wcs and background STD image
+    index_neg = np.nonzero(data_wcs<0)
+    data_wcs_copy = np.copy(data_wcs)
+    data_wcs_copy[index_neg] = 0
+
+
+    # create 1-sigma error image using:
+    #
+    #  noise = sqrt(flux_tot + area_ap * (rdnoise**2 + background))
+    #        ~ sqrt(area_ap * (flux/pixel + (rdnoise**2 + background))
+    #        = sqrt(area_ap * (data_wcs_copy + data_bkg_std**2)
+    #
+    # where area_ap is the effective aperture area used, flux is
+    # [data_wcs] and readnoise**2 + background is the same as
+    # [data_bkg_std]**2.
+    #
+    # N.B.: this is only valid if the flux in a particular pixel
+    # is the same as the average flux per pixel in the imaginary
+    # aperture of size area_ap centered on that pixel, which is
+    # fine for the background regions, but it will overestimate
+    # the noise at e.g. the centers of stars, where it is wrongly
+    # assumed the entire aperture contains the same flux per pixel
+    # as the flux at the center. Would have to convolve the noise
+    # image (data_wcs_copy + data_bkg_std**2) with the PSF and
+    # scale it to determine the proper limiting magnitude image
+
+    area_ap = np.zeros(nsubs)
+    for i in range(nsubs):
+        # The effective area is inferred from the
+        # PSF profile P (volume normalized to unity) as follows:
+        #
+        # var = 1 / sum(P**2/V)  - Eq. 9 from Horne (1986)
+        #
+        # assuming V is roughly equal for each pixel, then:
+        #
+        # 1 / sum(P**2/V) = V / sum(P**2) = area_ap * V
+        # so: area_ap = 1 / sum(P**2)
+        sum_P2 = np.sum(psf_orig[i]**2)
+        if sum_P2 != 0:
+            area_ap[i] = 1/sum_P2
+            
+
+    # set zero values to median
+    mask_zero = (area_ap==0)
+    if np.all(mask_zero):
+        area_ap[:] = 1
+    else:
+        area_ap[mask_zero] = np.median(area_ap)
+
+
+    log.info ('median effective aperture area for calculation of limiting '
+              'magnitude image: {:.2f} pix, inferred from 1/sum(P**2)'
+              .format(np.median(area_ap)))
+
+
+    # reshape, interpolate and grow area_ap array (1D) to size of
+    # data_wcs_copy; the reference image may not have the same
+    # size as the new image so that the [subimage_size] does not
+    # fit integer times into the image - in that case use the
+    # new-image size and pad the image to the actual size of the
+    # reference image
+    ysize, xsize = data_wcs_copy.shape
+    ysize_new, xsize_new = get_par(set_zogy.shape_new,tel)
+    subsize = get_par(set_zogy.subimage_size,tel)
+    if remap:
+        # remap is True, so the number of subimages is the same as
+        # for the new image
+        nx = int(xsize_new / subsize)
+        ny = int(ysize_new / subsize)
+    else:
+        # need to take care that ref image may have a different
+        # size than the new image
+        nx = int(xsize / subsize)
+        ny = int(ysize / subsize)
+
+
+
+    # grow the image using ndimage.zoom
+    data_area_ap = ndimage.zoom(area_ap.reshape((nx,ny)).transpose(),
+                                subsize, order=2, mode='nearest')
+
+
+    # if shape not that of input image [data_wcs], e.g. remap is False
+    # and reference image has a different size than the new image,
+    # need to pad it
+    if data_area_ap.shape != data_wcs_copy.shape:
+
+        #log.info ('data_area_ap.shape: {}, data_wcs_copy.shape: {}'
+        #          .format(data_area_ap.shape, data_wcs_copy.shape))
+        
+        if remap:
+
+            # find x,y pixel position in [data_wcs] of origin
+            # (x,y)=(1,1) of new image
+            header_new = read_hdulist ('{}.fits'.format(base_new),
+                                       get_data=False, get_header=True)
+            wcs_new = WCS(header_new)
+            x0 = y0 = np.array([1])
+            ra0, dec0 = wcs_new.all_pix2world(x0, y0, 1)
+            #log.info ('ra0: {}, dec0: {}'.format(ra0, dec0))
+            wcs_ref = WCS(header)
+            x0_ref, y0_ref = wcs_ref.all_world2pix(ra0, dec0, 1)
+            #log.info ('x0_ref: {}, y0_ref: {}'.format(x0_ref, y0_ref))
+            # determine padding on 4 sides
+            nx_before = max(int(x0_ref[0])-1, 0)
+            ny_before = max(int(y0_ref[0])-1, 0)
+            nx_after = max(xsize - (int(x0_ref[0])+xsize_new-1), 0)
+            ny_after = max(ysize - (int(y0_ref[0])+ysize_new-1), 0)
+
+        else:
+
+            # subimages were extracted starting from image index
+            # (0,0), so pad only after up to the image size
+            ny_before = nx_before = 0
+            ny_after = ysize - ny*subsize
+            nx_after = xsize - nx*subsize
+
+
+        # pad
+        pad_width = ((ny_before, ny_after), (nx_before, nx_after))
+        log.info ('shape of [data_area_ap]: {} not equal to shape of '
+                  '[data_wcs]: {}; padding it with pad_width: {}'
+                  .format(data_area_ap.shape, data_wcs_copy.shape, pad_width))
+        data_area_ap = np.pad (data_area_ap, pad_width, mode='edge')
+
+
+    # calculate error image
+    data_err = np.sqrt(data_area_ap * (data_wcs_copy + data_bkg_std**2))
+
+    # replace any zero values with a large value
+    mask_zero = (data_err==0)
+    data_err[mask_zero] = 100*np.median(data_bkg_std)
+
+
+    # apply the zeropoint
+    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
+    data_limmag = apply_zp((get_par(set_zogy.source_nsigma,tel) * data_err),
+                           zp, airmass_center, exptime, filt, ext_coeff
+                           ).astype('float32')
+
+
+    # set limiting magnitudes at edges to zero; only consider 'real'
+    # edge pixels for reference image
+    value_edge = get_par(set_zogy.mask_value['edge'],tel)
+    mask_edge = (data_mask == value_edge)
+    data_limmag[mask_edge] = 0
+
+
+    # write limiting magnitude image
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+    fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
+
+
+    return
+
+
+################################################################################
+
+def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
+                           data_wcs, data_bkg_std, data_mask, imtype, objmask,
+                           zp, zp_std, nthreads):
+
+
+    if get_par(set_zogy.timing,tel): t1 = time.time()
+    log.info('deriving optimal fluxes ...')
+
+
+    # read pixel positions
+    xwin = table_cat['X_POS']
+    ywin = table_cat['Y_POS']
+
+
+    # [mypsffit] determines if PSF-fitting part is also performed;
+    # this is different from SExtractor PSF-fitting
+    mypsffit = get_par(set_zogy.psffit,tel)
+
+    psfex_bintable = '{}_psf.fits'.format(base)
+    results = get_psfoptflux (
+        psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
+        psffit=mypsffit, imtype=imtype, D_objmask=objmask,
+        set_zogy=set_zogy, nthreads=nthreads, tel=tel)
+
+    if mypsffit:
+        (flux_opt, fluxerr_opt, flux_psf, fluxerr_psf, x_psf, y_psf,
+         chi2_psf, xerr_psf, yerr_psf) = results
+    else:
+        flux_opt, fluxerr_opt = results
+
+
+    # if required, replace saturated+connected pixels with PSF
+    # profile for the saturated objects
+    if get_par(set_zogy.replace_sat_psf,tel):
+        
+        # mask with objects identified as saturated
+        value_sat = mask_value['saturated']
+        mask_sat = (table_cat['FLAGS_MASK'] & value_sat == value_sat)
+        xwin_sat = table_cat['X_POS'][mask_sat]
+        ywin_sat = table_cat['Y_POS'][mask_sat]
+        sat_nmax = get_par(set_zogy.replace_sat_nmax,tel)
+        get_psfoptflux (psfex_bintable, data_wcs, data_bkg_std**2,
+                        data_mask, xwin_sat, ywin_sat, imtype=imtype,
+                        D_objmask=objmask, replace_sat_psf=True,
+                        replace_sat_nmax=sat_nmax, set_zogy=set_zogy,
+                        nthreads=nthreads, tel=tel)
+
+        # save data_wcs after modification in [get_psfoptflux] if
+        # temporary files are kept
+        if get_par(set_zogy.keep_tmp,tel):
+            fits_updated = '{}_updated.fits'.format(base)
+            fits.writeto(fits_updated, data_wcs, header, overwrite=True)
+
+       
+    if get_par(set_zogy.make_plots,tel):
+
+        # make ds9 regions file with all detections
+        result = prep_ds9regions(
+            '{}_alldet_ds9regions.txt'.format(base), xwin, ywin,
+            radius=2., width=1, color='blue',
+            value=np.arange(1,len(xwin)+1))
+
+        # and with flux_opt/fluxerr_opt < 5.
+        index_nonzero = np.nonzero(fluxerr_opt)[0]
+        mask_s2n_lt5 = np.zeros(flux_opt.shape, dtype='bool')
+        mask_s2n_lt5[index_nonzero] = (
+            np.abs(flux_opt[index_nonzero]/fluxerr_opt[index_nonzero])<5)
+        mask_s2n_lt5 |= (flux_opt==0)
+        result = prep_ds9regions(
+            '{}_s2n_lt5_ds9regions.txt'.format(base), xwin[mask_s2n_lt5],
+            ywin[mask_s2n_lt5], radius=2., width=1, color='red',
+            value=np.arange(1,np.sum(mask_s2n_lt5)+1))
+        
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t1, label='deriving optimal fluxes')
+
+
+    if get_par(set_zogy.timing,tel): t2 = time.time()
+
+    # add n-sigma to header; for new images this is nsigma
+    nsigma = get_par(set_zogy.source_nsigma,tel)
+    if imtype=='new':
+        header['NSIGMA'] = (nsigma, '[sigma] source detection threshold')
+    else:
+        # for reference image, do not apply S/N >= nsigma cut
+        # below to go as deep as possible and not discard any
+        # faint galaxies
+        header['NSIGMA'] = (0, '[sigma] source detection threshold')
+
+
+    # get airmasses for SExtractor catalog sources
+    ra_sex = table_cat['RA']
+    dec_sex = table_cat['DEC']
+    flags_sex = table_cat['FLAGS']
+    xcoords_sex = table_cat['X_POS']
+    ycoords_sex = table_cat['Y_POS']
+        
+    lat = get_par(set_zogy.obs_lat,tel)
+    lon = get_par(set_zogy.obs_lon,tel)
+    height = get_par(set_zogy.obs_height,tel)
+    airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, lat, lon, height)
+    airmass_sex_median = np.median(airmass_sex)
+
+        
+    # in case of reference image and header airmass==1 (set to
+    # unity in refbuild module used for ML/BG) then force
+    # airmasses calculated above to be unity.  If the reference
+    # image is a combination of multiple images, the airmass
+    # calculation above will not be correct. It is assumed that
+    # the fluxes in the combined reference image have been scaled
+    # to an airmass of 1.
+    if imtype=='ref' and 'AIRMASS' in header and header['AIRMASS']==1:
+        airmass_sex[:] = 1
+        airmass_sex_median = 1
+        
+    log.info('median airmass calibration stars: {:.3f}'
+             .format(airmass_sex_median))
+
+
+
+    # conversion of catalog fluxes to magnitudes
+    # ==========================================
+        
+    # if 'E_FLUX_OPT' and 'E_FLUXERR_OPT' columns are already present
+    # in catalog, delete them; this could happen in case
+    # [set_zogy.redo] is set to True
+    if 'E_FLUX_OPT' in table_cat.colnames:
+        del table_cat['E_FLUX_OPT', 'E_FLUXERR_OPT']
+
+
+    # add optimal flux columns to table
+    table_cat['E_FLUX_OPT'] = flux_opt
+    table_cat['E_FLUXERR_OPT'] = fluxerr_opt
+    
+
+    # split aperture flux with shape (nrows, napps) into separate
+    # columns
+    apphot_radii = get_par(set_zogy.apphot_radii,tel)
+    for col in table_cat.colnames:
+        if col=='E_FLUX_APER' or col=='E_FLUXERR_APER':
+            # update column names of aperture fluxes to include radii
+            # loop apertures
+            for i_ap in range(len(apphot_radii)):
+                # rename column
+                col_new = '{}_R{}xFWHM'.format(col, apphot_radii[i_ap])
+                # append it to table_cat
+                table_cat[col_new] = table_cat[col][:,i_ap]
+
+            # delete original column
+            del table_cat[col]
+
+
+    # convert fluxes to magnitudes and add to catalog
+    colnames = table_cat.colnames
+    ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
+    for col in colnames:
+        if 'E_FLUX_' in col and 'RADIUS' not in col and 'FLUX_MAX' not in col:
+            col_flux = col
+            col_fluxerr = col.replace('E_FLUX', 'E_FLUXERR')
+            col_mag = col.replace('E_FLUX', 'MAG')
+            col_magerr = col.replace('E_FLUX', 'MAGERR')
+
+            mag_tmp, magerr_tmp = apply_zp(
+                table_cat[col_flux], zp, airmass_sex, exptime, filt,
+                ext_coeff, fluxerr=table_cat[col_fluxerr])
+
+            if col_mag in colnames:
+                del table_cat[col_mag, col_magerr]
+
+            # add magnitude columns to table
+            table_cat[col_mag] = mag_tmp
+            table_cat[col_magerr] = magerr_tmp
+
+
+        # also convert MU_MAX in the ref catalog from e- to
+        # magnitudes (per pix**2); SExtractor calculation is as
+        # follows: -2.5 log10 (E_FLUX_MAX (in e-) / pixscale**2), so
+        # easiest to use E_FLUX_MAX to convert to magnitude
+        if 'MU_MAX' in col:
+            if 'E_FLUX_MAX' in colnames:
+                flux_max = table_cat['E_FLUX_MAX']
+            else:
+                flux_max = 10**(-0.4*table_cat['MU_MAX']) * pixscale**2
+                
+            mag_tmp = apply_zp(flux_max, zp, airmass_sex, exptime, filt,
+                               ext_coeff)
+            table_cat['MU_MAX'] = mag_tmp
+
+
+                
+    # discard sources with flux S/N below get_par(set_zogy.source_nsigma,tel)
+    # and with negative fluxes
+    def get_mask (flux, fluxerr, nsigma):
+        # mask with same size as flux array, initialized to False
+        mask_all = np.zeros(flux.size, dtype=bool)
+        # mask where fluxerr is not equal to zero
+        mask_ok = (fluxerr!=0)
+        # where fluxerr is not equal to zero, determine mask of
+        # sources with positive fluxes and flux errors and sources
+        # with significant S/N (flux/fluxerr > nsigma)
+        mask_all[mask_ok] = ((flux[mask_ok]>0) & (fluxerr[mask_ok]>0) &
+                             ((flux[mask_ok]/fluxerr[mask_ok]) >= nsigma))
+        return mask_all
+
+
+    # filter out objects lower than S/N=nsigma according to
+    # SExtractor AUTO fluxes and errors, if available; if not, use
+    # the optimal fluxes and errors
+    if False and ('E_FLUX_AUTO' in table_cat.colnames and
+                  'E_FLUXERR_AUTO' in table_cat.colnames):
+        log.info ('discarding sources with S/N_AUTO < {}'.format(nsigma))
+        mask_nsigma = get_mask(table_cat['E_FLUX_AUTO'],
+                               table_cat['E_FLUXERR_AUTO'], nsigma)
+    else:
+        log.info ('discarding sources with S/N_OPT < {}'.format(nsigma))
+        mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
+
+
+    # update header
+    header['NOBJECTS'] = (np.sum(mask_nsigma), 'number of >= {}-sigma '
+                          'objects'.format(nsigma))
+
+
+    return table_cat[mask_nsigma]
+
+
+################################################################################
+
+def limit_cal (table_cal, filt):
+
+    # limit calibration catalog entries based on chi2 of stellar template fits
+    if 'chi2' in table_cal.colnames:
+        mask_cal = (np.isfinite(table_cal['chi2']) & (table_cal['chi2'] <= 10))
+        #data_cal = data_cal[:][mask_cal]
+        table_cal = table_cal[mask_cal]
+
+
+    ncalstars = len(table_cal)
+    log.info('number of phot.cal. stars in FOV after chi2 cut: {}'
+             .format(ncalstars))
+
+
+    # requirements on presence of survey input filters for the
+    # calibration of a ML/BG filter:
+    #u: Gaia and (GALEX NUV or SM u or SM v or SDSS u)
+    #g: Gaia and (GALEX NUV or SM u or SM v or SDSS u or SDSS g)
+    #q: Gaia and (GALEX NUV or SM u or SM v or SDSS u or SDSS g or PS1 g or SM g)
+    #r: Gaia: 0
+    #i: Gaia and (2MASS J or PS1 z or PS1 y or SDSS z or SM z): 0
+    #z: Gaia and (2MASS J or PS1 y): 0
+
+    # prepare [filt_req] dictionary
+    filt_req = {}
+    # these filters are required for all filters, boolean AND
+    filt_req['all'] = ['Gaia2r_G', 'Gaia2r_Gbp', 'Gaia2r_Grp', '2MASS_J']
+    # these filters are required for specific filters, boolean OR
+    filt_req['u'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u']
+    filt_req['g'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g']
+    filt_req['q'] = ['GALEX_NUV', 'SM_u', 'SM_v', 'SDSS_u', 'SDSS_g', 'PS1_g',
+                     'SM_g']
+    filt_req['i'] = ['PS1_z', 'PS1_y', 'SDSS_z', 'SM_z']
+    filt_req['z'] = ['PS1_y']
+
+    # [mask_cal] is mask for entries in [table_cal] where all
+    # filters listed in [filt_req['all']] are present (True)
+    mask_cal = np.all([table_cal[col] for col in filt_req['all']], axis=0)
+    table_cal = table_cal[mask_cal]
+
+    # loop the the filter keys of [filt_req]
+    if filt in filt_req:
+        # [mask_cal_filt] is mask for for entries in the
+        # updated [table_cal] for which all filters in
+        # [filt_req[current filter]] are present
+        mask_cal_filt = np.any([table_cal[col] for col in filt_req[filt]],
+                               axis=0)
+        # if less than [set_zogy.phot_ncal_min] stars left,
+        # drop filter requirements and hope for the best!
+        if np.sum(mask_cal_filt) >= get_par(set_zogy.phot_ncal_min,tel):
+            table_cal = table_cal[mask_cal_filt]
+        else:
+            log.warning('less than {} calibration stars with '
+                        'default filter requirements'
+                        .format(get_par(set_zogy.phot_ncal_min,tel)))
+            log.info('filter: {}, requirements (any one of these): {}'
+                     .format(filt, filt_req[filt]))
+            log.info('dropping this specific requirement and hoping '
+                     'for the best')
+
+
+    return table_cal
+
+
+################################################################################
+
+def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
+                    dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
+                    imtype, objmask, nthreads):
+
+
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info('executing phot_calibrate ...')
+
+
+    # read [fits_calcat_field] if it exists; it should have been
+    # produced already by [run_wcs] when checking the astrometric
+    # accuracy
+    fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
+    if os.path.exists(fits_calcat_field):
+
+        # read [fits_calcat_field]
+        log.info ('reading {}'.format(fits_calcat_field))
+        table_cal = Table.read(fits_calcat_field)
+
+    else:
+
+        # select calibration stars that are within the image
+        if '20181115' in fits_cal:
+            # old calibration catalog is indexed by 1-degree declination
+            # zones, so need to use [get_imagestars_zones]
+            table_cal = get_imagestars_zones (fits_cal, obsdate, ra_center,
+                                              dec_center, fov_half_deg)
+
+        else:
+            # new calibration catalog is indexed by HEALPix indices
+            table_cal = get_imagestars_hpindex (fits_cal, obsdate, ra_center,
+                                                dec_center, fov_half_deg)
+
+        log.info ('selected {} calibration stars within the image {}, with '
+                  'central ra,dec: {:.4f},{:.4f}, a field-of-view of {:.3f} '
+                  'degrees and DATE-OBS: {}'
+                  .format(len(table_cal), base, ra_center, dec_center,
+                          2*fov_half_deg, obsdate))
+
+
+    ncalstars = len(table_cal)
+    log.info('number of potential photometric calibration stars in FOV: {}'
+             .format(ncalstars))
+    header['PC-TNCAL'] = (ncalstars, 'total number of photcal stars in FOV')
+
+
+    # for the old calibration catalog, limit [table_cal] with respect
+    # to the catalog chi2 of the stellar template fits, and also the
+    # filters
+    if '20181115' in fits_cal:
+
+        table_cal = limit_cal (table_cal, filt)
+
+        # number of photometric calibration stars after the chi2 and
+        # filter requirements cut.
+        ncalstars = len(table_cal)
+        log.info('number of photometric stars in FOV after filter cut: {}'
+                 .format(ncalstars))
+        header['PC-FNCAL'] = (ncalstars, 'number of photcal stars after '
+                              'filter cut')
+
+
+    # infer their optimal fluxes
+    ra_cal = table_cal['ra'].value
+    dec_cal = table_cal['dec'].value
+    xpos, ypos = WCS(header).all_world2pix(ra_cal, dec_cal, 1)
+    psfex_bintable = '{}_psf.fits'.format(base)
+    flux_opt, fluxerr_opt, flags_mask_opt = get_psfoptflux (
+        psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xpos, ypos,
+        imtype=imtype, D_objmask=objmask, set_zogy=set_zogy,
+        get_flags_mask_central=True, nthreads=nthreads, tel=tel)
+
+
+    # calculate the zeropoint (for ML/BG also calculate it per channel
+    # and do the ZP surface fit), starting with the airmasses of the
+    # calibration stars
+    lat = get_par(set_zogy.obs_lat,tel)
+    lon = get_par(set_zogy.obs_lon,tel)
+    height = get_par(set_zogy.obs_height,tel)
+    airmass_cal = get_airmass(ra_cal, dec_cal, obsdate, lat, lon, height)
+
+
+    # only continue if calibration stars are present in the FOV
+    zp = None
+    zp_std = None
+    ncal_used = 0
+    if ncalstars>0:
+
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+            if '20181115' in fits_cal:
+                # old calibration catalog lacks _ML subscripts
+                filt_subscript = ''
+            else:
+                # new catalog contains _ML and _BG subscripts
+                filt_subscript = '_{}'.format(tel[0:2])
+        else:
+            # what to do for other telescopes?
+            #filt_subscript = '_{}'.format(tel)
+            filt_subscript = ''
+
+        # extract calibration magnitudes
+        mag_cal = table_cal['{}{}'.format(filt, filt_subscript)].value
+
+
+        # discard entries with negative flux and zero FLAGS_MASK
+        mask_zp = ((flux_opt>0.) & (flags_mask_opt==0))
+        log.info ('{} calibration catalog entries left after flux/mask filter '
+                  .format(np.sum(mask_zp)))
+
+
+        # collect individual zeropoints across entire image
+        x_array, y_array, zp_array = collect_zps (
+            xpos[mask_zp], ypos[mask_zp], flux_opt[mask_zp],
+            fluxerr_opt[mask_zp], mag_cal[mask_zp], airmass_cal[mask_zp],
+            exptime, filt)
+
+
+        # determine single zeropoint for entire image
+        zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array,
+                                         filt, imtype, data_wcs.shape,
+                                         zp_type='single')
+
+        header['PC-NCAL'] = (ncal_used, 'number of brightest photcal '
+                             'stars used')
+
+
+        # for MeerLICHT and BlackGEM only
+        ncal_min_chan = 50
+        if (len(zp_array) >= ncal_min_chan and
+            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+            
+            # calculate zeropoint for each channel - not
+            # restricted anymore to brightest maximum number
+            # defined by get_par(set_zogy.phot_ncal_max,tel)
+            # which is used in the single-value ZP above
+            zp_chan, zp_std_chan, ncal_chan = calc_zp (
+                x_array, y_array, zp_array, filt, imtype,
+                zp_type='channels')
+
+        
+            for i_chan in range(zp_chan.size):
+                header['PC-ZP{}'.format(i_chan+1)] = (
+                    zp_chan[i_chan], '[mag] channel {} zeropoint'
+                    .format(i_chan+1))
+            for i_chan in range(zp_chan.size):
+                header['PC-ZPS{}'.format(i_chan+1)] = (
+                    zp_std_chan[i_chan], '[mag] channel {} sigma '
+                    '(STD) zeropoint'.format(i_chan+1))
+            for i_chan in range(zp_chan.size):
+                header['PC-NCC{}'.format(i_chan+1)] = (
+                    ncal_chan[i_chan], 'channel {} number of '
+                    'photcal stars used'.format(i_chan+1))
+
+
+            # fit low-order 2D polynomial to zeropoint array;
+            # normalize coordinates by image size to make it
+            # easier on the polynomial fit
+            order = 2
+            ysize, xsize = data_wcs.shape
+            f_norm = max(ysize, xsize)
+            # subtract 1 from coordinate arrays to convert fit
+            # to pixel indices rather than pixel coordinates,
+            # and then normalize to have coordinate values
+            # around 0-1
+            coeffs = polyfit2d ((x_array-1)/f_norm, (y_array-1)/f_norm,
+                                zp_array, order=order)
+
+            # evaluate at image grid in pixel indices
+            x = np.arange(xsize)
+            y = np.arange(ysize)
+            zp_2dfit = polygrid2d(x/f_norm, y/f_norm, coeffs).T
+
+            # N.B.: polynomials were fit with normalized x and
+            # y indices (using [f_norm]), so coeffients should
+            # be scaled accordingly if original image pixel
+            # indices are used to infer the polynomial fit
+            # (most natural)
+            xy = np.arange(order+1)
+            coeffs_power = np.sum(np.meshgrid(xy,xy), axis=0)
+            coeffs_scaled = coeffs / (float(f_norm)**coeffs_power)
+
+            # record fit coefficients in header
+            header['PC-ZPFDG'] = (order,
+                                  'zeropoint 2D polynomial fit degree')
+            for nc, coeff in enumerate(coeffs_scaled.ravel()):
+                if np.isfinite(coeff):
+                    value = coeff
+                else:
+                    value = 'None'              
+                    header['PC-ZPF{}'.format(nc)] = (
+                        value, 'zeropoint 2D poly fit coefficient {}'.format(nc))
+
+                    
+            if get_par(set_zogy.make_plots,tel):
+
+                # save zeropoint arrays
+                ascii.write([x_array, y_array, zp_array],
+                            '{}_zp.dat'.format(base),
+                            names=['x_array', 'y_array', 'zp_array'],
+                            overwrite=True)
+
+                # plot
+                plt.imshow(zp_2dfit, origin='lower', aspect=1)
+                plt.colorbar()
+                plt.scatter(x_array, y_array, c=zp_array, marker='o',
+                            edgecolor='k')
+                plt.xlim(x.min(), x.max())
+                plt.xlabel('X-axis')
+                plt.ylim(y.min(), y.max())
+                plt.ylabel('Y-axis')
+                plt.title('polynomial fit (order={}) to image zeropoints'
+                          .format(order))
+                plt.savefig('{}_zp_2dfit.pdf'.format(base))
+                plt.close()
+                
+                        
+            # determine median zeropoints on subimages to
+            # check if they are constant across the image
+            subsize = get_par(set_zogy.subimage_size,tel)
+            zp_mini, zp_std_mini, ncal_mini = calc_zp (
+                x_array, y_array, zp_array, filt, imtype,
+                data_shape=data_wcs.shape, zp_type='background',
+                boxsize=subsize)
+
+            # if keeping intermediate/temporary files, save
+            # these mini images
+            if get_par(set_zogy.keep_tmp,tel):
+                
+                fits.writeto('{}_zp_subs.fits'.format(base),
+                             zp_mini, overwrite=True)
+                fits.writeto('{}_zp_std_subs.fits'.format(base),
+                             zp_std_mini, overwrite=True)
+                fits.writeto('{}_zp_ncal_subs.fits'.format(base),
+                             ncal_mini.astype('int16'), overwrite=True)
+                
+
+            # add statistics of these arrays to header
+            mask_use = ((zp_mini != 0) & (zp_std_mini != 0))
+            n_zps = np.sum(mask_use)
+            if n_zps >= 4:
+                # discard the highest and lowest value in stats
+                arr_sort = np.sort(zp_mini[mask_use])
+                max_diff = np.abs(arr_sort[-2] - arr_sort[1])
+                arr_sort = np.sort(zp_std_mini[mask_use])
+                max_std = arr_sort[-2]
+            else:
+                log.warning ('too few subimages (<4) available to '
+                             'determine maximum ZP difference and STD')
+                max_diff = 'None'
+                max_std = 'None'
+
+                        
+            header['PC-TNSUB'] = (int(ysize/subsize)**2, 'total number '
+                                  'of subimages available')
+            header['PC-NSUB'] = (n_zps, 'number of subimages used for '
+                                 'ZP statistics')
+            header['PC-MZPD'] = (max_diff, '[mag] max. ZP '
+                                 'difference between subimages')
+            header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma '
+                                 '(STD) of subimages')
+
+        elif tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+            # if less than [ncal_min_chan] stars are
+            # available, set following header values to 'None'
+            # because they are required to be present in the
+            # header by the DataBase
+            header['PC-MZPD'] = ('None', '[mag] max. ZP '
+                                 'difference between subimages')
+            header['PC-MZPS'] = ('None', '[mag] max. ZP sigma '
+                                 '(STD) of subimages')
+
+
+    # end of block: if ncalstars > 0
+
+    # add a few additional header keywords
+    header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_max,tel),
+                          'input max. number of photcal stars to use')
+    header['PC-NCMIN'] = (get_par(set_zogy.phot_ncal_min,tel),
+                          'input min. number of stars to apply filter '
+                          'cut')
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='phot_calibrate')
+
+
+    return zp, zp_std, ncal_used, airmass_cal
+
+
+################################################################################
+
 def remove_files (filelist, verbose=False):
 
     for f in filelist:
@@ -7733,6 +8000,290 @@ def remove_files (filelist, verbose=False):
                 log.info ('removing temporary file {}'.format(f))
 
     return
+
+
+################################################################################
+
+def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
+                    fov_half_deg, fits_mask):
+
+    """function that performs forced photometry on [fits_in] at the
+    RADECs listed in [cat_in] with assumed column/field names ra and
+    dec for the coordinates and pmra and pmdec for the proper
+    motion. If the proper motion columns are not present, no proper
+    motion is applied."""
+
+    
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info('executing run_force_phot ...')
+
+
+    # use function [get_imagestars_hpindex] to extract the entries from the
+    # input catalog that are relevant for this image, and apply a
+    # proper motion correction - if columns pmra and pmdec are present
+    # in fits_gaia - from [obsdate] to the catalog epoch (2016 for
+    # Gaia DR3)
+    table_gaia_image = get_imagestars_hpindex (fits_gaia, obsdate, ra_center,
+                                               dec_center, fov_half_deg)
+    table_gaia_image['ra'].name = 'RA_IN'
+    table_gaia_image['dec'].name = 'DEC_IN'
+
+    log.info ('selected {} Gaia stars within the image {}, with central ra,dec: '
+              '{:.4f},{:.4f}, field-of-view: {:.3f} degrees and DATE-OBS: {}'
+              .format(len(table_gaia_image), fits_in, ra_center, dec_center,
+                      2*fov_half_deg, obsdate))
+
+
+    # create dictionary: {image: [indices in table to consider]}
+    ncoords = len(table_gaia_image)
+    image_indices_dict = {fits_in: np.arange(ncoords)}
+
+
+    # set various parameters to be able to run forced photometry
+    nsigma = get_par(set_zogy.source_nsigma,tel)
+    apphot_radii = get_par(set_zogy.apphot_radii,tel)
+    # CHECK!!! - add sky radii to set_zogy; need to take care of doing
+    # the same in source extractor
+    apphot_sky_inout = get_par(set_zogy.apphot_sky_inout,tel)
+    apphot_att2add = None
+
+    # use local or global background?
+    bkg_phototype = get_par(set_zogy.bkg_phototype,tel)
+    bkg_global = (bkg_phototype == 'global')
+
+
+    # run forced photometry
+    table_force_phot = force_phot.force_phot (
+        table_gaia_image, image_indices_dict, mask_list=[fits_mask], trans=False,
+        ref=False, fullsource=True, nsigma=nsigma, apphot_radii=apphot_radii,
+        apphot_sky_inout=apphot_sky_inout, apphot_att2add=apphot_att2add,
+        include_fluxes=True, bkg_global=bkg_global,
+        # CHECK!!! npcus - is relevant in force_phot
+        # in case of multiple images, but what if
+        # get_psfoptflux is multiprocessed??
+        tel=tel, ncpus=1)
+
+
+    # delete columns that are not needed
+    colnames = table_force_phot.colnames
+    # original Gaia ra and dec columns
+    #cols2delete = ['ra', 'dec']
+    cols2delete = ['RA_IN', 'DEC_IN', 'FILENAME']
+    # flux, fluxerr or S/N related to aperture photometry
+    cols2delete += [c for c in colnames
+                    if ('FLUX' in c or 'SNR' in c) and 'APER' in c]
+    for colname in colnames:
+        if colname in cols2delete:
+            # delete column
+            del table_force_phot[colname]
+        else:
+            # convert remaining ones to upper case, except for the
+            # aperture ones, which have a - confusing! - lower case x,
+            # but keep like that because of consistency with original
+            # catalogs
+            if 'APER' not in colname:
+                table_force_phot[colname].name = colname.upper()
+
+            
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='run_force_phot')
+
+
+    return table_force_phot
+
+
+################################################################################
+
+def get_imagestars_zones (fits_cal, obsdate, ra_center, dec_center,
+                          fov_half_deg):
+
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info('executing get_imagestars_zones ...')
+
+
+    # determine cal_cat fits extensions to read using
+    # [get_zone_indices] (each 1 degree strip in declination is
+    # recorded in its own extension in the calibration catalog)
+    zone_indices = get_zone_indices (dec_center, fov_half_deg,
+                                     zone_size=60.)
+
+
+    # read specific extensions (=zone_indices+1) of
+    # calibration catalog
+    data_cal = read_hdulist (get_par(set_zogy.cal_cat,tel),
+                             ext_name_indices=zone_indices+1)
+    
+
+    # use function [find_stars] to select stars in calibration
+    # catalog that are within the current field-of-view
+    index_field = find_stars (data_cal['ra'], data_cal['dec'],
+                              ra_center, dec_center, fov_half_deg, search='box')
+    #index_field = np.where(mask_field)[0]
+    data_cal = data_cal[index_field]
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_imagestars_zones')
+
+
+    # return [data_cal] as an astropy Table
+    return Table(data_cal)
+
+
+################################################################################
+
+def get_imagestars_hpindex (fits_gaia, obsdate, ra_center, dec_center,
+                            fov_half_deg):
+
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info('executing get_imagestars_hpindex ...')
+
+    
+    # infer healpixel level from settings file and convert to nside
+    level = get_par(set_zogy.gaia_hplevel,tel)
+    nside = 2**level
+
+
+    # determine healpix indices within radius [radius_deg] from
+    # (ra_center, dec_center)
+    radius_deg = 1.02 * fov_half_deg * np.sqrt(2)
+    indices = healpix_nearby(ra_center, dec_center, radius_deg, 
+                             nside=nside, search='circle')
+
+
+    # convert integer array of healpixel indices to list with fits
+    # extensions
+    ext_name_indices = list(indices+1) 
+    # add last extension with high proper motion stars
+    ext_name_indices.append(-1)
+    # read indices
+    data_gaia = read_hdulist (fits_gaia, ext_name_indices=ext_name_indices)
+
+
+    # apply proper motion if available
+    table_gaia = Table(data_gaia)
+    colnames = table_gaia.colnames
+    if 'pmra' in colnames and 'pmdec' in colnames:
+        gaia_epoch = get_par(set_zogy.gaia_epoch,tel)
+        table_gaia = apply_gaia_pm (table_gaia, obsdate, epoch=gaia_epoch,
+                                    return_table=True)
+
+
+    # limit stars to within the image FOV
+    index_field = find_stars (table_gaia['ra'].value, table_gaia['dec'].value,
+                              ra_center, dec_center, fov_half_deg, search='box')
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_imagestars_hpindex')
+
+
+    # return relevant indices
+    return table_gaia[index_field]
+
+
+################################################################################
+
+def healpix_nearby (ra, dec, radius_deg, nside=4, search='circle', nest=True):
+
+    """return indices (integer array) of healpixels for given [nside]
+       that overlap with circle with radius [radius_deg] or a square
+       image/box with halfsize of [radius_deg]/sqrt(2), centerered at
+       [ra], [dec] (floats). The circle method is slightly faster; the
+       box method can lead to fewer matching healpixels, because the
+       box halfsize is smaller than the circle radius.
+    """
+    
+    if search == 'circle':
+
+        # convert ra, dec to healpy vec
+        vec = hp.ang2vec(ra, dec, lonlat=True)
+    
+        # return indices of healpy pixels (nested or ring) which
+        # overlap with circle centered at ra,dec and with radius
+        # [radius_deg]
+        indices = hp.query_disc(nside=nside, vec=vec,
+                                radius=np.radians(radius_deg),
+                                inclusive=True, nest=nest)
+
+    elif search == 'box':
+
+        # center coordinates
+        center = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
+        
+        # determine 4 corners of image or box with directional offset
+        # method
+        ras = []
+        decs = []
+        for posangle in np.arange(45,360,90):
+            corner = center.directional_offset_by(posangle*u.deg,
+                                                  radius_deg*u.deg)
+            ras.append(corner.ra.deg)
+            decs.append(corner.dec.deg)
+
+        # convert corner ras, decs to healpy vec
+        vecs = (hp.ang2vec(ras, decs, lonlat=True))
+
+        # use query_polygon method to infer indices
+        indices = hp.query_polygon(nside, vecs, inclusive=True, nest=nest)
+
+
+    return indices
+
+
+################################################################################
+
+def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
+                   remove_pmcolumns=True):
+
+    """function to correct the coordinates in the input table
+    [table_gaia], assumed to be in columns ra and dec and in units of
+    degrees, for the corresponding proper motion, assumed to be in
+    columns pmra and pmdec and in units of milli-arcseconds per year.
+    The input [obsdate] needs to be readable by astropy's time.Time,
+    e.g. fits format yyyy-mm-ddThh:mm:ss.sss, which is compared to the
+    catalog epoch - 2016 for Gaia DR3 - to calculate the total offset
+    due to the proper motion.
+
+    """
+
+
+    # delta time in years between [obsdate] and epoch
+    dtime_yr = Time(obsdate).decimalyear - epoch
+
+    # convert table columns to numpy arrays
+    ra = table_gaia['ra'].value
+    dec = table_gaia['dec'].value
+    coords_in = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
+
+    # offset due to proper motion in arcseconds
+    offset_ra = 1e-3 * table_gaia['pmra'].value * dtime_yr
+    offset_dec = 1e-3 * table_gaia['pmdec'].value * dtime_yr
+
+    # use astropy's SkyCoord.spherical_offsets_by method to calculate
+    # coordinates corrected for offset due to proper motion
+    coords_out = coords_in.spherical_offsets_by(offset_ra *u.arcsec,
+                                                offset_dec*u.arcsec)
+
+    # return astropy Table or just the ra and dec arrays
+    if return_table:
+
+        # replace ra and dec columns with corrected coordinates
+        table_gaia['ra'] = coords_out.ra
+        table_gaia['dec'] = coords_out.dec
+
+        # remove proper motion columns if needed
+        if remove_pmcolumns:
+            del table_gaia['pmra']
+            del table_gaia['pmdec']
+
+        # return Astropy table
+        return table_gaia
+
+    else:
+
+        # return the RA and DEC arrays
+        return coords_out.ra, coords_out.dec 
 
 
 ################################################################################
@@ -8031,39 +8582,33 @@ def create_modify_mask (data, satlevel, data_mask=None):
 
 ################################################################################
 
-def collect_zps (ra_sex, dec_sex, airmass_sex, xcoords_sex, ycoords_sex,
-                 flux_opt, fluxerr_opt, ra_cal, dec_cal, mag_cal,
+def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
                  exptime, filt):
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing collect_zps ...')
 
-
-    # find calibration sources matching SExtractor coordinates using
-    # [get_matches]
-    index_sex, index_cal = get_matches (ra_sex, dec_sex, ra_cal, dec_cal,
-                                        dist_max=2, return_offsets=False)
-    x_array = xcoords_sex[index_sex]
-    y_array = ycoords_sex[index_sex]
-
     # calculate zeropoints using individual airmasses, since at A=2
     # the difference in airmass across the FOV is 0.1, i.e. a 5%
     # change
-    mag_sex_inst = -2.5*np.log10(flux_opt/exptime)
-    pogson = 2.5/np.log(10.)
-    magerr_sex_inst = pogson * fluxerr_opt / flux_opt
-    zp_array = (mag_cal[index_cal] - mag_sex_inst[index_sex] +
-                airmass_sex[index_sex] * get_par(set_zogy.ext_coeff,tel)[filt])
-    zp_array = zp_array.value
 
-    log.info ('number of matches in collect_zps: {}'.format(len(zp_array)))
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='collect_zps')
+    # instrumental magnitudes
+    mag_opt_inst = -2.5*np.log10(flux_opt/exptime)
+    pogson = 2.5/np.log(10)
+    # corresponding (symmetrical) error
+    magerr_opt_inst = pogson * fluxerr_opt / flux_opt
 
+    # zeropoints; N.B.: although an airmass of 1.2 was used to infer
+    # the mag_cal, this same airmass was used for the (hypothetical)
+    # standard star, so the zeropoints below need not be corrected for
+    # this
+    zp_array = (mag_cal - mag_opt_inst +
+                airmass_cal * get_par(set_zogy.ext_coeff,tel)[filt])
 
     # return x_array, y_array and zp_array in order of brightness
     # determined by [mag_cal]
-    index_sort = np.argsort(mag_cal[index_cal])
+    index_sort = np.argsort(mag_cal)
+
 
     return x_array[index_sort], y_array[index_sort], zp_array[index_sort]
 
@@ -8236,8 +8781,8 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_min):
 
 ################################################################################
 
-def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff,
-              fluxerr=None, zp_std=None):
+def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff, fluxerr=None,
+              zp_std=None):
 
     """Function that converts the array [flux] into calibrated magnitudes
     using [zp] (a scalar), [airmass] (scalar or array with the same
@@ -8263,8 +8808,8 @@ def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff,
     # atmospheric extinction was already included in the calibration
     # catalog
     mag = zp + mag_inst - airmass * ext_coeff
-    # set magnitudes of sources with non-positive fluxes to -1
-    mag[~mask_pos] = -1
+    # set magnitudes of sources with non-positive fluxes to 99
+    mag[~mask_pos] = 99
     
     # and determine errors if [fluxerr] is provided
     if fluxerr is not None:
@@ -8278,9 +8823,9 @@ def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff,
             if zp_std>0.1:
                 log.info('Warning: zp_std is larger than 0.1 mag: {}'.
                          format(zp_std))
-        # set errors of sources with non-positive fluxes to -1
-        magerr[~mask_pos] = -1
-        
+        # set errors of sources with non-positive fluxes to 99
+        magerr[~mask_pos] = 99
+
 
     if fluxerr is not None:
         return mag, magerr
@@ -8290,15 +8835,14 @@ def apply_zp (flux, zp, airmass, exptime, filt, ext_coeff,
 
 ################################################################################
 
-def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box',
-                sort=False):
+def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box', sort=False):
     
     """find entries in [ra_cat] and [dec_cat] within [dist] of [ra] and
        [dec]; all in degrees
     """
 
     # make a big cut in arrays ra_cat and dec_cat to speed up
-    index_cut = np.nonzero(np.abs(dec_cat-dec)<=dist)
+    index_cut = np.nonzero(np.abs(dec_cat-dec)<=dist)[0]
     ra_cat_cut = ra_cat[index_cut]
     dec_cat_cut = dec_cat[index_cut]
 
@@ -8318,7 +8862,7 @@ def find_stars (ra_cat, dec_cat, ra, dec, dist, search='box',
 
 
     # indices of sources in input catalog within circle or box
-    index_dist = index_cut[0][mask_dist]
+    index_dist = index_cut[mask_dist]
 
     # sort indices in distance if needed
     if sort:
@@ -8432,11 +8976,12 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, get_altaz=False):
                                              location=location))
 
     if get_altaz:
-        return coords_altaz.secz, coords_altaz.alt.deg, coords_altaz.az.deg
+        return (coords_altaz.secz.value, coords_altaz.alt.deg.value,
+                coords_altaz.az.deg.value)
     else:
-        return coords_altaz.secz
-    
-        
+        return coords_altaz.secz.value
+
+
 ################################################################################
 
 def fixpix (data, satlevel=60000., data_bkg_std=None, data_mask=None,
@@ -10124,9 +10669,9 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, nthreads=1):
     ny = int(ysize / subsize)
 
 
-
-    # switch to rerun some parts (source extractor, astrometry.net,
-    # psfex) even if those were executed done
+    # redo boolean to determine whether to rerun some parts (source
+    # extractor, astrometry.net, psfex) even if those were executed
+    # done
     redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
             (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
 
@@ -11108,12 +11653,12 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         ra_psf = ra_new[index_new]
         dec_psf = dec_new[index_new]
         __, index_new_cat = get_matches (ra_psf, dec_psf,
-                                         table_new['RA'].quantity.value,
-                                         table_new['DEC'].quantity.value,
+                                         table_new['RA'].value,
+                                         table_new['DEC'].value,
                                          return_offsets=False)
         __, index_ref_cat = get_matches (ra_psf, dec_psf,
-                                         table_ref['RA'].quantity.value,
-                                         table_ref['DEC'].quantity.value,
+                                         table_ref['RA'].value,
+                                         table_ref['DEC'].value,
                                          return_offsets=False)
 
         if ('E_FLUX_OPT' in table_new.colnames and
@@ -11716,77 +12261,88 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing run_wcs ...')
-    
+
+
+    # pixel scale range
     varyfrac = get_par(set_zogy.pixscale_varyfrac,tel)
     scale_low = (1 - varyfrac) * pixscale
     scale_high = (1 + varyfrac) * pixscale
 
-    base = image_in.replace('.fits','')
-    sexcat = '{}_cat.fits'.format(base)
 
     # read SExtractor catalogue (this is also used further down below
     # in this function)
-    data_sexcat = read_hdulist (sexcat)
-    #nobjects = data_sexcat.shape[0]
-    #header['S-NOBJ'] = (nobjects, 'number of objects detected by SExtractor')
-    #log.info('number of objects detected by SExtractor: {}'.format(nobjects))
-    
-    # feed Astrometry.net only with brightest sources; N.B.:
-    # keeping only objects with zero FLAGS does not work well in crowded fields
-    # select stars for finding WCS solution
-    #mask_use = (data_sexcat['FLAGS']<=1)
-    # the above selection is not working well for crowded images; Danielle
-    # found the following to work well for both non-crowded as crowded
-    # images, i.e. use all objects that are not masked according to the
-    # input mask (any pixel within the isophotal area of an object):
+    base = image_in.replace('.fits','')
+    sexcat = '{}_cat.fits'.format(base)
+    table_sex = Table.read(sexcat)
 
-    if 'FLAGS_MASK' in data_sexcat.dtype.names:
-        mask_use = (data_sexcat['FLAGS_MASK']==0)
+
+    # feed Astrometry.net only with brightest sources; N.B.: keeping
+    # only objects with zero FLAGS does not work well in crowded
+    # fields select stars for finding WCS solution
+    #mask_use = (data_sexcat['FLAGS']<=1)
+
+    # the above selection is not working well for crowded images
+    # either; Danielle found the following to work well for both
+    # non-crowded as crowded images, i.e. use all objects that are not
+    # masked according to the input mask (any pixel within the
+    # isophotal area of an object):
+    if 'FLAGS_MASK' in table_sex.colnames:
+        mask_use = (table_sex['FLAGS_MASK']==0)
     else:
-        mask_use = (data_sexcat['FLAGS']<=3)
+        mask_use = (table_sex['FLAGS']<=3)
 
     # sort in brightness (E_FLUX_AUTO)
-    if 'E_FLUX_AUTO' in data_sexcat.dtype.names:
+    if 'E_FLUX_AUTO' in table_sex.colnames:
         column_sort = 'E_FLUX_AUTO'
-    elif 'E_FLUX_OPT' in data_sexcat.dtype.names:
+    elif 'E_FLUX_OPT' in table_sex.colnames:
         column_sort = 'E_FLUX_OPT'
     else:
         column_sort = 'E_FLUX_APER_R5xFWHM'
 
-    index_sort = np.argsort(data_sexcat[column_sort][mask_use])
+    index_sort = np.argsort(table_sex[mask_use][column_sort])
     # sorting is done by flux, so reverse [index_sort] to have the
     # brightest objects first
     index_sort = index_sort[::-1]
 
+
+    # subset of table_sex, sorted in brightness
+    table_sex_use_sort = table_sex[mask_use][index_sort]
+
+
     # select the brightest objects
     nbright = get_par(set_zogy.ast_nbright,tel)
-    index_bright = uniform_subset (data_sexcat['X_POS'][mask_use][index_sort],
-                                   data_sexcat['Y_POS'][mask_use][index_sort],
-                                   nbright)
+    index_bright = uniform_subset (table_sex_use_sort['X_POS'].value,
+                                   table_sex_use_sort['Y_POS'].value, nbright)
+    table_sex_bright = table_sex_use_sort[index_bright]
 
+    # save to fits
     sexcat_bright = '{}_cat_bright.fits'.format(base)
-    #fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][-nbright:],
-    #             overwrite=True)
-    fits.writeto(sexcat_bright, data_sexcat[mask_use][index_sort][index_bright],
-                 overwrite=True)
+    table_sex_bright.write(sexcat_bright, format='fits', overwrite=True)
+
 
     # create ds9 regions text file to show the brightest stars
     if get_par(set_zogy.make_plots,tel):
-        result = prep_ds9regions(
-            '{}_cat_bright_ds9regions.txt'.format(base),
-            data_sexcat['X_POS'][mask_use][index_sort][index_bright],
-            data_sexcat['Y_POS'][mask_use][index_sort][index_bright],
-            radius=5., width=2, color='green',
-            value=np.arange(1,nbright+1))
+        result = prep_ds9regions('{}_cat_bright_ds9regions.txt'.format(base),
+                                 table_sex_bright['X_POS'].value,
+                                 table_sex_bright['Y_POS'].value,
+                                 radius=5., width=2, color='green',
+                                 value=np.arange(1,nbright+1))
 
+
+    # output folder
     dir_out = '.'
     if '/' in base:
-        dir_out = '/'.join(base.split('/')[:-1])
+        dir_out, __ = os.path.split(base)
+        #dir_out = '/'.join(base.split('/')[:-1])
 
+
+    # string with depths
     dstep = 30
     depth_str = (str(list(range(dstep,nbright//2+1,dstep)))
                  .replace('[','').replace(']','').replace(' ',''))
 
+
+    # solve-field command
     cmd = ['solve-field', '--no-plots',
            '--config', get_par(set_zogy.astronet_config,tel),
            #'--no-fits2fits', cloud version of astrometry does not have this arg
@@ -11979,93 +12535,111 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # axis mismatch, as .wcs files have NAXIS=0, while proper image
     # header files have NAXIS=2
     wcs = WCS(header)
-    newra, newdec = wcs.all_pix2world(data_sexcat['X_POS'],
-                                      data_sexcat['Y_POS'],
-                                      1)
+    newra, newdec = wcs.all_pix2world(table_sex['X_POS'], table_sex['Y_POS'], 1)
 
     # update catalog with new RA and DEC columns
-    data_sexcat['RA'] = newra
-    data_sexcat['DEC'] = newdec
-    fits.writeto(sexcat, data_sexcat, overwrite=True)
-    
+    table_sex['RA'] = newra
+    table_sex['DEC'] = newdec
+    table_sex.write(sexcat, format='fits', overwrite=True)
+
+
+    # also infer RA, DEC of central pixel
+    xsize = width
+    ysize = height
+    ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
+    log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+
+    # add RA-CNTR and DEC-CNTR to header
+    header['RA-CNTR'] = (float(ra_center), 
+                         '[deg] RA (ICRS) at image center (astrometry.net)')
+    header['DEC-CNTR'] = (float(dec_center), 
+                          '[deg] DEC (ICRS) at image center (astrometry.net)')
+
+
     if get_par(set_zogy.timing,tel):
         t3 = time.time()
 
-    # check how well the WCS solution just found, compares with an
-    # external catalog defined in Constants module
-    if os.path.isfile(get_par(set_zogy.cal_cat,tel)):
 
-        # use .wcs file to get RA, DEC of central pixel
-        xsize = width
-        ysize = height
-        ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
-        log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+    # check how well the WCS solution just found, compares with the
+    # coordinates in the calibration catalog
+    fits_cal = get_par(set_zogy.cal_cat,tel)
+    if os.path.exists (fits_cal):
 
-        # determine cal_cat min and max declination zone of field
-        # to determine fits extensions (=zone+1) to read
+        # field-of-view
         fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
-        zone_indices = get_zone_indices (dec_center, fov_half_deg, zone_size=60.)
-        log.info('declination zone indices read from calibration catalog: {}'
-                 .format(zone_indices))
 
-        # read specific extensions (=zone_indices+1) of calibration catalog
-        data_cal = read_hdulist (get_par(set_zogy.cal_cat,tel),
-                                 ext_name_indices=zone_indices+1)
+        # date of observation for proper motion correction
+        obsdate = read_header(header, 'obsdate')
 
-        # use function [find_stars] to select stars in calibration
-        # catalog that are within the current field-of-view
-        index_field = find_stars (data_cal['ra'], data_cal['dec'], ra_center,
-                                  dec_center, fov_half_deg)
-        #index_field = np.where(mask_field)[0]
-        # N.B.: this [data_cal] array is returned by this function
-        # [run_wcs] and also by [sex_wcs] so that it can be re-used
-        # for the photometric calibration in [prep_optimal_subtraction]
-        data_cal = data_cal[index_field]
-        ra_ast = data_cal['ra']
-        dec_ast = data_cal['dec']
-        mag_ast = data_cal[get_par(set_zogy.ast_filter,tel)]
+        # select calibration stars that are within the image
+        if '20181115' in fits_cal:
+            # old calibration catalog is indexed by 1-degree declination
+            # zones, so need to use [get_imagestars_zones]
+            table_cal = get_imagestars_zones (fits_cal, obsdate, ra_center,
+                                              dec_center, fov_half_deg)
 
-        n_aststars = np.shape(index_field)[0]
+        else:
+            # new calibration catalog is indexed by HEALPix indices
+            table_cal = get_imagestars_hpindex (fits_cal, obsdate, ra_center,
+                                                dec_center, fov_half_deg)
+
+        log.info ('selected {} calibration stars within the image {}, with '
+                  'central ra,dec: {:.4f},{:.4f}, a field-of-view of {:.3f} '
+                  'degrees and DATE-OBS: {}'
+                  .format(len(table_cal), base, ra_center, dec_center,
+                          2*fov_half_deg, obsdate))
+
+        
+        # write table_cal to fits table so it can be re-used in the
+        # photometric calibration; one file for each imtype as the
+        # shift may be considerable
+        if table_cal is not None:
+            fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
+            table_cal.write (fits_calcat_field, format='fits', overwrite=True)
+
+
+        n_ast = len(table_cal)
         log.info('number of potential astrometric stars in FOV: {}'
-                 .format(n_aststars))
+                 .format(n_ast))
+
 
         # add header keyword(s):
-        cal_name = get_par(set_zogy.cal_cat,tel).split('/')[-1]
+        cal_name = fits_cal.split('/')[-1]
         header['A-CAT-F'] = (cal_name, 'astrometric catalog') 
-        header['A-TNAST'] = (n_aststars,
-                             'total number of astrometric stars in FOV')
+        header['A-TNAST'] = (n_ast, 'total number of astrometric stars in FOV')
 
 
         # calculate array of offsets between astrometry comparison
         # stars and any non-saturated SExtractor source
-        newra_bright = newra[mask_use][index_sort][index_bright]
-        newdec_bright = newdec[mask_use][index_sort][index_bright]        
-        __, indx_ast, __, dra_array, ddec_array = get_matches (
-            newra_bright, newdec_bright, ra_ast, dec_ast, dist_max=2)
+        newra_use_sort = newra[mask_use][index_sort]
+        newdec_use_sort = newdec[mask_use][index_sort]
+        __, index_ast, __, dra_array, ddec_array = get_matches (
+            newra_use_sort[index_bright], newdec_use_sort[index_bright],
+            table_cal['ra'].value, table_cal['dec'].value, dist_max=2)
 
 
         # this is the number of matches that Anet could find
         # between brightest stars detected and the number of stars
         # in the index file for this field
-        n_aststars_used = table_match['NMATCH'][0]
+        n_ast_used = table_match['NMATCH'][0]
 
-        log.info('number of astrometric stars used: {}'.format(n_aststars_used))
-        header['A-NAST'] = (n_aststars_used,
+        log.info('number of astrometric stars used: {}'.format(n_ast_used))
+        header['A-NAST'] = (n_ast_used,
                             'number of brightest matching stars used for WCS')
         header['A-NAMAX'] = (get_par(set_zogy.ast_nbright,tel),
                              'input max. no. of stars detected to use for WCS')
+
 
         # calculate means, stds and medians
         dra_mean, dra_median, dra_std = sigma_clipped_stats(
             dra_array, sigma=5, mask_value=0)
         ddec_mean, ddec_median, ddec_std = sigma_clipped_stats(
             ddec_array, sigma=5, mask_value=0)
-        
+
         log.info('dra_mean [arcsec]: {:.3f}, dra_std: {:.3f}, dra_median: {:.3f}'
                  .format(dra_mean, dra_std, dra_median))
         log.info('ddec_mean [arcsec]: {:.3f}, ddec_std: {:.3f}, ddec_median: '
                  '{:.3f}'.format(ddec_mean, ddec_std, ddec_median))
-
 
         # add header keyword(s):
         header['A-DRA'] = (dra_median,
@@ -12079,8 +12653,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         # this is the number of matches found above between
         # brightest stars detected and the total number of catalog
         # stars in this field
-        n_aststars_offset = np.shape(dra_array)[0]
-        header['A-NA-OFF'] = (n_aststars_offset, 'number of matching stars '
+        n_ast_offset = np.shape(dra_array)[0]
+        header['A-NA-OFF'] = (n_ast_offset, 'number of matching stars '
                               'used in offset calc.')
 
 
@@ -12103,14 +12677,16 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                 filename='{}_dRADEC.pdf'.format(base),
                 title=base.split('/')[-1])
 
+
             # plot of dra vs. color and ddec vs. color, to check for
             # offset dependence on stellar color
             col = ['g', 'r']
-            if (col[0] in data_cal.dtype.names and
-                col[1] in data_cal.dtype.names and np.sum(mask_nonzero) >= 10):
+            if (col[0] in table_cal.colnames and
+                col[1] in table_cal.colnames and np.sum(mask_nonzero) >= 10):
 
-                col_array = data_cal[col[0]][indx_ast]-data_cal[col[1]][indx_ast]
-                
+                col_array = (table_cal[col[0]][index_ast] -
+                             table_cal[col[1]][index_ast])
+
                 fig, (ax0, ax1) = plt.subplots(2, 1, sharex=True, sharey=False)
                 fig.subplots_adjust(hspace=0, wspace=0)
                 fig.suptitle(base.split('/')[-1], fontsize=10)
@@ -12151,7 +12727,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
                 # also save fits file with calibration info and
                 # offsets for ADC analysis
-                table_cal_offsets = Table(data_cal[indx_ast])
+                table_cal_offsets = Table(table_cal[index_ast])
                 table_cal_offsets['DRA'] = dra_array
                 table_cal_offsets['DDEC'] = ddec_array
                 table_cal_offsets.write ('{}_dRADEC_calcat.fits'.format(base),
@@ -12159,30 +12735,9 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 
     else:
-        log.info('Warning: calibration catalog {} not found!'
-                 .format(get_par(set_zogy.cal_cat,tel)))
-        data_cal = None
+        log.error ('calibration catalog {} not found!'
+                   .format(get_par(set_zogy.cal_cat,tel)))
 
-        
-    # add RA-CNTR and DEC-CNTR to header
-    wcs = WCS(header)
-    ra_center, dec_center = wcs.all_pix2world(width/2+0.5, height/2+0.5, 1)
-    log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
-    header['RA-CNTR'] = (float(ra_center), 
-                         '[deg] RA (ICRS) at image center (astrometry.net)')
-    header['DEC-CNTR'] = (float(dec_center), 
-                          '[deg] DEC (ICRS) at image center (astrometry.net)')
-
-
-    # write data_cal with selection of calibration stars in this field
-    # to fits table; one for each imtype as the shift may be
-    # considerable
-    if data_cal is not None:
-        fits_calcat_field = '{}_calcat_field_{}.fits'.format(base, imtype)
-        #data_cal.writeto (fits_calcat_field, overwrite=True)
-        table_calcat_field = Table(data_cal)
-        table_calcat_field.write (fits_calcat_field, format='fits',
-                                  overwrite=True)
 
 
     # update header of input image
