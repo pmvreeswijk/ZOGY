@@ -3441,7 +3441,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
-    airmass_trans = get_airmass(table_trans['RA_PEAK'], table_trans['DEC_PEAK'],
+    airmass_trans = get_airmass(table_trans['RA_PEAK'].value,
+                                table_trans['DEC_PEAK'].value,
                                 obsdate, lat, lon, height)
 
     # get magnitudes corresponding to absolute fluxes; fluxes, which
@@ -4100,7 +4101,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     height = get_par(set_zogy.obs_height,tel)
     airmass_trans = get_airmass(ra_peak, dec_peak, obsdate, 
                                 lat, lon, height)
-        
+
     # get magnitudes corresponding to absolute fluxes; fluxes, which
     # can be negative for e.g. an object detected in the reference
     # image but not in the new image, are first converted to positive
@@ -7497,11 +7498,11 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
 
     # get airmasses for SExtractor catalog sources
-    ra_sex = table_cat['RA']
-    dec_sex = table_cat['DEC']
-    flags_sex = table_cat['FLAGS']
-    xcoords_sex = table_cat['X_POS']
-    ycoords_sex = table_cat['Y_POS']
+    ra_sex = table_cat['RA'].value
+    dec_sex = table_cat['DEC'].value
+    flags_sex = table_cat['FLAGS'].value
+    xcoords_sex = table_cat['X_POS'].value
+    ycoords_sex = table_cat['Y_POS'].value
         
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
@@ -8976,10 +8977,9 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, get_altaz=False):
                                              location=location))
 
     if get_altaz:
-        return (coords_altaz.secz.value, coords_altaz.alt.deg.value,
-                coords_altaz.az.deg.value)
+        return coords_altaz.secz, coords_altaz.alt.deg, coords_altaz.az.deg
     else:
-        return coords_altaz.secz.value
+        return coords_altaz.secz
 
 
 ################################################################################
