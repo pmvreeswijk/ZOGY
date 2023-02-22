@@ -1171,9 +1171,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if (get_par(set_zogy.ML_calc_prob,tel) and
             tel in ['ML1', 'BG2', 'BG3', 'BG4']):
 
-            if get_par(set_zogy.timing,tel):
-                t_ML = time.time() 
-
             try:
                 ML_processed = False
                 # vetting training version to be used
@@ -1181,12 +1178,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # and the corresponding model
                 ML_model = get_par(set_zogy.ML_models,tel)[int(ML_version[0])-1]
                 
-                log.info ('applying machine-learning real/bogus version {}, '
+                log.info ('applying machine-learning real/bogus version {} with '
                           'model {} for {}'
                           .format(ML_version, ML_model.split('/')[-1], base_new))
 
                 # depending on version, execute a different function
-                if ML_version == 1:
+                if int(ML_version[0]) == 1:
                     ML_prob_real = get_ML_prob_real_Zafiirah (dict_thumbnails,
                                                               ML_model)
                 else:
@@ -1213,11 +1210,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # if exception occurred in [get_ML_prob_real], leave
             if not ML_processed:
                 return header_new, header_trans
-
-
-            if get_par(set_zogy.timing,tel):
-                log_timing_memory (t0=t_ML, label='application of real/bogus '
-                                   'model for {}'.format(base_new))
 
 
 
@@ -1784,6 +1776,9 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model):
 
     """
 
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info ('executing get_ML_prob_real_Diederik ...')
+
     # initially list with data to be stacked after the loop
     list_2stack = []
 
@@ -1801,6 +1796,10 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model):
     # [get_probability] is (nrows, size, size, 4) where size needs to
     # be at least 40
     data_stack = np.stack(list_2stack, axis=-1)
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_ML_prob_real_Diederik')
 
 
     # obtain and return probabilities
@@ -1824,6 +1823,8 @@ def get_ML_prob_real_Zafiirah (dict_thumbnails, model, use_30x30=True,
 
     """
 
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info ('executing get_ML_prob_real_Zafiirah ...')
 
     # read fits table
     #table = Table.read(fits_table)
@@ -1879,6 +1880,10 @@ def get_ML_prob_real_Zafiirah (dict_thumbnails, model, use_30x30=True,
     prob_thresh = 0.5
     ML_real_prob, __ = prediction_phase.realbogus_prediction(
         model_name, data_stack, id_trans, prob_thresh, model_path=model_path)
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_ML_prob_real_Zafiirah')
 
 
     return ML_real_prob
@@ -2173,7 +2178,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
 
     """
 
-    t = time.time()
+    if get_par(set_zogy.timing,tel):
+        t = time.time()
+
     log.info('executing format_cat ...')
     mem_use (label='at start of format_cat')
 
@@ -2557,8 +2564,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     hdulist = fits.HDUList(fits.PrimaryHDU(header=hdu.header))
     hdulist.writeto(cat_out.replace('.fits', '_hdr.fits'), overwrite=True)
 
-
-    log_timing_memory (t0=t, label='format_cat')
+    
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='format_cat')
 
     
     return
