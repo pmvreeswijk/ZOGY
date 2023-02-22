@@ -1183,7 +1183,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 
                 log.info ('applying machine-learning real/bogus version {}, '
                           'model {} for {}'
-                          .format(ML_version, ML_model.split('/')[-1], base))
+                          .format(ML_version, ML_model.split('/')[-1], base_new))
 
                 # depending on version, execute a different function
                 if ML_version == 1:
