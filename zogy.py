@@ -1217,7 +1217,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
             if get_par(set_zogy.timing,tel):
                 log_timing_memory (t0=t_ML, label='application of real/bogus '
-                                   'model for {}'.format(base))
+                                   'model for {}'.format(base_new))
 
 
 
