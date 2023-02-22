@@ -3442,9 +3442,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
-    airmass_trans = get_airmass(table_trans['RA_PEAK'].value,
-                                table_trans['DEC_PEAK'].value,
-                                obsdate, lat, lon, height)
+    airmass_trans = get_airmass (table_trans['RA_PEAK'].value,
+                                 table_trans['DEC_PEAK'].value,
+                                 obsdate, lat, lon, height)
 
     # get magnitudes corresponding to absolute fluxes; fluxes, which
     # can be negative for e.g. an object detected in the reference
@@ -4100,8 +4100,8 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
-    airmass_trans = get_airmass(ra_peak, dec_peak, obsdate, 
-                                lat, lon, height)
+    airmass_trans = get_airmass (ra_peak, dec_peak, obsdate, 
+                                 lat, lon, height)
 
     # get magnitudes corresponding to absolute fluxes; fluxes, which
     # can be negative for e.g. an object detected in the reference
@@ -6935,9 +6935,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     else:
         pc_ok = False
-        log.warning ('photometric calibration catalog {} not found '
-                     'and/or filter {} not one of ugqriz'
-                     .format(get_par(set_zogy.cal_cat,tel), filt))
         
 
     # if photometric calibration failed (either because no photometric
@@ -6947,6 +6944,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     if not pc_ok:
         zp = get_par(set_zogy.zp_default,tel)[filt]
         zp_std = 0
+        log.warning ('photometric calibration catalog {} not found '
+                     'and/or filter {} not one of ugqriz; using the '
+                     'default zeropoint: {} and zp_std=0'
+                     .format(get_par(set_zogy.cal_cat,tel), filt, zp))
 
 
     # add header keyword(s):
@@ -6963,8 +6964,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
-    airmass_center = get_airmass(ra_center, dec_center, obsdate,
-                                 lat, lon, height)
+    airmass_center = get_airmass (ra_center, dec_center, obsdate,
+                                  lat, lon, height)
     # in case of reference image and header airmass==1 (set to
     # unity in refbuild module used for ML/BG) then force
     # airmasses calculated above to be unity.  If the reference
@@ -7508,7 +7509,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
-    airmass_sex = get_airmass(ra_sex, dec_sex, obsdate, lat, lon, height)
+    airmass_sex = get_airmass (ra_sex, dec_sex, obsdate, lat, lon, height)
     airmass_sex_median = np.median(airmass_sex)
 
         
@@ -7781,7 +7782,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     lat = get_par(set_zogy.obs_lat,tel)
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
-    airmass_cal = get_airmass(ra_cal, dec_cal, obsdate, lat, lon, height)
+    airmass_cal = get_airmass (ra_cal, dec_cal, obsdate, lat, lon, height)
 
 
     # only continue if calibration stars are present in the FOV
@@ -8977,10 +8978,14 @@ def get_airmass (ra, dec, obsdate, lat, lon, height, get_altaz=False):
     coords_altaz = coords.transform_to(AltAz(obstime=Time(obsdate),
                                              location=location))
 
+    # take care to convert Quantity coords_altaz.secz to numpy float
+    # or array
+    airmass = coords_altaz.secz.value
+
     if get_altaz:
-        return coords_altaz.secz, coords_altaz.alt.deg, coords_altaz.az.deg
+        return airmass, coords_altaz.alt.deg, coords_altaz.az.deg
     else:
-        return coords_altaz.secz
+        return airmass
 
 
 ################################################################################
