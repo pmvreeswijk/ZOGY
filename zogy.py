@@ -6779,7 +6779,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
             if False:
                 ds9_arrays (data_ref_remap=data_ref_remap)
-            
+
 
 
     # determine psf of input image with get_psf function - needs to be
@@ -6791,7 +6791,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     dict_psf, psf_orig = get_psf (input_fits, header, nsubs, imtype, fwhm,
                                   pixscale, remap, nthreads=nthreads)
 
-    
+
     # -----------------------------------------------
     # injection of fake/artificial stars in new image
     # -----------------------------------------------
@@ -6804,7 +6804,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # number of stars to add
         nfake = get_par(set_zogy.nfakestars,tel)
         radec = get_par(set_zogy.fakestar_radec,tel)
-        
+
         # coordinates of stars to add; place them in random positions
         # across the image, keeping [edge] pixels off the image edges
         edge = 200
@@ -6855,7 +6855,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         fits_new = '{}_new.fits'.format(base)
         fits.writeto(fits_new, data_wcs, header, overwrite=True)
         sexcat_ldac = '{}_ldac.fits'.format(base_new)
-        
+
         result = run_sextractor(fits_new, sexcat_ldac,
                                 get_par(set_zogy.sex_cfg,tel),
                                 get_par(set_zogy.sex_par,tel),
@@ -6873,6 +6873,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         sexcat = '{}_cat.fits'.format(base)
         ldac2fits (sexcat_ldac, sexcat)
 
+
+
+    # redo boolean to determine whether to rerun some parts
+    # (source extractor, astrometry.net, psfex) even if those were
+    # executed done
+    redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
+            (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
 
 
     # -----------------------
@@ -6895,7 +6902,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # with ones indicating the objects; previous to that it was a
     # float32 image with zeros indicating the objects)
     fits_objmask = '{}_objmask.fits'.format(base)
-    objmask = read_hdulist (fits_objmask, dtype=bool)
+    if os.path.exists (fits_objmask):
+        objmask = read_hdulist (fits_objmask, dtype=bool)
+    else:
+        objmask = None
 
 
     # infer image central coordinates; this is used in forced
@@ -6909,207 +6919,208 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # otherwise, use WCS solution in input [header] to get RA, DEC
         # of central pixel
         wcs = WCS(header)
-        ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
+        ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5,
+                                                  ysize/2+0.5, 1)
 
 
     # half the field-of-view (FoV) in degrees
     fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
 
 
-    # add header keyword(s):
-    fits_cal = get_par(set_zogy.cal_cat,tel)
-    header['PC-CAT-F'] = (fits_cal.split('/')[-1], 'photometric catalog')
+    # only execute this phot_calibrate/limiting magnitude image block
+    # if the photometric calibration was not already performed
+    # successfully, or redo is switched on
+    if ('PC-P' in header and header['PC-P'] == True and not redo 
+        and 'PC-ZP' in header and 'PC-ZPSTD' in header):
 
-
-    # run [phot_calibrate]
-    if (os.path.isfile(fits_cal) and filt in 'ugqriz'):
-
-        pc_ok = True
-        zp, zp_std, ncal_used, airmass_cal = phot_calibrate (
-            fits_cal, header, exptime, filt, obsdate, base, ra_center,
-            dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask, imtype,
-            objmask, nthreads)
-
-        if zp is None or ncal_used==0:
-            pc_ok = False
-
-    else:
-        pc_ok = False
-        
-
-    # if photometric calibration failed (either because no photometric
-    # calibration catalog could be found, or no matching calibration
-    # stars were present in this particular field), use the default
-    # zeropoints defined in the settings
-    if not pc_ok:
-        zp = get_par(set_zogy.zp_default,tel)[filt]
-        zp_std = 0
-        log.warning ('photometric calibration catalog {} not found '
-                     'and/or filter {} not one of ugqriz; using the '
-                     'default zeropoint: {} and zp_std=0'
-                     .format(get_par(set_zogy.cal_cat,tel), filt, zp))
-
-
-    # add header keyword(s):
-    header['PC-P'] = (pc_ok, 'successfully processed by phot. calibration?')
-    header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
-                          '[mag] default filter zeropoint in settings file')
-    header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
-    header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
-    header['PC-EXTCO'] = (ext_coeff, '[mag] filter extinction coefficient (k)')
-    header['PC-AIRM'] = (np.median(airmass_cal),
-                         'median airmass of calibration stars')
-
-    # determine airmass at image center
-    lat = get_par(set_zogy.obs_lat,tel)
-    lon = get_par(set_zogy.obs_lon,tel)
-    height = get_par(set_zogy.obs_height,tel)
-    airmass_center = get_airmass (ra_center, dec_center, obsdate,
-                                  lat, lon, height)
-    # in case of reference image and header airmass==1 (set to
-    # unity in refbuild module used for ML/BG) then force
-    # airmasses calculated above to be unity.  If the reference
-    # image is a combination of multiple images, the airmass
-    # calculation above will not be correct. It is assumed that
-    # the fluxes in the combined reference image have been scaled
-    # to an airmass of 1.
-    if imtype=='ref' and 'AIRMASS' in header and header['AIRMASS']==1:
-        airmass_center = 1
-
-    log.info('airmass at image center: {:.3f}'.format(airmass_center))
-    header['AIRMASSC'] = (airmass_center, 'airmass at image center')
-
-
-    # -------------------------------------------
-    # determine image limiting flux and magnitude
-    # -------------------------------------------
-
-    # determine image limiting flux using [get_psfoptflux] with
-    # [get_limflux]=True for random coordinates across the field
-    nlimits = 501
-    edge = 100
-    xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
-    ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
-
-
-    # execute [get_psfoptflux]
-    nsigma = get_par(set_zogy.source_nsigma,tel)
-    psfex_bintable = '{}_psf.fits'.format(base)
-    limflux_array, __ = get_psfoptflux (
-        psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
-        ylim, get_limflux=True, limflux_nsigma=nsigma,
-        imtype=imtype, set_zogy=set_zogy, nthreads=nthreads, tel=tel)
-
-
-    # clipped statistics
-    limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
-        limflux_array.astype(float), mask_value=0)
-    if get_par(set_zogy.verbose,tel):
-        log.info('{}-sigma limiting flux; mean: {:.2f}, std: {:.2f}, '
-                 'median: {:.2f}'.format(nsigma, limflux_mean,
-                                         limflux_std, limflux_median))
-
-
-    # infer limiting magnitudes from limiting flux using zeropoint
-    # and median airmass
-    limflux = limflux_median
-    [limmag] = apply_zp([limflux], zp, np.median(airmass_cal), exptime, filt,
-                        ext_coeff)
-    log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
-
-
-    # add n-sigma limiting flux in e-/s and limiting magnitude to header
-    header['LIMEFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
-                          'limiting flux'.format(nsigma))
-    header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
-                        .format(nsigma))
-
-
-
-    # redo boolean to determine whether to rerun some parts
-    # (source extractor, astrometry.net, psfex) even if those were
-    # executed done
-    redo = ((get_par(set_zogy.redo_new,tel) and imtype=='new') or
-            (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
-
-
-    # ------------------------------------
-    # creation of limiting magnitude image
-    # ------------------------------------
-
-    # create limiting magnitude image if it does not exist yet or redo
-    # is True
-    fits_limmag = '{}_limmag.fits'.format(base)
-    if not os.path.isfile(fits_limmag) or redo:
-        
-        create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
-                             data_bkg_std, data_mask, nsubs, psf_orig, remap, zp,
-                             airmass_center)
-
-    else:
-
-        log.warning ('limiting magnitude image is not made for {}'
-                     .format(input_fits))
-
-
-    # based on the settings parameter [force_phot_gaia], perform
-    # either forced photometry on the coordinates from an input (Gaia)
-    # catalog is performed, or optimal photometry for all sources
-    # detected already by source extractor
-    
-    if get_par(set_zogy.force_phot_gaia,tel):
-
-        # ------------------------------------------
-        # perform forced photometry on input catalog
-        # ------------------------------------------
-
-        # update header of input fits image with keywords added by
-        # PSFEx and [phot_calibrate]; the function [phot_calibrate]
-        # requires the zeropoint to be present in the header
-        with fits.open(input_fits, 'update', memmap=True) as hdulist:
-            hdulist[0].header = header
-
-
-        # perform forced photometry on input_fits at relevant
-        # positions in input catalog
-        obsdate = read_header(header, ['obsdate'])
-        table_cat = run_force_phot (
-            input_fits, get_par(set_zogy.gaia_cat,tel), obsdate,
-            ra_center, dec_center, fov_half_deg, fits_mask)
-
-
-        # write fits table to file
-        fits_cat = '{}_cat.fits'.format(base)
-        table_cat.write (fits_cat, format='fits', overwrite=True)
-
+        # read zp and zp_std from header
+        zp = header['PC-ZP']
+        zp_std = header['PC-ZPSTD']
 
     else:
         
-        # -------------------------------
-        # determination of optimal fluxes
-        # -------------------------------
-
-        # get estimate of optimal flux for all sources in the new and
-        # ref image if not already done so
+        # add header keyword(s):
+        fits_cal = get_par(set_zogy.cal_cat,tel)
+        header['PC-CAT-F'] = (fits_cal.split('/')[-1], 'photometric catalog')
 
 
-        # read SExtractor fits table
-        fits_cat = '{}_cat.fits'.format(base)
-        table_cat = Table.read (fits_cat)
+        # run [phot_calibrate]
+        if (os.path.isfile(fits_cal) and filt in 'ugqriz'):
 
+            pc_ok = True
+            zp, zp_std, ncal_used, airmass_cal = phot_calibrate (
+                fits_cal, header, exptime, filt, obsdate, base, ra_center,
+                dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
+                imtype, objmask, nthreads)
 
-        # do not bother to execute [infer_optimal_fluxmag] if
-        # 'E_FLUX_OPT' is already present in [fits_cat] and redo is
-        # False
-        psf_rad_phot = get_par(set_zogy.psf_rad_phot,tel)
-        if ('E_FLUX_OPT' in table_cat.colnames and not redo and
-            # and PSF-RADP in header is equal to psf_rad_phot in the
-            # settings file
-            ('PSF-RADP' in header and header['PSF-RADP'] == psf_rad_phot)):
-
-            pass
+            if zp is None or ncal_used==0:
+                pc_ok = False
 
         else:
+            pc_ok = False
+        
+
+        # if photometric calibration failed (either because no photometric
+        # calibration catalog could be found, or no matching calibration
+        # stars were present in this particular field), use the default
+        # zeropoints defined in the settings
+        if not pc_ok:
+            zp = get_par(set_zogy.zp_default,tel)[filt]
+            zp_std = 0
+            log.warning ('photometric calibration catalog {} not found '
+                         'and/or filter {} not one of ugqriz; using the '
+                         'default zeropoint: {} and zp_std=0'
+                         .format(get_par(set_zogy.cal_cat,tel), filt, zp))
+
+
+        # add header keyword(s):
+        header['PC-P'] = (pc_ok, 'successfully processed by phot. calibration?')
+        header['PC-ZPDEF'] = (get_par(set_zogy.zp_default,tel)[filt], 
+                              '[mag] default filter zeropoint in settings file')
+        header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
+        header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
+        header['PC-EXTCO'] = (ext_coeff, '[mag] filter extinction coefficient '
+                              '(k)')
+        header['PC-AIRM'] = (np.median(airmass_cal),
+                             'median airmass of calibration stars')
+
+
+        # determine airmass at image center
+        lat = get_par(set_zogy.obs_lat,tel)
+        lon = get_par(set_zogy.obs_lon,tel)
+        height = get_par(set_zogy.obs_height,tel)
+        airmass_center = get_airmass (ra_center, dec_center, obsdate,
+                                      lat, lon, height)
+        # in case of reference image and header airmass==1 (set to
+        # unity in refbuild module used for ML/BG) then force
+        # airmasses calculated above to be unity.  If the reference
+        # image is a combination of multiple images, the airmass
+        # calculation above will not be correct. It is assumed that
+        # the fluxes in the combined reference image have been scaled
+        # to an airmass of 1.
+        if imtype=='ref' and 'AIRMASS' in header and header['AIRMASS']==1:
+            airmass_center = 1
+
+        log.info('airmass at image center: {:.3f}'.format(airmass_center))
+        header['AIRMASSC'] = (airmass_center, 'airmass at image center')
+
+        
+
+        # -------------------------------------------
+        # determine image limiting flux and magnitude
+        # -------------------------------------------
+
+        # determine image limiting flux using [get_psfoptflux] with
+        # [get_limflux]=True for random coordinates across the field
+        nlimits = 501
+        edge = 100
+        xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
+        ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
+
+
+        # execute [get_psfoptflux]
+        nsigma = get_par(set_zogy.source_nsigma,tel)
+        psfex_bintable = '{}_psf.fits'.format(base)
+        limflux_array, __ = get_psfoptflux (
+            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
+            ylim, get_limflux=True, limflux_nsigma=nsigma,
+            imtype=imtype, set_zogy=set_zogy, nthreads=nthreads, tel=tel)
+
+
+        # clipped statistics
+        limflux_mean, limflux_median, limflux_std = sigma_clipped_stats(
+            limflux_array.astype(float), mask_value=0)
+        if get_par(set_zogy.verbose,tel):
+            log.info('{}-sigma limiting flux; mean: {:.2f}, std: {:.2f}, '
+                     'median: {:.2f}'.format(nsigma, limflux_mean,
+                                             limflux_std, limflux_median))
+
+
+        # infer limiting magnitudes from limiting flux using zeropoint
+        # and median airmass
+        limflux = limflux_median
+        [limmag] = apply_zp([limflux], zp, np.median(airmass_cal), exptime,
+                            filt, ext_coeff)
+        log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
+
+
+        # add n-sigma limiting flux in e-/s and limiting magnitude to header
+        header['LIMEFLUX'] = (limflux/exptime, '[e-/s] full-frame {}-sigma '
+                              'limiting flux'.format(nsigma))
+        header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
+                            .format(nsigma))
+
+
+
+        # ------------------------------------
+        # creation of limiting magnitude image
+        # ------------------------------------
+
+        # create limiting magnitude image
+        fits_limmag = '{}_limmag.fits'.format(base)
+        create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
+                             data_bkg_std, data_mask, nsubs, psf_orig, remap,
+                             zp, airmass_center)
+
+
+
+    # based on the settings parameter [force_phot_gaia], either
+    # perform forced photometry on the coordinates from an input
+    # (Gaia) catalog, or optimal photometry for all sources detected
+    # already by source extractor
+
+
+    # read catalog fits table
+    fits_cat = '{}_cat.fits'.format(base)
+    table_cat = Table.read (fits_cat)
+
+
+    # do not bother to execute block below if 'E_FLUX_OPT' is already
+    # present in [fits_cat] and redo is False
+    psf_rad_phot = get_par(set_zogy.psf_rad_phot,tel)
+    if ('E_FLUX_OPT' in table_cat.colnames and not redo
+        # and PSF-RADP in header is equal to psf_rad_phot in the
+        # settings file
+        and ('PSF-RADP' in header and header['PSF-RADP'] == psf_rad_phot)):
+
+        pass
+        
+    else:
+    
+        if get_par(set_zogy.force_phot_gaia,tel):
+
+            # ------------------------------------------
+            # perform forced photometry on input catalog
+            # ------------------------------------------
+            
+            # update header of input fits image with keywords added by
+            # PSFEx and [phot_calibrate]; the function [phot_calibrate]
+            # requires the zeropoint to be present in the header
+            with fits.open(input_fits, 'update', memmap=True) as hdulist:
+                hdulist[0].header = header
+
+
+            # perform forced photometry on input_fits at relevant
+            # positions in input catalog
+            obsdate = read_header(header, ['obsdate'])
+            table_cat = run_force_phot (
+                input_fits, get_par(set_zogy.gaia_cat,tel), obsdate,
+                ra_center, dec_center, fov_half_deg, fits_mask)
+
+
+            # write fits table to file
+            fits_cat = '{}_cat.fits'.format(base)
+            table_cat.write (fits_cat, format='fits', overwrite=True)
+
+
+        else:
+        
+            # -------------------------------
+            # determination of optimal fluxes
+            # -------------------------------
+            
+            # get estimate of optimal flux for all sources in the new
+            # and ref image
 
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
