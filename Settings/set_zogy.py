@@ -73,10 +73,10 @@ fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
 # Machine Learning - trained on MeerLICHT data!
 #===============================================================================
 ML_calc_prob = True
-# version to use: 1=Zafiirah; 2=Diederik
-ML_version = 2
-# list of ML_models, where the model used is determined by [ML_version]:
-# ML_model = ML_models[ML_version - 1]
+# version to use: '1'=Zafiirah; '2'=Diederik
+ML_version = '2'
+# list of ML_models, where the model used is determined by the first
+# character of [ML_version]: ML_model = ML_models[int(ML_version[0]) - 1]
 ML_models = ['{}/meerCRAB_model/NET3_threshold_9_NRD'
              .format(os.environ['MEERCRABHOME']),
              '{}/CalFiles/model270123.h5'.format(os.environ['ZOGYHOME'])]

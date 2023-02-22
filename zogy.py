@@ -1171,12 +1171,20 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if (get_par(set_zogy.ML_calc_prob,tel) and
             tel in ['ML1', 'BG2', 'BG3', 'BG4']):
 
+            if get_par(set_zogy.timing,tel):
+                t_ML = time.time() 
+
             try:
                 ML_processed = False
                 # vetting training version to be used
                 ML_version = get_par(set_zogy.ML_version,tel)
                 # and the corresponding model
-                ML_model = get_par(set_zogy.ML_models,tel)[ML_version-1]
+                ML_model = get_par(set_zogy.ML_models,tel)[int(ML_version[0])-1]
+                
+                log.info ('applying machine-learning real/bogus version {}, '
+                          'model {} for {}'
+                          .format(ML_version, ML_model.split('/')[-1], base))
+
                 # depending on version, execute a different function
                 if ML_version == 1:
                     ML_prob_real = get_ML_prob_real_Zafiirah (dict_thumbnails,
@@ -1205,6 +1213,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # if exception occurred in [get_ML_prob_real], leave
             if not ML_processed:
                 return header_new, header_trans
+
+
+            if get_par(set_zogy.timing,tel):
+                log_timing_memory (t0=t_ML, label='application of real/bogus '
+                                   'model for {}'.format(base))
 
 
 
@@ -6937,6 +6950,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         zp = header['PC-ZP']
         zp_std = header['PC-ZPSTD']
 
+        log.warning ('skipping photometric calibration and creation of limiting'
+                     'magnitude image for {}'.format(base))
+
     else:
         
         # add header keyword(s):
@@ -7083,8 +7099,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # settings file
         and ('PSF-RADP' in header and header['PSF-RADP'] == psf_rad_phot)):
 
-        pass
+        if get_par(set_zogy.force_phot_gaia,tel):
+            label = 'forced photometry'
+        else:
+            label = 'optimal fluxes'
         
+        log.warning ('skipping extraction of {} for {}'.format(label, base))
+
+
     else:
     
         if get_par(set_zogy.force_phot_gaia,tel):
