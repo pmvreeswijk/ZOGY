@@ -37,6 +37,8 @@ cpus_per_task = os.environ.get('SLURM_CPUS_PER_TASK')
 if cpus_per_task is not None:
     os.environ['OMP_NUM_THREADS'] = str(cpus_per_task)
 
+# to avoid tensorflow info and warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import numpy as np
 from numpy.polynomial.polynomial import polyvander2d, polygrid2d, polyval2d
@@ -102,9 +104,6 @@ import healpy as hp
 
 # tensorflow
 import tensorflow as tf
-tf.get_logger().setLevel('ERROR')
-#tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # from memory_profiler import profile
 # import objgraph
