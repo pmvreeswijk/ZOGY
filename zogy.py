@@ -102,7 +102,9 @@ import healpy as hp
 
 # tensorflow
 import tensorflow as tf
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+tf.get_logger().setLevel('ERROR')
+#tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # from memory_profiler import profile
 # import objgraph
@@ -12547,7 +12549,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     xsize = width
     ysize = height
     ra_center, dec_center = wcs.all_pix2world(xsize/2+0.5, ysize/2+0.5, 1)
-    log.info('ra_center: {}, dec_center: {}'.format(ra_center, dec_center))
+    log.info('ra_center: {:.4f}, dec_center: {:.4f}'.format(ra_center,
+                                                            dec_center))
 
     # add RA-CNTR and DEC-CNTR to header
     header['RA-CNTR'] = (float(ra_center), 
@@ -12569,7 +12572,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         fov_half_deg = np.amax([xsize, ysize]) * pixscale / 3600. / 2
 
         # date of observation for proper motion correction
-        obsdate = read_header(header, 'obsdate')
+        obsdate = read_header(header, ['obsdate'])
 
         # select calibration stars that are within the image
         if '20181115' in fits_cal:
