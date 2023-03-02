@@ -47,32 +47,32 @@ from multiprocessing import Pool
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '0.9.3'
+__version__ = '0.9.4'
 
 
 ################################################################################
 
 def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
-                ref=True, fullsource=False, nsigma=5, apphot_radii=None,
-                apphot_sky_inout=None, apphot_att2add=None,
+                ref=True, fullsource=False, nsigma=3, apphot_radii=None,
+                apphot_sky_inout=None, apphot_att2add=None, pm_epoch=2016.0,
                 include_fluxes=False, keys2add=None, keys2add_dtypes=None,
                 bkg_global=True, thumbnails=False, size_thumbnails=None,
                 tel=None, ncpus=1):
 
 
-    """Forced photometry on list of MeerLICHT/BlackGEM images
-       [filenames] at the input coordinates provided through the input
-       Astropy Table [table_in] and a dictionary [image_indices_dict]
-       defining {image1: indices1, image2: indices2, ..}. The results
-       are returned in a single astropy Table.
+    """Forced photometry on MeerLICHT/BlackGEM images at the input
+       coordinates provided through the input Astropy Table [table_in]
+       and a dictionary [image_indices_dict] defining {image1:
+       indices1, image2: indices2, ..}. The results are returned in a
+       single astropy Table.
 
        A list of image masks can be provided through [mask_list],
-       which should have the same number of elements as the number of
-       images (= the number of keys in [image_indices_dict].
+       which should have the same number and order of elements as the
+       images defined in the keys of [image_indices_dict].
 
        Depending on whether [trans] and/or [ref] and/or [fullsource]
-       is set to True, this is done for the transient and/or reference
-       and/or full-source catalogs.
+       is set to True, forced photometry is done for the transient
+       and/or reference and/or full-source catalogs.
 
        In the transient case, the transient magnitude (MAG_ZOGY) and
        corresponding error (MAGERR_ZOGY), its signal-to-noise ratio
@@ -98,11 +98,11 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     Parameters:
     -----------
 
-    table_in: Astropy Table that needs to include at least the columns
-              RA_IN and DEC_IN with the coordinates in decimal degrees
-              at which the photometry will be determined. Any
-              additional column will also be recorded in the output
-              table.
+    table_in: Astropy Table (no default) that needs to include at
+              least the columns RA_IN and DEC_IN with the coordinates
+              in decimal degrees at which the photometry will be
+              determined. Any additional column will also be recorded
+              in the output table.
 
     image_indices_dict: dictionary (no default) with reduced image
                         filenames - including full path - as keys and
@@ -110,7 +110,9 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                         DEC_IN coordinates will be used to perform the
                         forced photometry.
 
-    mask_list: list of masks (default=None) corresponding to the input images
+    mask_list: list of masks (default=None) corresponding to the input
+               images; the order of this list needs to be the same as
+               the keys in [image_indices_dict]
 
     trans: boolean (default=True), if True the transient magnitudes
            and limits will be extracted
@@ -121,29 +123,51 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     fullsource: boolean (default=False), if True the full-source
                 magnitudes and limits will be extracted
 
-    nsigma: float (default=5), the significance level at which the
+    nsigma: float (default=3), the significance level at which the
             limiting magnitudes will be determined; this values will
             be indicated in the relevant output table column names
 
-    apphot_radii: list or numpy array of radii to use for aperture
-                  photometry
+    apphot_radii: list or numpy array of radii (default=None) to use
+                  for aperture photometry
 
-    apphot_sky_inout: list or numpy array of 2 numbers indicating the
-                      inner and outer radius of the sky annulus used
-                      for the aperture photometry sky background
-                      determination
+    apphot_sky_inout: 2-element list or numpy array (default=None)
+                      indicating the inner and outer radius of the sky
+                      annulus used for the aperture photometry sky
+                      background determination
                  
     apphot_att2add: list of strings, indicating any float or integer
                     attribute of photutils.aperture.ApertureStats
-    
+
+    pm_epoch: float (default=2016.0), proper motion reference epoch;
+              if [table_in] includes the columns PMRA_IN and PMDEC_IN
+              (units: mas/yr), the proper motion is taken into account
+              using this reference epoch
+
+    include_fluxes: boolean (default=False) deciding whether the
+                    electron fluxes (e-/s) corresponding to the
+                    magnitudes are included in the output table
+
     keys2add: list of strings (default=None); header keywords that
               will be added as columns to the output table
 
     keys2add_dtypes: list of dtypes (default=None); corresponding
                      dtypes of the header keywords provided in
                      [keys2add]
-                     
+
+    bkg_global: boolean (default=True) determining whether to use the
+                global or local background determination in the
+                photometry
+    
     ncpus: int (default=1); number of processes/tasks to use
+
+    thumbnails: boolean (default=None) determining whether to include
+                the thumbnail images of size [size_thumbnails] to the
+                output catalog. Which thumbnails are included depends
+                on [trans], [ref] and [fullsource]
+
+    tel: str (default=None) indicating telescope (e.g. ML1, BG2)
+
+    size_thumbnails: int (default=100), size in pixels of thumbnails
 
     """
     
@@ -360,7 +384,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         image_indices_list = [[l[0][0], l[0][1], l[1]]
                               for l in zip(image_indices_list, mask_list)]
 
-        
+
     # check if there are any images to process at all
     nimages = len(image_indices_list)
     log.info ('effective number of images from which to extract magnitudes: {}'
@@ -369,13 +393,25 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         log.critical ('no images could be found matching the input coordinates ')
 
 
-    # use pool_func and function [get_rows] to multi-process list of
-    # filenames
-    table_list = pool_func (get_rows, image_indices_list, table_in,
-                            trans, ref, fullsource, nsigma, apphot_radii,
-                            apphot_sky_inout, apphot_att2add, include_fluxes,
-                            keys2add, add_keys, names, dtypes, bkg_global,
-                            thumbnails, size_thumbnails, nproc=ncpus)
+    # input parameters to [get_rows]
+    pars = [table_in, trans, ref, fullsource, nsigma, apphot_radii,
+            apphot_sky_inout, apphot_att2add, pm_epoch, include_fluxes, keys2add,
+            add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails]
+
+    if nimages == 1:
+        # for single image, execute [get_rows] without pool_func, and
+        # provide ncpus as input parameter, which will multiprocess
+        # the function zogy.get_psfoptflux_mp such that the different cpus
+        # process different lists of objects on the same image
+        table = get_rows (image_indices_list[0], *pars, ncpus=ncpus)
+        table_list = [table]
+
+
+    else:
+        # for multiple images, execute [get_rows] with pool_func, such
+        # that the different cpus process different images
+        table_list = zogy.pool_func (get_rows, image_indices_list, *pars,
+                                     nproc=ncpus)
 
 
     # remove None entries, e.g. due to coordinates off the field
@@ -427,7 +463,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     else:
         return None
-        
+
 
     # sort in time
     log.info ('sorting by FILENAME')
@@ -523,9 +559,9 @@ def add_drop_fz (filename):
 ################################################################################
 
 def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
-              apphot_radii, apphot_sky_inout, apphot_att2add, include_fluxes,
-              keys2add, add_keys, names, dtypes, bkg_global, thumbnails,
-              size_thumbnails):
+              apphot_radii, apphot_sky_inout, apphot_att2add, pm_epoch,
+              include_fluxes, keys2add, add_keys, names, dtypes, bkg_global,
+              thumbnails, size_thumbnails, ncpus=None):
 
 
     # extract filenames and table indices from input list
@@ -592,7 +628,19 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
                        .format(fits2read))
         return [None]
 
-            
+
+    # if proper motion need to be corrected for (if [pm_epoch] is not
+    # None and [table_in] columns PMRA_IN and PMDEC_IN exist),
+    # extract the image date of observation and apply the proper motion
+    # correction
+    if (pm_epoch is not None and 'PMRA_IN' in colnames and 'PMDEC_IN' in colnames
+        and 'DATE-OBS' in header):
+
+        obsdate = header['DATE-OBS']
+        table = zogy.apply_gaia_pm (
+            table, obsdate, epoch=pm_epoch, return_table=True, ra_col='RA_IN',
+            dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN')
+
 
     # need to define proper shapes for thumbnail columns; if
     # [thumbnails] is set, adopt the corresponding input
@@ -644,7 +692,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                             apphot_sky_inout, apphot_att2add, include_fluxes,
                             keys2add, add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='new', tel=tel)
+                            imtype='new', tel=tel, ncpus=ncpus)
 
 
 
@@ -656,7 +704,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                             apphot_sky_inout, apphot_att2add, include_fluxes,
                             keys2add, add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='trans', tel=tel)
+                            imtype='trans', tel=tel, ncpus=ncpus)
 
 
 
@@ -673,11 +721,16 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         # reference image and catalog names including full path
         basename = '{}/{}/{}_{}_red'.format(ref_dir, obj, tel, filt)
 
+        # reference mask image; input parameter fits_mask refers to
+        # the reduced image mask
+        fits_mask = '{}/{}/{}_{}_mask.fits.fz'.format(ref_dir, obj, tel, filt)
+
+
         # infer reference magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                             apphot_sky_inout, apphot_att2add, include_fluxes,
                             keys2add, add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='ref', tel=tel)
+                            imtype='ref', tel=tel, ncpus=ncpus)
 
 
         # for transients, add any potential source in the reference
@@ -758,7 +811,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 apphot_sky_inout, apphot_att2add, include_fluxes, keys2add,
                 add_keys, bkg_global, thumbnails, size_tn, imtype='new',
-                tel='ML1'):
+                tel='ML1', ncpus=None):
 
 
     # label in logging corresponding to 'new', 'ref' and 'trans' imtypes
@@ -923,7 +976,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # object mask - not always available, so first check if it
         # exists
-        if os.path.exists(fits_objmask):
+        if fits_objmask is not None and os.path.exists(fits_objmask):
             objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
 
         else:
@@ -949,11 +1002,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         # corresponding mask may not be available, so first check if
         # it exists
         if fits_mask is not None and os.path.exists(fits_mask):
+            log.info ('fits_mask used: {}'.format(fits_mask))
             data_mask = zogy.read_hdulist (fits_mask)
             # mask can be read using fitsio.FITS, but only little bit
             # faster than astropy.io.fits
             #data_mask = FITS(fits_mask)[-1][:,:]
         else:
+            log.warning ('fits_mask {} does not exist; assuming that none of '
+                         'the pixels are flagged'.format(fits_mask))
             data_mask = np.zeros (data_shape, dtype='uint8')
 
 
@@ -962,14 +1018,32 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         table['FLAGS_MASK{}'.format(s2add)] = (
             get_flags_mask_comb(data_mask, xcoords, ycoords, fwhm, xsize, ysize))
 
-    
+
         try:
             # determine optimal fluxes at pixel coordinates
-            flux_opt, fluxerr_opt = zogy.get_psfoptflux (
-                psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
-                set_zogy=set_zogy, tel=tel)
-        
+            # !!! CHECK !!! _mp or not
+            if ncpus is None:
+                # submit to [get_psfoptflux_mp] with single thread,
+                # as the multiprocessing is done on the image level,
+                # i.e. each cpu is processing a different image
+                flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
+                    psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
+                    ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
+                    set_zogy=set_zogy, tel=tel, nthreads=1)
+            else:
+                # submit to [get_psfoptflux_mp] with [ncpu] threads as
+                # this concerns a single image and the multiprocessing
+                # should be done on a the object level, i.e. each cpu
+                # processes different objects on the same image. The
+                # [force_phot] function only provides ncpus to
+                # [get_rows] and [infer_mags] in case of a single
+                # image.
+                flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
+                    psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
+                    ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
+                    set_zogy=set_zogy, tel=tel, nthreads=ncpus)
+
+
         except Exception as e:
             log.error ('exception was raised while executing '
                        '[zogy.get_psfoptflux]; skipping extraction of {} '
@@ -1029,9 +1103,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             if bkg_global or apphot_sky_inout is None:
                 bkgann = None
             else:
-                bkgann = tuple(np.array(apphot_sky_inout) * fwhm)
+                bkgann = tuple(np.array(apphot_sky_inout).astype(float) * fwhm)
 
-            apphot_radii_xfwhm = np.array(apphot_radii) * fwhm
+            apphot_radii_xfwhm = np.array(apphot_radii).astype(float) * fwhm
             nrad = len(apphot_radii)
 
 
@@ -1457,14 +1531,18 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
 ################################################################################
 
 def index_images (indices, table_in, mjds_obs, dtime_max, basenames,
-                  radecs_cntr, fov_deg):
+                  radecs_cntr, fov_deg, pm_epoch):
 
     """function to return a dictionary: {index1: imagelist1, index2:
-    imagelist2, etc} with the index and the corresponding list of
-    images from [basenames] for which the RA,DEC coordinates of
-    [table_in[index]] is within the image boundaries determined by
-    [radecs_cntr] and [fov_deg]. If [table_in] also contains MJD_IN,
-    the images are also filters on abs(MJD_IN - mjd_obs) < [dtime_max]
+    imagelist2, etc} with the index of [table_in] and the
+    corresponding list of images from [basenames] for which the RA,DEC
+    coordinates of [table_in[index]] (assumed to be in columns 'RA_IN'
+    and 'DEC_IN') is within the image boundaries determined by
+    [radecs_cntr] and [fov_deg]. If [table_in] contains 'MJD_IN', the
+    images are also filtered on abs(MJD_IN - mjd_obs) <
+    [dtime_max]. If columns PMRA_IN and PMDEC_IN are present in
+    [table_in], then the proper motion with respect to [pm_epoch] is
+    taken into account.
 
     """
 
@@ -1490,16 +1568,27 @@ def index_images (indices, table_in, mjds_obs, dtime_max, basenames,
         filter_mjd = False
 
 
-    # loop input list
+    # in case proper motion is included, add a buffer zone around each
+    # image, determined by the maximum proper motion in table_in
+    # multiplied by 30 years, to make sure that all sources that could
+    # end up within the image are taken into consideration
+    if 'PMRA_IN' in table_in.colnames and 'PMDEC_IN' in table_in.colnames:
+        pm_buffer = (30/3.6e6) * np.concatenate(
+            [table_in['PMRA_IN'].value, table_in['PMDEC_IN'].value]).max()
+        log.info ('proper motion buffer: {:.2f} arcmin'.format(pm_buffer * 60))
+        hfov_deg += pm_buffer
+
+
+    # loop input indices, corresponding to the indices of sources in
+    # [table_in]
     for i in indices:
 
-        # initial cut in [radecs_cntr] using maximum separation in
-        # declination only
+        # mask indicating the files to be used
         mask_files = (np.abs(radecs_cntr[:,1] - decs_in[i]) <= hfov_deg)
-
-
+        
         # now determine whether radec is actually on which of
-        # images[mask_files]
+        # images[mask_files]; if proper motion is included, include an
+        # additional buffer around the images is used in [hfov_deg]
         target = SkyCoord(ra=ras_in[i], dec=decs_in[i], unit='deg')
         centers = SkyCoord(ra=radecs_cntr[:,0][mask_files],
                            dec=radecs_cntr[:,1][mask_files], unit='deg')
@@ -1509,6 +1598,48 @@ def index_images (indices, table_in, mjds_obs, dtime_max, basenames,
         mask_on = ((np.abs(xi) < hfov_deg*u.deg) &
                    (np.abs(eta) < hfov_deg*u.deg))
         mask_files[mask_files] = mask_on
+
+
+        if False:
+            # this block below is not needed, as the proper motion
+            # buffer has already been taken into account, and should a
+            # source fall outside the actual image, it will be
+            # neglected in [infer_mags]
+            
+            # if proper motion is included, need to loop over the list
+            # of relevant images only and determine the corrected
+            # ra,dec for the MJD_OBS of that particular image
+            if apply_pm:
+
+                # corresponding indices
+                index_files = np.nonzero(mask_files)[0]
+                log.info ('len(index_files): {}'.format(len(index_files)))
+            
+                for i_file in index_files:
+
+                    # convert MJD_OBS to date of observations
+                    obsdate = Time(mjds_obs[i_file], format='mjd').isot
+                    # infer corrected RA and DEC; note that they should be
+                    # 1-element arrays
+                    ra_corr, dec_corr = zogy.apply_gaia_pm (
+                        table_in[i], obsdate, epoch=pm_epoch, return_table=False,
+                        ra_col='RA_IN', dec_col='DEC_IN',
+                        pmra_col='PMRA_IN', pmdec_col='PMDEC_IN')
+                    
+                    # now determine whether RA,DEC corrected for proper
+                    # motion is actually on this particular image
+                    target = SkyCoord(ra=ra_corr, dec=dec_corr, unit='deg')
+                    center = SkyCoord(ra=radecs_cntr[i_file,0],
+                                      dec=radecs_cntr[i_file,1], unit='deg')
+                    center.transform_to(SkyOffsetFrame(origin=center))
+                    target_center = target.transform_to(SkyOffsetFrame(origin=center))
+                    xi, eta = target_center.lon, target_center.lat
+                    # N.B.: use original image (half) size again, so
+                    # without the proper motion buffer
+                    mask_on = ((np.abs(xi) < (fov_deg/2)*u.deg) &
+                               (np.abs(eta) < (fov_deg/2)*u.deg))
+                    # mask_on is 1-element mask
+                    mask_files[i_file] = mask_on
 
 
         # also mask files based on MJD_IN if relevant
@@ -1549,9 +1680,18 @@ def get_headkeys (filenames):
         #    header = hdulist[-1].header
         header = FITS('{}_hdr.fits'.format(basename))[-1].read_header()
 
-                
+
         objects[nfile] = int(header['OBJECT'])
-        mjds_obs[nfile] = header['MJD-OBS']
+        if 'MJD-OBS' in header:
+            mjds_obs[nfile] = header['MJD-OBS']
+        elif 'DATE-OBS' in header:
+            mjds_obs[nfile] = Time(header['DATE-OBS']).mjd
+        else:
+            log.error ('MJD-OBS or DATE-OBS not in header of {}'
+                       .format(basename))
+            mjds_obs[nfile] = None
+
+
         filts[nfile] = header['FILTER'].strip()
         ras_cntr[nfile] = header['RA-CNTR']
         decs_cntr[nfile] = header['DEC-CNTR']
@@ -1603,37 +1743,6 @@ def verify_lengths(p1, p2):
 
 ################################################################################
 
-def pool_func (func, filelist, *args, nproc=1):
-
-    try:
-        results = []
-        pool = Pool(nproc)
-        for filename in filelist:
-            args_temp = [filename]
-            for arg in args:
-                args_temp.append(arg)
-                
-            results.append(pool.apply_async(func, args_temp))
-
-
-        pool.close()
-        pool.join()
-        results = [r.get() for r in results]
-        #log.info ('result from pool.apply_async: {}'.format(results))
-    except Exception as e:
-        #log.exception (traceback.format_exc())
-        log.exception ('exception was raised during [pool.apply_async({})]: '
-                       '{}'.format(func, e))
-
-        #logging.shutdown()
-        #raise SystemExit
-
-    return results
-
-
-
-################################################################################
-
 # from
 # https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
 def str2bool(v):
@@ -1681,11 +1790,26 @@ if __name__ == "__main__":
 
     parser.add_argument('--date_col', type=str, default='DATE-OBS',
                         help='name of input date of observation in [radecs]; '
+                        'only needed in case you want to limit the images '
+                        'defined in [filenames] to be observed within a time '
+                        'window with size [dtime_max] around this input date; '
                         'default=DATE-OBS')
 
     parser.add_argument('--date_format', type=str, default='isot',
                         help='astropy.time.Time format of [date_col]; '
                         'default=isot')
+
+    parser.add_argument('--pmra_col', type=str, default='PMRA',
+                        help='name of input RA proper motion column (unit: '
+                        'mas/yr) in [radecs]; default=PMRA')
+
+    parser.add_argument('--pmdec_col', type=str, default='PMDEC',
+                        help='name of input DEC proper motion column (unit: '
+                        'mas/yr) in [radecs]; default=PMDEC')
+
+    parser.add_argument('--pm_epoch', type=float, default=2016.0,
+                        help='proper motion reference epoch; default=2016.0 '
+                        '(Gaia DR3)')
 
     parser.add_argument('--input_cols2copy', type=str, default=None,
                         help='comma-separated list of input column names to '
@@ -1805,7 +1929,8 @@ if __name__ == "__main__":
                         help='corresponding header keyword dtypes; default={}'
                         .format(par_default))
 
-    parser.add_argument('--telescope', type=str, default='ML1', help='telescope')
+    parser.add_argument('--telescope', type=str, default='ML1',
+                        help='telescope; default=ML1')
     
     parser.add_argument('--fov_deg', type=float, default=1.655,
                         help='[deg] instrument field-of-view (FOV); '
@@ -2018,21 +2143,31 @@ if __name__ == "__main__":
     table_in[args.dec_col].name = 'DEC_IN'
 
 
-    # only keep columns that are needed; note that MJD_IN may
-    # not be a column
-    cols2keep = ['RA_IN', 'DEC_IN', 'MJD_IN', 'NUMBER_IN']
+    # rename proper motion columns if they are present
+    colnames = table_in.colnames
+    if args.pmra_col in colnames and args.pmdec_col in colnames:
+        table_in[args.pmra_col].name = 'PMRA_IN'
+        table_in[args.pmdec_col].name = 'PMDEC_IN'
+
+
+    # only keep columns that are needed; note that MJD_IN, PMRA_IN and
+    # PMDEC_IN may not exist, but this is checked a bit further below
+    cols2keep = ['RA_IN', 'DEC_IN', 'MJD_IN', 'NUMBER_IN', 'PMRA_IN', 'PMDEC_IN']
+
+    # add the ones from args.input_cols2copy
     if args.input_cols2copy is not None:
         cols2keep += args.input_cols2copy.split(',')
 
     # could in principle do the following in a single line with
-    # Table.keep_columns(cols2keep), but need to check if MJD_IN is in
-    # table_in, and also it would lead to an issue if names in
+    # Table.keep_columns(cols2keep), but need to check if MJD_IN,
+    # PMRA_IN and PMDEC_IN are in table_in - which need not be the
+    # case - and also it would lead to an issue if names in
     # [args.input_cols2copy] are mispelled
     for colname in table_in.colnames:
         if colname not in cols2keep:
             del table_in[colname]
-    
-            
+
+
     # unique elements based on RA_IN and DEC_IN
     table_in = unique(table_in, keys=['RA_IN', 'DEC_IN'])
     log.info('{} unique RADECs (and MJDs) in input list/file [radecs]'
@@ -2208,9 +2343,9 @@ if __name__ == "__main__":
 
         
     # run multiprocessing
-    results = pool_func (index_images, table_indices_cpu, table_in, mjds_obs,
-                         args.dtime_max, basenames, radecs_cntr, args.fov_deg,
-                         nproc=ncpus)
+    results = zogy.pool_func (index_images, table_indices_cpu, table_in,
+                              mjds_obs, args.dtime_max, basenames, radecs_cntr,
+                              args.fov_deg, args.pm_epoch, nproc=ncpus)
 
     # convert results, which is a list of dictionaries, to a single
     # dictionary
@@ -2308,18 +2443,19 @@ if __name__ == "__main__":
 
     # prepare list of masks
     mask_list = ['{}_mask.fits.fz'.format(fn.split('_red')[0])
-                 for fn in filenames]
-    
+                 for fn in image_indices_dict]
+
 
     # call [force_phot]
     table_out = force_phot (
         table_in, image_indices_dict, mask_list=mask_list, trans=args.trans,
         ref=args.ref, fullsource=args.fullsource, nsigma=args.nsigma,
         apphot_radii=apphot_radii, apphot_sky_inout=apphot_sky_inout,
-        apphot_att2add=apphot_att2add, include_fluxes=args.include_fluxes,
-        keys2add=keys2add, keys2add_dtypes=keys2add_dtypes,
-        bkg_global=args.bkg_global, thumbnails=args.thumbnails,
-        size_thumbnails=args.size_thumbnails, tel=args.telescope, ncpus=ncpus)
+        apphot_att2add=apphot_att2add, pm_epoch=args.pm_epoch,
+        include_fluxes=args.include_fluxes, keys2add=keys2add,
+        keys2add_dtypes=keys2add_dtypes, bkg_global=args.bkg_global,
+        thumbnails=args.thumbnails, size_thumbnails=args.size_thumbnails,
+        tel=args.telescope, ncpus=ncpus)
 
 
 
@@ -2331,33 +2467,29 @@ if __name__ == "__main__":
     # have to be added here anymore
     if table_out is not None:
 
-        if True:
-            # rename columns RA and DEC to the input column names; if
-            # the input columns were in sexagesimal notation, these
-            # will be decimal degrees
-            # decided to fix these names to RA_IN and DEC_IN, to
-            # separate them from RA and DEC of full-source or
-            # transient catalog match
-            table_out['RA_IN'].name = args.ra_col
-            table_out['DEC_IN'].name = args.dec_col
+        # rename columns RA and DEC to the input column names; if
+        # the input columns were in sexagesimal notation, these
+        # will be decimal degrees
+        table_out['RA_IN'].name = args.ra_col
+        table_out['DEC_IN'].name = args.dec_col
 
 
-            
         # if [date_col] was provided and the MJD-OBS column is present
         # in the output table, the delta time between it and the image
         # date of observations can be determined
-        if str(args.date_col) != 'None' and 'MJD-OBS' in table_out.colnames: 
+        if str(args.date_col) != 'None' and 'MJD-OBS' in table_out.colnames:
             mjds_in = table_out['MJD_IN'].value
-            dtime_hr = 24*np.abs(mjds_in - table_out['MJD-OBS'])
-            table_out.add_column(dtime_hr, name='DELTA_MJD_HR',
+            dtime_days = np.abs(mjds_in - table_out['MJD-OBS'])
+            table_out.add_column(dtime_days, name='DELTA_MJD',
                                  index=table_out.colnames.index('MJD-OBS')+1)
-
+            
             # if args.date_format is mjd, then can rename 'MJD_IN'
-            # back to the original name
-            if args.date_format == 'mjd':
+            # back to the original name, unless the original name is
+            # the same as MJD-OBS - the MJD of the images
+            if args.date_format == 'mjd' and args.date_col != 'MJD-OBS':
                 table_out['MJD_IN'].name = args.date_col
 
-            
+
 
         # order the output table by original row number
         indices_sorted = np.argsort(table_out, order=(('NUMBER_IN','FILENAME')))
