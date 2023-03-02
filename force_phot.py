@@ -639,7 +639,8 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         obsdate = header['DATE-OBS']
         table = zogy.apply_gaia_pm (
             table, obsdate, epoch=pm_epoch, return_table=True, ra_col='RA_IN',
-            dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN')
+            dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN',
+            remove_pmcolumns=False)
 
 
     # need to define proper shapes for thumbnail columns; if
@@ -2151,7 +2152,7 @@ if __name__ == "__main__":
 
 
     # only keep columns that are needed; note that MJD_IN, PMRA_IN and
-    # PMDEC_IN may not exist, but this is checked a bit further below
+    # PMDEC_IN may not exist, but that is checked a bit further below
     cols2keep = ['RA_IN', 'DEC_IN', 'MJD_IN', 'NUMBER_IN', 'PMRA_IN', 'PMDEC_IN']
 
     # add the ones from args.input_cols2copy
@@ -2477,18 +2478,26 @@ if __name__ == "__main__":
         # if [date_col] was provided and the MJD-OBS column is present
         # in the output table, the delta time between it and the image
         # date of observations can be determined
-        if str(args.date_col) != 'None' and 'MJD-OBS' in table_out.colnames:
+        colnames = table_out.colnames
+        if str(args.date_col) != 'None' and 'MJD-OBS' in colnames:
             mjds_in = table_out['MJD_IN'].value
             dtime_days = np.abs(mjds_in - table_out['MJD-OBS'])
             table_out.add_column(dtime_days, name='DELTA_MJD',
-                                 index=table_out.colnames.index('MJD-OBS')+1)
-            
+                                 index=colnames.index('MJD-OBS')+1)
+
             # if args.date_format is mjd, then can rename 'MJD_IN'
             # back to the original name, unless the original name is
             # the same as MJD-OBS - the MJD of the images
             if args.date_format == 'mjd' and args.date_col != 'MJD-OBS':
                 table_out['MJD_IN'].name = args.date_col
 
+
+        # rename proper motion columns if needed
+        cols2keep = args.input_cols2copy.split(',')
+        if ('PMRA_IN' in colnames and 'PMDEC_IN' in colnames and
+            args.pmra_col in cols2keep and args.pmdec_col in cols2keep):
+            table_out['PMRA_IN'].name = args.pmra_col
+            table_out['PMDEC_IN'].name = args.pmdec_col
 
 
         # order the output table by original row number
