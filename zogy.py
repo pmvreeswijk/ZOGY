@@ -108,7 +108,7 @@ import tensorflow as tf
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.1.0'
+__version__ = '1.1.1'
 
 
 ################################################################################
@@ -2055,16 +2055,15 @@ def get_par (par, tel):
 ################################################################################
 
 def read_hdulist (fits_file, get_data=True, get_header=False, 
-                  ext_name_indices=None, dtype=None, columns=None,
-                  memmap=True):
-    
-    """Function to read the data (if [get_data] is True) and/or header (if
-    [get_header] is True) of the input [fits_file].  The fits file can
-    be an image or binary table, and can be compressed (with the
-    compressions that astropy.io can handle, such as .gz and .fz
-    files). If [ext_name_indices] is defined, which can be an integer,
-    a string matching the extension's keyword EXTNAME or a list or
-    numpy array of integers, those extensions are retrieved.
+                  ext_name_indices=None, dtype=None, memmap=True):
+
+    """Function to read the data (if [get_data] is True) and/or header
+    (if [get_header] is True) of the input [fits_file].  The fits file
+    can be an image or binary table, and can be compressed (with the
+    compressions that astropy.io can handle, such as .gz and .fz). If
+    [ext_name_indices] is defined, which can be an integer, a string
+    matching the extension's keyword EXTNAME or a list or numpy array
+    of integers, those extensions are retrieved.
 
     """
 
@@ -2124,6 +2123,14 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
                         # these are incorrectly converted; therefore the
                         # conversion to a Table above
                         data = np.concatenate([data, data_temp])
+                        # could also use the following instead, but
+                        # since the above is working ...
+                        #data = vstack([data, data_temp])
+
+
+                    log.info ('added {} rows from extension {} of {}'
+                              .format(len(data_temp), ext, fits_file))
+
 
         else:
             # otherwise read the extension defined by [ext_name_indices]
@@ -2143,22 +2150,21 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
                 header = hdulist[ext].header
 
 
-    if columns is not None:
-        # only return defined columns
-        return [data[col] for col in columns if col in data.dtype.names]
-    else:
-        # return data and header depending on whether [get_data]
-        # and [get_header] are defined or not
-        if get_data:
-            if get_header:
-                return data, header
-            else:
-                return data
+    # return data and header depending on whether [get_data]
+    # and [get_header] are defined or not
+    if get_data:
+        if get_header:
+            return data, header
         else:
-            if get_header:
-                return header
-            else:
-                return
+            return data
+    else:
+        if get_header:
+            return header
+        else:
+            log.error ('parameters [get_data] and [get_header] are both False '
+                       'in function [zogy.read_hdlist]; returning None'
+                       )
+            return None
 
 
 ################################################################################
@@ -2196,8 +2202,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
         if header_toadd is not None:
             header += header_toadd
 
-        log.info ('cat_type: {}: data.dtype.names: {}'
-                  .format(cat_type, data.dtype.names))
+        log.info ('format catalog: {}, type: {}: column names: {}'
+                  .format(cat_in, cat_type, data.dtype.names))
 
     else:
 
@@ -4591,20 +4597,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
               .format(psf_size, imtype))
 
 
-    if False:
-        # split coordinates in [nproc] lists in case multiprocessing
-        # is used instead of loop below
-        lists_of_indices = []
-        index_tmp = np.linspace(0,ncoords,num=nproc+1).astype(int)
-        index_arr = np.arange(ncoords)
-        for i in range(nproc):
-            lists_of_indices.append(index_arr[index_tmp[i]:index_tmp[i+1]])
-
-    
     # loop coordinates
     for i in range(ncoords):
         
-        t_temp = time.time()
+        t_tmp = time.time()
 
         # determine shift to the subpixel center of the object (object
         # at fractional pixel position 0.5,0.5 doesn't need the PSF to
@@ -4625,7 +4621,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
         if i % 10000 == 0:
-            t_new = time.time()-t_temp
+            t_new = time.time()-t_tmp
         
         
         # determine indices of PSF square footprint (with size:
@@ -4956,9 +4952,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         
                         mask_satcon_use = (mask_satcon_sub & mask_region)
 
-                        # CHECK!!!
-                        if False:
-                            D_sub_orig = np.copy(D_sub)
 
                         # replace these by the estimate of flux_opt * PSF + 2d
                         # fit to the sky background, determined in function
@@ -4968,8 +4961,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                             + bkg_2dfit_sub[mask_satcon_use])
 
 
-                        # CHECK!!!
                         if False:
+                            D_sub_orig = np.copy(D_sub)
                             if np.sqrt((xcoords[i]-2500)**2 +
                                        (ycoords[i]-9450)**2) < 100:
                                 D_sub_psf = P_shift * flux_opt[i] + bkg_2dfit_sub
@@ -4997,7 +4990,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 
         if False:
             if i % 10000 == 0:
-                t_loop = time.time()-t_temp
+                t_loop = time.time()-t_tmp
                 log.info ('t_loop = {:.3f}s'.format(t_loop))
                 log.info ('t_new = {:.3f}s; fraction: {:.3f}'
                           .format(t_new, t_new/t_loop))
@@ -5041,430 +5034,654 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 ################################################################################
 
-def get_psfoptflux_single (i, xcoords, ycoords, data_psf, psf_size,
-                           psf_samp, polzero1, polscal1, polzero2,
-                           polscal2, poldeg, imtype, xsize, ysize,
-                           D, D_mask, bkg_var,
-                           data_psf_ref=None,  psf_samp_ref=None,
-                           polzero1_ref=None, polscal1_ref=None,
-                           polzero2_ref=None, polscal2_ref=None, poldeg_ref=None,
-                           header_new=None, header_ref=None, header_trans=None,
-                           data_new_bkg_std=None, data_ref_bkg_std=None,
-                           D_objmask=None,
-                           psffit=False, moffat=False, gauss=False, get_limflux=False,
-                           limflux_nsigma=5, fwhm_fit_init=None,
-                           inject_fake=False, nsigma_fake=10,
-                           replace_sat_psf=False, replace_sat_nmax=100,
-                           remove_psf=False,
-                           set_zogy=None, tel=None, fwhm_use=None, diff=True,
-                           get_flags_mask_central=False, nthreads=1):
+def pool_func (func, itemlist, *args, nproc=1):
+
+    try:
+        # list to record the results
+        results = []
+        # create pool of workers
+        pool = Pool(nproc)
+        # loop items in itemlist
+        for item in itemlist:
+            args_temp = [item]
+            # add any additional arguments
+            for arg in args:
+                args_temp.append(arg)
+
+            # issue function and arguments to the worker pool
+            results.append(pool.apply_async(func, args_temp))
+
+        # close the pool
+        pool.close()
+        # wait for the worker processes to exit
+        pool.join()
+        # get the results
+        results = [r.get() for r in results]
+
+    except Exception as e:
+        log.exception ('exception was raised during [pool.apply_async({})]: '
+                       '{}'.format(func, e))
+
+    return results
 
 
+################################################################################
 
-    t_temp = time.time()
+def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
+                       psffit=False, moffat=False, gauss=False, get_limflux=False,
+                       limflux_nsigma=5., psfex_bintable_ref=None,
+                       data_new_bkg_std=None, data_ref_bkg_std=None,
+                       header_new=None, header_ref=None, header_trans=None,
+                       imtype=None, Scorr_peak=None, inject_fake=False,
+                       nsigma_fake=10., D_objmask=None, remove_psf=False,
+                       replace_sat_psf=False, replace_sat_nmax=100,
+                       set_zogy=None, tel=None, fwhm=None, diff=True,
+                       get_flags_mask_central=False, nthreads=1):
 
-    # determine shift to the subpixel center of the object (object
-    # at fractional pixel position 0.5,0.5 doesn't need the PSF to
-    # shift if the PSF image is constructed to be even)
-    # odd case:
-    xshift = xcoords[i]-np.round(xcoords[i])
-    yshift = ycoords[i]-np.round(ycoords[i])
 
-    # using function [get_psf_ima], construct the PSF image with
-    # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
-    # image is at the original pixel scale
+    log.info('executing get_psfoptflux_mp with {} thread(s) ...'
+             .format(nthreads))
+    if get_par(set_zogy.timing,tel): t = time.time()
+
+
+    # get dimensions of D
+    ysize, xsize = np.shape(D)
+
+    # read in PSF output binary table from psfex, containing the
+    # polynomial coefficient images, and various PSF parameters using
+    # the function [extract_psf_datapars]
+    verbose = get_par(set_zogy.verbose,tel)
+    results = extract_psf_datapars (psfex_bintable, verbose=verbose)
+    (data_psf, header_psf, psf_fwhm, psf_samp, psf_size_config, psf_chi2,
+     psf_nstars, polzero1, polscal1, polzero2, polscal2, poldeg) = results
+
+    # same for reference image
+    if psfex_bintable_ref is not None:
+
+        results_ref = extract_psf_datapars (psfex_bintable_ref, verbose=verbose)
+        (data_psf_ref, header_psf_ref, psf_fwhm_ref, psf_samp_ref,
+         psf_size_config_ref, psf_chi2_ref, psf_nstars_ref, polzero1_ref,
+         polscal1_ref, polzero2_ref, polscal2_ref, poldeg_ref) = results_ref
+
+    else:
+
+        (data_psf_ref, header_psf_ref, psf_fwhm_ref, psf_samp_ref,
+         psf_size_config_ref, psf_chi2_ref, psf_nstars_ref, polzero1_ref,
+         polscal1_ref, polzero2_ref, polscal2_ref, poldeg_ref) = [None] * 12
+
+
+    # [psf_size] is the PSF size in image pixels, which determines the
+    # size of [psf_ima] and [psf_ima_ref] below. For the photometry
+    # measurements, [psf_size] should be defined by
+    # 2*psf_rad_phot*fwhm_new or fwhm_ref; for the PSF fit to the
+    # difference image, in which case the input imtype will be None,
+    # the psf_size should be defined using the maximum of fwhm_new and
+    # fwhm_ref.
+    if imtype=='new':
+        if fwhm is not None:
+            fwhm_use = fwhm
+        else:
+            fwhm_use = fwhm_new
+
+        # initial fwhm used for flux limits and Moffat/Gauss fits below
+        fwhm_fit_init = fwhm_use
+
+    elif imtype=='ref':
+        if fwhm is not None:
+            fwhm_use = fwhm
+        else:
+            fwhm_use = fwhm_ref
+
+        fwhm_fit_init = fwhm_use
+
+    elif imtype is None:
+        fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
+        fwhm_fit_init = (fwhm_new + fwhm_ref) / 2.
+
+
+    psf_size = 2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use
+    # make sure [psf_size] is not larger than [psf_size_config] *
+    # [psf_samp], which will happen if FWHM is very large
+    psf_size = int(min(psf_size, psf_size_config * psf_samp))
+    # it should also not be larger than the vignet size; for the PSF
+    # fits to the D image, that would lead to an exception because the
+    # psf_imas used to build the P_D below would not have the same
+    # size
+    size_vignet = get_par(set_zogy.size_vignet,tel)
+    psf_size = int(min(psf_size, size_vignet))
+
+    # force it to be odd
+    if psf_size % 2 == 0:
+        psf_size -= 1
+
+
+    # bad pixel mask values used inside loop
+    mask_value = get_par(set_zogy.mask_value,tel)
+    value_sat = mask_value['saturated']
+    value_satcon = mask_value['saturated-connected']
+
+
+    log.info ('psf_size used in [get_psfoptflux]: {} pix for imtype: {}'
+              .format(psf_size, imtype))
+
+
+    # split input coordinates into nthreads roughly-equal lists
+    ncoords = len(xcoords)
+    indices = list(np.linspace(0, ncoords, num=nthreads+1).astype(int))
+    # indices_start_stop is a list of lists with the start and stop
+    # indices for each of the threads to be run
+    indices_start_stop = [indices[i:i+2] for i in range(len(indices)-1)]
+    log.info ('indices_start_stop: {}'.format(indices_start_stop))
+
+    
+    # set_zogy parameters that were previously inferred in
+    # [get_psfoptflux_loop], but which makes the function unpickable
+    # because of the reference to the set_zogy module, leading to the
+    # multiprocessing breaking down
     psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
-    psf_ima, __ = get_psf_ima (
-        data_psf, xcoords[i], ycoords[i], psf_size,
-        psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-        xshift=xshift, yshift=yshift, imtype=imtype,
-        psf_clean_factor=psf_clean_factor)
+    source_minpixfrac = get_par(set_zogy.source_minpixfrac,tel)
+    fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
+    bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
+    
+    
+    # list of parareters to provide to [get_psfoptflux_loop]
+    pars = [xcoords, ycoords, data_psf, psf_size, psf_samp, polzero1, polscal1,
+            polzero2, polscal2, poldeg, imtype, xsize, ysize, D, D_mask, bkg_var,
+            data_psf_ref, psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
+            polscal2_ref, poldeg_ref, data_new_bkg_std, data_ref_bkg_std,
+            header_new, header_ref, header_trans, D_objmask, psffit, moffat,
+            gauss, get_limflux, limflux_nsigma, fwhm_fit_init, inject_fake,
+            nsigma_fake, replace_sat_psf, replace_sat_nmax, remove_psf, fwhm_use,
+            diff, get_flags_mask_central, psf_clean_factor, source_minpixfrac,
+            fit_bkg, bkg_order]
 
-
-    if i % 10000 == 0:
-        t_new = time.time()-t_temp
-
-        
-    # determine indices of PSF square footprint (with size:
-    # [psf_size]) in an image with shape (ysize, xsize) at pixel
-    # coordinates xcoords[i], ycoords[i]; if the footprint is
-    # partially off the image, index_P is needed to define the
-    # subset of pixels in the PSF footprint that are on the full
-    # image. After remapping of the ref image, these indices also
-    # apply to the ref image.
-    index, index_P = get_P_indices (
-        xcoords[i], ycoords[i], xsize, ysize, psf_size)
-
-    # if coordinates off the image, the function [get_P_indices]
-    # returns None and the rest can be skipped; continue with next
-    # source
-    if index is None:
-        log.warning ('index return from [get_P_indices] is None for object '
-                     'at x,y: {:.2f},{:.2f}; returning zero flux and fluxerr'
-                     .format(xcoords[i], ycoords[i]))
-        return
-
-
-    # if [data_psf_ref] is provided, the new image [psf_ima]
-    # will be convolved with the ref image [psf_ima_ref], and
-    # replaced with the resulting combined PSF image
-    if data_psf_ref is not None:
-
-        # same for reference image
-        psf_ima_ref, __ = get_psf_ima (
-            data_psf_ref, xcoords[i], ycoords[i], psf_size,
-            psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
-            polscal2_ref, poldeg_ref, xshift=xshift, yshift=yshift,
-            imtype='ref', psf_clean_factor=psf_clean_factor)
-
-
-        # [psf_ima_ref] needs to be rotated to the orientation of
-        # the new image
-        psf_ima_ref = orient_data (psf_ima_ref, header_ref,
-                                   header_out=header_new, tel=tel)
-
-
-        # setting image standard deviations and flux ratios to
-        # unity; if values present in headers, use those instead
-        sn, sr, fn, fr = 1, 1, 1, 1
-
-        if data_new_bkg_std is not None and data_ref_bkg_std is not None:
-            sn = np.median(data_new_bkg_std[index])
-            sr = np.median(data_ref_bkg_std[index])
-        elif header_new is not None:
-            if 'S-BKGSTD' in header_new:
-                sn = header_new['S-BKGSTD']
-            if 'S-BKGSTD' in header_ref:
-                sr = header_new['S-BKGSTD']
-
-        if header_trans is not None:
-            if 'Z-FNR' in header_trans:
-                fr = fn / header_new['Z-FNR']
-
-
-        # could save some time in rest of the loop below by saving P_D
-        # for each subimage when it is created in [run_zogy], and
-        # reading them in this function; they would need to be
-        # fftshifted back and extracted as the center as they are
-        # defined for the entire subimage. Downside: single PSF is
-        # used for the entire subimage - not so unreasonable.
-       
-        # now combine [psf_ima] and [psf_ima_ref]
-        # into single psf image using FFT, first performing FFT shift
-        Pn_fftshift = fft.fftshift(psf_ima)
-        Pr_fftshift = fft.fftshift(psf_ima_ref)
-        # fourier transforms
-        Pn_hat = fft.fft2(Pn_fftshift)
-        Pr_hat = fft.fft2(Pr_fftshift)
-        Pn_hat2_abs = np.abs(Pn_hat**2)
-        Pr_hat2_abs = np.abs(Pr_hat**2)
-
-        # following definitions as in zogy core function
-        sn2 = sn**2
-        sr2 = sr**2
-        fn2 = fn**2
-        fr2 = fr**2
-        fD = (fr*fn) / np.sqrt(sn2*fr2+sr2*fn2)
-        denominator = (sn2*fr2)*Pr_hat2_abs + (sr2*fn2)*Pn_hat2_abs
-        P_D_hat = (fr*fn/fD) * (Pr_hat*Pn_hat) / np.sqrt(denominator)
-            
-        # multiply, inverse FFT and shift
-        P_D = fft.ifftshift(np.real(fft.ifft2(P_D_hat)))
-        # needs shift of 1,1 pixel because above operations
-        # are on a odd-sized image
-        psf_ima = ndimage.shift(P_D, (1,1), order=2)
-        # normalize
-        psf_ima /= np.sum(psf_ima)
-
-        # this provides the same result (apart from the sn, sr,
-        # fn, fr ratios), but is ~10 times slower:
-        #psf_ima_config = ndimage.convolve(psf_ima_config, psf_ima_config_ref)
-        #psf_ima_config /= np.sum(psf_ima_config)
-
-
-
-    # extract index_P
-    P_shift = psf_ima[index_P]
-
-    # extract subsection from D, D_mask
-    D_sub = D[index]
-    D_mask_sub = D_mask[index]
-    if D_objmask is not None:
-        # object footprints are nonzero in D_objmask
-        D_objmask_sub = D_objmask[index]
-    else:
-        D_objmask_sub = None
-            
-
-    # if bkg_var is a scalar, convert to an image
-    if np.isscalar(bkg_var):
-        bkg_var_sub = bkg_var * np.ones(D_sub.shape)
-
-    # if bkg_var is a 2D array with the same shape as the input
-    # data image (D), extract the subimage part
-    elif np.shape(bkg_var) == np.shape(D):
-        bkg_var_sub = bkg_var[index]
-
-    # if input background variance is a string
-    # 'calc_from_data', calculate it from the input subimage
-    # (can be used when background standard deviation was not
-    # calculated already, e.g. for the zogy difference (D)
-    # image when transients are being fit using this function  
-    elif bkg_var == 'calc_from_data':
-        D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
-        D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
-            D_sub_masked.astype(float), mask_value=0)
-        bkg_var_sub = D_sub_std**2
+    # feed these lists to pool_func
+    if nthreads == 1:
+        # do not bother to multiprocess
+        list2return = get_psfoptflux_loop (indices_start_stop[0], *pars)
 
     else:
-        # if none of the above, write error message to log
-        log.error('input parameter {} with value {} in function {} '
-                  'not understood'
-                  .format('bkg_var', bkg_var, 'get_psfoptflux'))
-
-                           
-    # initialize 2dfit to sky background, which will be updated in
-    # [flux_optimal] and used in case saturated pixels are
-    # replaced by the PSF
-    bkg_2dfit_sub = np.zeros(D_sub.shape)
+        # multiprocess
+        results = pool_func (get_psfoptflux_loop, indices_start_stop, *pars,
+                             nproc=nthreads)
+        # results is a list of output arrays; need to concatenate these
+        # into single arrays
+        list2return = np.concatenate(results, axis=1)
 
 
-    # define central mask of object using the PSF
-    mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='get_psfoptflux_mp')
 
-    # if flags_mask_central is specified, calculate the combined
-    # flags_mask of the central object area
+
+    return list2return
+
+
+################################################################################
+
+def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
+                         psf_samp, polzero1, polscal1, polzero2,
+                         polscal2, poldeg, imtype, xsize, ysize,
+                         D, D_mask, bkg_var,
+                         data_psf_ref=None,  psf_samp_ref=None,
+                         polzero1_ref=None, polscal1_ref=None,
+                         polzero2_ref=None, polscal2_ref=None, poldeg_ref=None,
+                         data_new_bkg_std=None, data_ref_bkg_std=None,
+                         header_new=None, header_ref=None, header_trans=None,
+                         D_objmask=None,
+                         psffit=False, moffat=False, gauss=False,
+                         get_limflux=False, limflux_nsigma=5,
+                         fwhm_fit_init=None, inject_fake=False, nsigma_fake=10,
+                         replace_sat_psf=False, replace_sat_nmax=100,
+                         remove_psf=False, fwhm_use=None, diff=True,
+                         get_flags_mask_central=False,
+                         psf_clean_factor=None, source_minpixfrac=None,
+                         fit_bkg=False, bkg_order=None):
+
+
+
+    # loop indices
+    i1, i2 = index_start_stop
+
+    # limit coordinates to i1:i2 range
+    xcoords = xcoords[i1:i2]
+    ycoords = ycoords[i1:i2]
+
+    # initialize output arrays
+    ncoords = len(xcoords)
+    flux_opt = np.zeros(ncoords)
+    fluxerr_opt = np.zeros(ncoords)
+
     if get_flags_mask_central:
-        flags_mask_central = np.sum(np.unique(D_mask_sub[mask_central]))
+        flags_mask_central = np.zeros(ncoords, dtype='uint8')
 
+    if psffit:
+        flux_psf = np.zeros(ncoords)
+        fluxerr_psf = np.zeros(ncoords)
+        xshift_psf = np.zeros(ncoords)
+        yshift_psf = np.zeros(ncoords)
+        chi2_psf = np.zeros(ncoords)
+        xerr_psf = np.zeros(ncoords)
+        yerr_psf = np.zeros(ncoords)
 
-    # determine optimal or psf or limiting flux
-    if get_limflux:
-        # determine limiting flux at this position using
-        # flux_optimal_s2n; if Poisson noise of objects should be
-        # taken into account, then add background-subtracted image
-        # to the background variance: bkg_var_sub + D_sub
-        flux_opt = flux_optimal_s2n (P_shift, bkg_var_sub,
-                                     limflux_nsigma, fwhm=fwhm_fit_init)
+    if moffat or gauss:
+        x_moffat = np.zeros(ncoords)
+        xerr_moffat = np.zeros(ncoords)
+        y_moffat = np.zeros(ncoords)
+        yerr_moffat = np.zeros(ncoords)
+        fwhm_moffat = np.zeros(ncoords)
+        elong_moffat = np.zeros(ncoords)
+        chi2_moffat = np.zeros(ncoords)
 
-    elif inject_fake:
+    if inject_fake and np.isscalar(nsigma_fake):
+        # convert to array
+        nsigma_fake *= np.ones(ncoords)
+
+    
+    # start loop over index_list; this is practically the same loop as
+    # in the original [get_psfoptflux], except that parameter
+    # psfex_bintable_ref is replaced by data_psf_ref
+    for i in range(ncoords):
         
-        # add star to input image with following flux; here the
-        # Poisson noise of objects is added to the background
-        # variance
-        flux_opt = flux_optimal_s2n (P_shift, bkg_var_sub + D_sub,
-                                     nsigma_fake[i], fwhm=fwhm_fit_init)
-        D_sub += flux_opt * psf_ima
+        t_tmp = time.time()
+
+        # determine shift to the subpixel center of the object (object
+        # at fractional pixel position 0.5,0.5 doesn't need the PSF to
+        # shift if the PSF image is constructed to be even)
+        # odd case:
+        xshift = xcoords[i]-np.round(xcoords[i])
+        yshift = ycoords[i]-np.round(ycoords[i])
+
+        # using function [get_psf_ima], construct the PSF image with
+        # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
+        # image is at the original pixel scale
+        #psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
+        psf_ima, __ = get_psf_ima (
+            data_psf, xcoords[i], ycoords[i], psf_size,
+            psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
+            xshift=xshift, yshift=yshift, imtype=imtype,
+            psf_clean_factor=psf_clean_factor)
 
 
-    else:
+        if i % 1000 == 0:
+            t_new = time.time()-t_tmp
+        
+        
+        # determine indices of PSF square footprint (with size:
+        # [psf_size]) in an image with shape (ysize, xsize) at pixel
+        # coordinates xcoords[i], ycoords[i]; if the footprint is
+        # partially off the image, index_P is needed to define the
+        # subset of pixels in the PSF footprint that are on the full
+        # image. After remapping of the ref image, these indices also
+        # apply to the ref image.
+        index, index_P = get_P_indices (
+            xcoords[i], ycoords[i], xsize, ysize, psf_size)
 
-        # use only those pixels that are not affected by any bad
-        # pixels, cosmic rays, saturation, edge pixels, etc.
-        mask_use = (D_mask_sub==0)
+        # if coordinates off the image, the function [get_P_indices]
+        # returns None and the rest can be skipped; continue with next
+        # source
+        if index is None:
+            log.warning ('index return from [get_P_indices] is None for object '
+                         'at x,y: {:.2f},{:.2f}; returning zero flux and fluxerr'
+                         .format(xcoords[i], ycoords[i]))
+            continue
+
+        # if [data_psf_ref] is provided, the new image [psf_ima]
+        # will be convolved with the ref image [psf_ima_ref], and
+        # replaced with the resulting combined PSF image
+        if data_psf_ref is not None:
+
+            # same for reference image
+            psf_ima_ref, __ = get_psf_ima (
+                data_psf_ref, xcoords[i], ycoords[i], psf_size,
+                psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
+                polscal2_ref, poldeg_ref, xshift=xshift, yshift=yshift,
+                imtype='ref', psf_clean_factor=psf_clean_factor)
+
+
+            # [psf_ima_ref] needs to be rotated to the orientation of
+            # the new image
+            psf_ima_ref = orient_data (psf_ima_ref, header_ref,
+                                       header_out=header_new, tel=tel)
+
+
+            # setting image standard deviations and flux ratios to
+            # unity; if values present in headers, use those instead
+            sn, sr, fn, fr = 1, 1, 1, 1
+
+            if data_new_bkg_std is not None and data_ref_bkg_std is not None:
+                sn = np.median(data_new_bkg_std[index])
+                sr = np.median(data_ref_bkg_std[index])
+            elif header_new is not None:
+                if 'S-BKGSTD' in header_new:
+                    sn = header_new['S-BKGSTD']
+                if 'S-BKGSTD' in header_ref:
+                    sr = header_new['S-BKGSTD']
+
+            if header_trans is not None:
+                if 'Z-FNR' in header_trans:
+                    fr = fn / header_new['Z-FNR']
+
+
+            # could save some time in rest of the loop below by saving
+            # P_D for each subimage when it is created in [run_zogy],
+            # and reading them in this function; they would need to be
+            # fftshifted back and extracted as the center as they are
+            # defined for the entire subimage. Downside: single PSF is
+            # used for the entire subimage - not so unreasonable.
+       
+            # now combine [psf_ima] and [psf_ima_ref]
+            # into single psf image using FFT, first performing FFT shift
+            Pn_fftshift = fft.fftshift(psf_ima)
+            Pr_fftshift = fft.fftshift(psf_ima_ref)
+            # fourier transforms
+            Pn_hat = fft.fft2(Pn_fftshift)
+            Pr_hat = fft.fft2(Pr_fftshift)
+            Pn_hat2_abs = np.abs(Pn_hat**2)
+            Pr_hat2_abs = np.abs(Pr_hat**2)
+
+            # following definitions as in zogy core function
+            sn2 = sn**2
+            sr2 = sr**2
+            fn2 = fn**2
+            fr2 = fr**2
+            fD = (fr*fn) / np.sqrt(sn2*fr2+sr2*fn2)
+            denominator = (sn2*fr2)*Pr_hat2_abs + (sr2*fn2)*Pn_hat2_abs
+            P_D_hat = (fr*fn/fD) * (Pr_hat*Pn_hat) / np.sqrt(denominator)
             
-        if mask_use.shape != mask_central.shape:
-            log.warning ('mask_use.shape: {} not equal to '
-                         'mask_central.shape: {} for object at x,y: '
-                         '{:.2f},{:.2f}; returning zero flux and fluxerr'
-                         .format(mask_use.shape, mask_central.shape,
-                                 xcoords[i], ycoords[i]))
-            return
+            # multiply, inverse FFT and shift
+            P_D = fft.ifftshift(np.real(fft.ifft2(P_D_hat)))
+            # needs shift of 1,1 pixel because above operations
+            # are on a odd-sized image
+            psf_ima = ndimage.shift(P_D, (1,1), order=2)
+            # normalize
+            psf_ima /= np.sum(psf_ima)
+
+            # this provides the same result (apart from the sn, sr,
+            # fn, fr ratios), but is ~10 times slower:
+            #psf_ima_config = ndimage.convolve(psf_ima_config, psf_ima_config_ref)
+            #psf_ima_config /= np.sum(psf_ima_config)
+
+
+
+        # extract index_P
+        P_shift = psf_ima[index_P]
+        
+        # extract subsection from D, D_mask
+        D_sub = D[index]
+        D_mask_sub = D_mask[index]
+        if D_objmask is not None:
+            # object footprints are nonzero in D_objmask
+            D_objmask_sub = D_objmask[index]
+        else:
+            D_objmask_sub = None
+            
+
+        # if bkg_var is a scalar, convert to an image
+        if np.isscalar(bkg_var):
+            bkg_var_sub = bkg_var * np.ones(D_sub.shape)
+
+        # if bkg_var is a 2D array with the same shape as the input
+        # data image (D), extract the subimage part
+        elif np.shape(bkg_var) == np.shape(D):
+            bkg_var_sub = bkg_var[index]
+
+        # if input background variance is a string
+        # 'calc_from_data', calculate it from the input subimage
+        # (can be used when background standard deviation was not
+        # calculated already, e.g. for the zogy difference (D)
+        # image when transients are being fit using this function  
+        elif bkg_var == 'calc_from_data':
+            D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
+            D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
+                D_sub_masked.astype(float), mask_value=0)
+            bkg_var_sub = D_sub_std**2
 
         else:
-            if np.sum(mask_central) != 0:
-                frac_tmp = (np.sum(mask_use & mask_central) /
-                            np.sum(mask_central))
+            # if none of the above, write error message to log
+            log.error('input parameter {} with value {} in function {} '
+                      'not understood'
+                      .format('bkg_var', bkg_var, 'get_psfoptflux'))
+
+        # initialize 2dfit to sky background, which will be updated in
+        # [flux_optimal] and used in case saturated pixels are
+        # replaced by the PSF
+        bkg_2dfit_sub = np.zeros(D_sub.shape)
+
+
+        # define central mask of object using the PSF
+        mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+
+        # if flags_mask_central is specified, calculate the combined
+        # flags_mask of the central object area
+        if get_flags_mask_central:
+            flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
+
+
+        # determine optimal or psf or limiting flux
+        if get_limflux:
+            # determine limiting flux at this position using
+            # flux_optimal_s2n; if Poisson noise of objects should be
+            # taken into account, then add background-subtracted image
+            # to the background variance: bkg_var_sub + D_sub
+            flux_opt[i] = flux_optimal_s2n (P_shift, bkg_var_sub,
+                                            limflux_nsigma, fwhm=fwhm_fit_init)
+
+        elif inject_fake:
+
+            # add star to input image with following flux; here the
+            # Poisson noise of objects is added to the background
+            # variance
+            flux_opt[i] = flux_optimal_s2n (P_shift, bkg_var_sub + D_sub,
+                                            nsigma_fake[i], fwhm=fwhm_fit_init)
+            D_sub += flux_opt[i] * psf_ima
+
+
+        else:
+
+            # use only those pixels that are not affected by any bad
+            # pixels, cosmic rays, saturation, edge pixels, etc.
+            mask_use = (D_mask_sub==0)
+            
+            if mask_use.shape != mask_central.shape:
+                log.warning ('mask_use.shape: {} not equal to '
+                             'mask_central.shape: {} for object at x,y: '
+                             '{:.2f},{:.2f}; returning zero flux and fluxerr'
+                             .format(mask_use.shape, mask_central.shape,
+                                     xcoords[i], ycoords[i]))
+                continue
+
             else:
-                frac_tmp = 0
+                if np.sum(mask_central) != 0:
+                    frac_tmp = (np.sum(mask_use & mask_central) /
+                                np.sum(mask_central))
+                else:
+                    frac_tmp = 0
                     
-            # if the fraction of good pixels around the source is less
-            # than set_zogy.source_minpixfrac, then continue with next
-            # source; optimal flux will be zero and source will not be
-            # included in output catalog - may result in very
-            # saturated stars not ending up in output catalog
-            if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
-                # too many bad pixel objects to warn about
-                #log.warning ('fraction of useable pixels around source '
-                #             'at x,y: {:.0f},{:.0f}: {} is less than limit '
-                #             'set by set_zogy.source_minpixfrac: {}; '
-                #             'returning zero flux and flux error'
-                #             .format(xcoords[i], ycoords[i], frac_tmp,
-                #                     get_par(set_zogy.source_minpixfrac,tel)))
-                return
+                # if the fraction of good pixels around the source is less
+                # than set_zogy.source_minpixfrac, then continue with next
+                # source; optimal flux will be zero and source will not be
+                # included in output catalog - may result in very
+                # saturated stars not ending up in output catalog
+                #if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
+                if frac_tmp < source_minpixfrac:
+                    # too many bad pixel objects to warn about
+                    #log.warning ('fraction of useable pixels around source '
+                    #             'at x,y: {:.0f},{:.0f}: {} is less than limit '
+                    #             'set by set_zogy.source_minpixfrac: {}; '
+                    #             'returning zero flux and flux error'
+                    #             .format(xcoords[i], ycoords[i], frac_tmp,
+                    #                     get_par(set_zogy.source_minpixfrac,tel)))
+                    continue
 
 
-        # perform optimal photometry measurements
-        try:
-
-            show=False
-
-            if False:
-
-                # show optimal fit of particular object(s)
-                dist_tmp = np.sqrt((xcoords[i]-2500)**2 +
-                                   (ycoords[i]-9450)**2)
-                if dist_tmp < 50:
-                    show=True
-                    print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
-                                                                   ycoords[i]))
-
-            fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
-            bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
-            flux_opt, fluxerr_opt, bkg_2dfit_sub = flux_optimal (
-                P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                fit_bkg=fit_bkg, bkg_order=bkg_order,
-                D_objmask=D_objmask_sub, fwhm=fwhm_use, show=show)
-
-        except Exception as e:
-            #log.exception(traceback.format_exc())
-            log.exception('problem running [flux_optimal] on object at pixel '
-                          'coordinates: x={}, y={}; returning zero flux '
-                          'and fluxerr'.format(xcoords[i], ycoords[i]))
-
-            return
-
-
-        # infer error image used in psffit and gauss/moffat fits below
-        D_sub_err = np.sqrt(np.abs(bkg_var_sub))
-
-
-        # if psffit=True, perform PSF fitting
-        if psffit:
-
+            # perform optimal photometry measurements
             try:
-                flux_psf, fluxerr_psf, xshift_psf, yshift_psf, \
-                    chi2_psf, xerr_psf, yerr_psf = (
-                        flux_psffit (P_shift, D_sub, D_sub_err, flux_opt,
-                                     mask_use=mask_use, fwhm=fwhm_fit_init,
-                                     show=False, max_nfev=200, diff=diff))
+
+                show=False
+
+                if False:
+
+                    # show optimal fit of particular object(s)
+                    dist_tmp = np.sqrt((xcoords[i]-2500)**2 +
+                                       (ycoords[i]-9450)**2)
+                    if dist_tmp < 50:
+                        show=True
+                        print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
+                                                                       ycoords[i]))
+
+                #fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
+                #bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
+                flux_opt[i], fluxerr_opt[i], bkg_2dfit_sub = flux_optimal (
+                    P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
+                    fit_bkg=fit_bkg, bkg_order=bkg_order,
+                    D_objmask=D_objmask_sub, fwhm=fwhm_use, show=show)
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
-                log.exception('problem running [flux_psffit] on object at '
-                              'pixel coordinates: {}, {}; returning zero '
-                              'flux, fluxerr, (x,y) shifts and chi2'
-                              .format(xcoords[i], ycoords[i]))
-                return
+                log.exception('problem running [flux_optimal] on object at pixel '
+                              'coordinates: x={}, y={}; returning zero flux '
+                              'and fluxerr'.format(xcoords[i], ycoords[i]))
 
-
-        # if moffat=True, perform Moffat fit
-        if moffat or gauss:
-
-            try:
-
-                # fit 2D gauss
-                x_moffat, xerr_moffat, y_moffat, yerr_moffat, \
-                    fwhm_moffat, elong_moffat, chi2_moffat = \
-                        fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
-                                           fit_gauss=gauss, fwhm=fwhm_fit_init,
-                                           P_shift=P_shift, show=False,
-                                           max_nfev=200)
-                x_moffat += index[1].start
-                y_moffat += index[0].start
-                    
-            except Exception as e:
-                #log.exception(traceback.format_exc())
-                log.exception('problem running [fit_moffat_single] on object '
-                              'at pixel coordinates: {}, {}; returning zeros'
-                              .format(xcoords[i], ycoords[i]))
-                return
-
-
-        # replace saturated+connected pixels with PSF profile
-        if replace_sat_psf:
-
-            if False:
-                if np.sqrt((xcoords[i]-2500)**2 +
-                           (ycoords[i]-9450)**2) < 100:
-                    log.info('xcoords[i]: {}, ycoords[i]: {}'
-                             .format(xcoords[i], ycoords[i]))
-
-            # determine pixels to be replaced; avoid including
-            # saturated pixels from other objects within the
-            # footprint
-
-            # mask of saturated+connected pixels in subimage:
-            mask_sat_sub = (D_mask_sub & value_sat == value_sat)
-            mask_satcon_sub = (mask_sat_sub |
-                               (D_mask_sub & value_satcon == value_satcon))
-
-            # label saturated+connected pixels; also
-            # diagonally-connected pixels are included in a region
-            struct = np.ones((3,3), dtype=bool)
-            regions, nregions = ndimage.label(mask_satcon_sub,
-                                              structure=struct)
+                continue
                 
 
-            # loop regions
-            for ir in range(nregions):
+            # infer error image used in psffit and gauss/moffat fits below
+            D_sub_err = np.sqrt(np.abs(bkg_var_sub))
 
-                mask_region = (regions==ir+1)
-                nsat = np.sum(mask_sat_sub & mask_region)
 
-                if np.sqrt((xcoords[i]-2500)**2 +
-                           (ycoords[i]-9450)**2) < 100:
-                    log.info('xcoords[i]: {}, ycoords[i]: {}'
-                             .format(xcoords[i], ycoords[i]))
-                    log.info('nsat: {}, np.sum(mask_central & mask_region): {}'
-                             .format(nsat, np.sum(mask_central & mask_region)))
+            # if psffit=True, perform PSF fitting
+            if psffit:
 
-                # check if there is overlap with central PSF region
-                if (np.sum(mask_central & mask_region) > 0 and
-                    nsat > 0 and nsat <= replace_sat_nmax): 
+                try:
+                    flux_psf[i], fluxerr_psf[i], xshift_psf[i], yshift_psf[i], \
+                        chi2_psf[i], xerr_psf[i], yerr_psf[i] = (
+                            flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
+                                         mask_use=mask_use, fwhm=fwhm_fit_init,
+                                         show=False, max_nfev=200, diff=diff))
+
+                except Exception as e:
+                    #log.exception(traceback.format_exc())
+                    log.exception('problem running [flux_psffit] on object at '
+                                  'pixel coordinates: {}, {}; returning zero '
+                                  'flux, fluxerr, (x,y) shifts and chi2'
+                                  .format(xcoords[i], ycoords[i]))
+                    continue
+                
+
+            # if moffat=True, perform Moffat fit
+            if moffat or gauss:
+
+                try:
+
+                    # fit 2D gauss
+                    x_moffat[i], xerr_moffat[i], y_moffat[i], yerr_moffat[i], \
+                        fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
+                            fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
+                                               fit_gauss=gauss, fwhm=fwhm_fit_init,
+                                               P_shift=P_shift, show=False,
+                                               max_nfev=200)
+                    x_moffat[i] += index[1].start
+                    y_moffat[i] += index[0].start
+                    
+                except Exception as e:
+                    #log.exception(traceback.format_exc())
+                    log.exception('problem running [fit_moffat_single] on object '
+                                  'at pixel coordinates: {}, {}; returning zeros'
+                                  .format(xcoords[i], ycoords[i]))
+                    continue
+
+
+            # replace saturated+connected pixels with PSF profile
+            if replace_sat_psf:
+
+                if False:
+                    if np.sqrt((xcoords[i]-2500)**2 +
+                               (ycoords[i]-9450)**2) < 100:
+                        log.info('xcoords[i]: {}, ycoords[i]: {}'
+                                 .format(xcoords[i], ycoords[i]))
+
+                # determine pixels to be replaced; avoid including
+                # saturated pixels from other objects within the
+                # footprint
+
+                # mask of saturated+connected pixels in subimage:
+                mask_sat_sub = (D_mask_sub & value_sat == value_sat)
+                mask_satcon_sub = (mask_sat_sub |
+                                   (D_mask_sub & value_satcon == value_satcon))
+
+                # label saturated+connected pixels; also
+                # diagonally-connected pixels are included in a region
+                struct = np.ones((3,3), dtype=bool)
+                regions, nregions = ndimage.label(mask_satcon_sub,
+                                                  structure=struct)
+                
+
+                # loop regions
+                for ir in range(nregions):
+
+                    mask_region = (regions==ir+1)
+                    nsat = np.sum(mask_sat_sub & mask_region)
+
+                    if np.sqrt((xcoords[i]-2500)**2 +
+                               (ycoords[i]-9450)**2) < 100:
+                        log.info('xcoords[i]: {}, ycoords[i]: {}'
+                                 .format(xcoords[i], ycoords[i]))
+                        log.info('nsat: {}, np.sum(mask_central & mask_region): {}'
+                                 .format(nsat, np.sum(mask_central & mask_region)))
+
+                    # check if there is overlap with central PSF region
+                    if (np.sum(mask_central & mask_region) > 0 and
+                        nsat > 0 and nsat <= replace_sat_nmax): 
                         
-                    mask_satcon_use = (mask_satcon_sub & mask_region)
+                        mask_satcon_use = (mask_satcon_sub & mask_region)
 
-                    # CHECK!!!
-                    if False:
-                        D_sub_orig = np.copy(D_sub)
-
-                    # replace these by the estimate of flux_opt * PSF + 2d
-                    # fit to the sky background, determined in function
-                    # [flux_optimal]
-                    D_sub[mask_satcon_use] = (
-                        P_shift[mask_satcon_use] * flux_opt
-                        + bkg_2dfit_sub[mask_satcon_use])
+                        # replace these by the estimate of flux_opt * PSF + 2d
+                        # fit to the sky background, determined in function
+                        # [flux_optimal]
+                        D_sub[mask_satcon_use] = (
+                            P_shift[mask_satcon_use] * flux_opt[i]
+                            + bkg_2dfit_sub[mask_satcon_use])
 
 
-                    # CHECK!!!
-                    if False:
-                        if np.sqrt((xcoords[i]-2500)**2 +
-                                   (ycoords[i]-9450)**2) < 100:
-                            D_sub_psf = P_shift * flux_opt + bkg_2dfit_sub
-                            ds9_arrays (D_sub_orig=D_sub_orig, D_sub=D_sub,
-                                        D_mask_sub=D_mask_sub.astype(int))
+                        if False:
+                            D_sub_orig = np.copy(D_sub)
+                            if np.sqrt((xcoords[i]-2500)**2 +
+                                       (ycoords[i]-9450)**2) < 100:
+                                D_sub_psf = P_shift * flux_opt[i] + bkg_2dfit_sub
+                                ds9_arrays (D_sub_orig=D_sub_orig, D_sub=D_sub,
+                                            D_mask_sub=D_mask_sub.astype(int))
 
 
-                else:
-                    log.warning ('saturated+connected pixels not replaced '
-                                 'for object at x,y={},{}; '
-                                 'np.sum(mask_central & mask_region): {}, '
-                                 'nsat: {}'
-                                 .format(int(xcoords[i]), int(ycoords[i]),
-                                         np.sum(mask_central & mask_region),
-                                         nsat))
+                    else:
+                        log.warning ('saturated+connected pixels not replaced '
+                                     'for object at x,y={},{}; '
+                                     'np.sum(mask_central & mask_region): {}, '
+                                     'nsat: {}'
+                                     .format(int(xcoords[i]), int(ycoords[i]),
+                                             np.sum(mask_central & mask_region),
+                                             nsat))
+
+                        
+
+        if remove_psf:
+            if psffit:
+                D_sub -= P_shift * flux_psf[i]
+            else:       
+                D_sub -= P_shift * flux_opt[i]
+
+                
+        if False:
+            if i % 1000 == 0:
+                t_loop = time.time()-t_tmp
+                log.info ('t_loop = {:.3f}s'.format(t_loop))
+                log.info ('t_new = {:.3f}s; fraction: {:.3f}'
+                          .format(t_new, t_new/t_loop))
+                if data_psf_ref is not None:
+                    log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
+                              .format(t_ref, t_ref/t_loop))
 
 
-
-    if remove_psf:
-        if psffit:
-            D_sub -= P_shift * flux_psf
-        else:       
-            D_sub -= P_shift * flux_opt
-
-
-    if False:
-        if i % 10000 == 0:
-            t_loop = time.time()-t_temp
-            log.info ('t_loop = {:.3f}s'.format(t_loop))
-            log.info ('t_new = {:.3f}s; fraction: {:.3f}'
-                      .format(t_new, t_new/t_loop))
-            if data_psf_ref is not None:
-                log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
-                          .format(t_ref, t_ref/t_loop))
-
-
+    # end of loop: for i in range(i1,i2):
 
     # always return optimal flux, which can refer to a limiting flux
     # or flux of an artificial/fake object that was added
@@ -6958,7 +7175,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         zp = header['PC-ZP']
         zp_std = header['PC-ZPSTD']
 
-        log.warning ('skipping photometric calibration and creation of limiting'
+        log.warning ('skipping photometric calibration and creation of limiting '
                      'magnitude image for {}'.format(base))
 
     else:
@@ -6982,8 +7199,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         else:
             pc_ok = False
-        
 
+            
         # if photometric calibration failed (either because no photometric
         # calibration catalog could be found, or no matching calibration
         # stars were present in this particular field), use the default
@@ -6995,6 +7212,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                          'and/or filter {} not one of ugqriz; using the '
                          'default zeropoint: {} and zp_std=0'
                          .format(get_par(set_zogy.cal_cat,tel), filt, zp))
+        else:
+            log.info ('inferred zeropoint: {:.4f} +- {:.4f}, using {} '
+                      'calibration stars'.format(zp, zp_std, ncal_used))
 
 
         # add header keyword(s):
@@ -7005,8 +7225,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         header['PC-ZPSTD'] = (zp_std, '[mag] sigma (STD) zeropoint')
         header['PC-EXTCO'] = (ext_coeff, '[mag] filter extinction coefficient '
                               '(k)')
-        header['PC-AIRM'] = (np.median(airmass_cal),
-                             'median airmass of calibration stars')
+        if pc_ok:
+            # airmass_cal is only present if photometric calibration
+            # went fine
+            header['PC-AIRM'] = (np.median(airmass_cal),
+                                 'median airmass of calibration stars')
 
 
         # determine airmass at image center
@@ -7061,9 +7284,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
         # infer limiting magnitudes from limiting flux using zeropoint
-        # and median airmass
+        # and central airmass
         limflux = limflux_median
-        [limmag] = apply_zp([limflux], zp, np.median(airmass_cal), exptime,
+        [limmag] = apply_zp([limflux], zp, airmass_center, exptime,
                             filt, ext_coeff)
         log.info('{}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
 
@@ -7135,7 +7358,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             obsdate = read_header(header, ['obsdate'])
             table_cat = run_force_phot (
                 input_fits, get_par(set_zogy.gaia_cat,tel), obsdate,
-                ra_center, dec_center, fov_half_deg, fits_mask)
+                ra_center, dec_center, fov_half_deg, fits_mask, nthreads)
 
 
             # write fits table to file
@@ -7468,6 +7691,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     mypsffit = get_par(set_zogy.psffit,tel)
 
     psfex_bintable = '{}_psf.fits'.format(base)
+    # !!!CHECK!!! _mp or not
     results = get_psfoptflux (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
         psffit=mypsffit, imtype=imtype, D_objmask=objmask,
@@ -7784,6 +8008,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                           2*fov_half_deg, obsdate))
 
 
+
     ncalstars = len(table_cal)
     log.info('number of potential photometric calibration stars in FOV: {}'
              .format(ncalstars))
@@ -7854,7 +8079,9 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                   .format(np.sum(mask_zp)))
 
 
-        # collect individual zeropoints across entire image
+        # collect individual zeropoints across entire image;
+        # N.B. these output arrays are sorted in brightess according
+        # to mag_cal
         x_array, y_array, zp_array = collect_zps (
             xpos[mask_zp], ypos[mask_zp], flux_opt[mask_zp],
             fluxerr_opt[mask_zp], mag_cal[mask_zp], airmass_cal[mask_zp],
@@ -7868,6 +8095,42 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
         header['PC-NCAL'] = (ncal_used, 'number of brightest photcal '
                              'stars used')
+
+
+        # after sorting in brightness and masking table_cal with
+        # [mask_zp], add (x,y) positions, zeropoints and airmasses to
+        # it, and overwrite [fits_calcat_field] that can be used to
+        # inspect the zeropoints as a function of position and stellar
+        # colour
+        index_sort = np.argsort(mag_cal[mask_zp])
+        table_cal = table_cal[mask_zp][index_sort]
+        table_cal['x_pos'] = x_array.astype('float32')
+        table_cal['y_pos'] = y_array.astype('float32')
+        table_cal['zeropoint'] = zp_array.astype('float32')
+        table_cal['airmass'] = airmass_cal[mask_zp][index_sort].astype('float32')
+        table_cal.write (fits_calcat_field, format='fits', overwrite=True)
+
+
+        # plot zeropoints vs. calibration star colour
+        if get_par(set_zogy.make_plots,tel):
+
+            col = ['g{}'.format(filt_subscript), 'r{}'.format(filt_subscript)]
+            if (col[0] in table_cal.colnames and col[1] in table_cal.colnames):
+
+                col_array = (table_cal[col[0]] - table_cal[col[1]])
+
+                fig, ax = plt.subplots(1, 1)
+                fig.subplots_adjust(hspace=0, wspace=0)
+                fig.suptitle(base.split('/')[-1], fontsize=10)
+
+                ax.plot(col_array, zp_array, 'o', color='tab:blue',
+                        markersize=5, markeredgecolor='k')
+                ax.set_ylabel('image zeropoints (mag)')
+                ax.set_xlabel('{} - {} colour'.format(col[0], col[1]))
+
+                plt.savefig('{}_zeropoint_vs_color_{}.pdf'.format(base, imtype))
+                if get_par(set_zogy.show_plots,tel): plt.show()
+                plt.close()
 
 
         # for MeerLICHT and BlackGEM only
@@ -8049,24 +8312,26 @@ def remove_files (filelist, verbose=False):
 ################################################################################
 
 def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
-                    fov_half_deg, fits_mask):
+                    fov_half_deg, fits_mask, nthreads):
 
     """function that performs forced photometry on [fits_in] at the
-    RADECs listed in [cat_in] with assumed column/field names ra and
-    dec for the coordinates and pmra and pmdec for the proper
-    motion. If the proper motion columns are not present, no proper
-    motion is applied."""
+    RADECs listed in [fits_gaia] with assumed column/field names 'ra'
+    and 'dec' for the coordinates and 'pmra' and 'pmdec' for the
+    proper motion. If the proper motion columns are not present, no
+    proper motion is applied.
+
+    """
 
     
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing run_force_phot ...')
 
 
-    # use function [get_imagestars_hpindex] to extract the entries from the
-    # input catalog that are relevant for this image, and apply a
-    # proper motion correction - if columns pmra and pmdec are present
-    # in fits_gaia - from [obsdate] to the catalog epoch (2016 for
-    # Gaia DR3)
+    # use function [get_imagestars_hpindex] to extract the entries
+    # from the input catalog that are relevant for this image, and
+    # apply a proper motion correction - if columns pmra and pmdec are
+    # present in fits_gaia - from [obsdate] to the reference epoch
+    # (2016 for Gaia DR3)
     table_gaia_image = get_imagestars_hpindex (fits_gaia, obsdate, ra_center,
                                                dec_center, fov_half_deg)
     table_gaia_image['ra'].name = 'RA_IN'
@@ -8101,11 +8366,7 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
         table_gaia_image, image_indices_dict, mask_list=[fits_mask], trans=False,
         ref=False, fullsource=True, nsigma=nsigma, apphot_radii=apphot_radii,
         apphot_sky_inout=apphot_sky_inout, apphot_att2add=apphot_att2add,
-        include_fluxes=True, bkg_global=bkg_global,
-        # CHECK!!! npcus - is relevant in force_phot
-        # in case of multiple images, but what if
-        # get_psfoptflux is multiprocessed??
-        tel=tel, ncpus=1)
+        include_fluxes=True, bkg_global=bkg_global, ncpus=nthreads)
 
 
     # delete columns that are not needed
@@ -8154,24 +8415,25 @@ def get_imagestars_zones (fits_cal, obsdate, ra_center, dec_center,
 
     # read specific extensions (=zone_indices+1) of
     # calibration catalog
+    t1 = time.time()
     data_cal = read_hdulist (get_par(set_zogy.cal_cat,tel),
                              ext_name_indices=zone_indices+1)
-    
+    log.info ('read extensions {} from {} in {:.3f}s'
+              .format(zone_indices, fits_cal, time.time()-t1))
+
 
     # use function [find_stars] to select stars in calibration
     # catalog that are within the current field-of-view
     index_field = find_stars (data_cal['ra'], data_cal['dec'],
                               ra_center, dec_center, fov_half_deg, search='box')
-    #index_field = np.where(mask_field)[0]
-    data_cal = data_cal[index_field]
 
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_imagestars_zones')
 
 
-    # return [data_cal] as an astropy Table
-    return Table(data_cal)
+    # return relevant indices as an astropy Table
+    return Table(data_cal[index_field])
 
 
 ################################################################################
@@ -8193,7 +8455,7 @@ def get_imagestars_hpindex (fits_gaia, obsdate, ra_center, dec_center,
     radius_deg = 1.02 * fov_half_deg * np.sqrt(2)
     indices = healpix_nearby(ra_center, dec_center, radius_deg, 
                              nside=nside, search='circle')
-
+    
 
     # convert integer array of healpixel indices to list with fits
     # extensions
@@ -8201,9 +8463,12 @@ def get_imagestars_hpindex (fits_gaia, obsdate, ra_center, dec_center,
     # add last extension with high proper motion stars
     ext_name_indices.append(-1)
     # read indices
+    t1 = time.time()
     data_gaia = read_hdulist (fits_gaia, ext_name_indices=ext_name_indices)
+    log.info ('read extensions {} from {} in {:.3f}s'
+              .format(ext_name_indices, fits_gaia, time.time()-t1))
 
-
+    
     # apply proper motion if available
     table_gaia = Table(data_gaia)
     colnames = table_gaia.colnames
@@ -8278,48 +8543,52 @@ def healpix_nearby (ra, dec, radius_deg, nside=4, search='circle', nest=True):
 ################################################################################
 
 def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
-                   remove_pmcolumns=True):
+                   remove_pmcolumns=True, ra_col='ra', dec_col='dec',
+                   pmra_col='pmra', pmdec_col='pmdec'):
 
-    """function to correct the coordinates in the input table
-    [table_gaia], assumed to be in columns ra and dec and in units of
-    degrees, for the corresponding proper motion, assumed to be in
-    columns pmra and pmdec and in units of milli-arcseconds per year.
-    The input [obsdate] needs to be readable by astropy's time.Time,
-    e.g. fits format yyyy-mm-ddThh:mm:ss.sss, which is compared to the
-    catalog epoch - 2016 for Gaia DR3 - to calculate the total offset
-    due to the proper motion.
+    """function to correct the coordinates defined by [ra_col] and
+    [dec_col] in the input table [table_gaia], for the corresponding
+    proper motion defined in columns [pmra_col] and [pmdec_col],
+    assumed to be in units of milli-arcseconds per year.  The input
+    [obsdate] needs to be readable by astropy's time.Time, e.g. fits
+    format yyyy-mm-ddThh:mm:ss.sss. That date is compared to the
+    catalog [epoch] - 2016 for Gaia DR3 - to calculate the total
+    offset due to the proper motion.
 
     """
+
+    log.info('executing apply_gaia_pm ...')
 
 
     # delta time in years between [obsdate] and epoch
     dtime_yr = Time(obsdate).decimalyear - epoch
 
     # convert table columns to numpy arrays
-    ra = table_gaia['ra'].value
-    dec = table_gaia['dec'].value
+    ra = table_gaia[ra_col].value
+    dec = table_gaia[dec_col].value
     coords_in = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
 
     # offset due to proper motion in arcseconds
-    offset_ra = 1e-3 * table_gaia['pmra'].value * dtime_yr
-    offset_dec = 1e-3 * table_gaia['pmdec'].value * dtime_yr
+    offset_ra = 1e-3 * table_gaia[pmra_col].value * dtime_yr
+    offset_dec = 1e-3 * table_gaia[pmdec_col].value * dtime_yr
 
     # use astropy's SkyCoord.spherical_offsets_by method to calculate
     # coordinates corrected for offset due to proper motion
     coords_out = coords_in.spherical_offsets_by(offset_ra *u.arcsec,
                                                 offset_dec*u.arcsec)
 
+
     # return astropy Table or just the ra and dec arrays
     if return_table:
 
         # replace ra and dec columns with corrected coordinates
-        table_gaia['ra'] = coords_out.ra
-        table_gaia['dec'] = coords_out.dec
+        table_gaia[ra_col] = coords_out.ra
+        table_gaia[dec_col] = coords_out.dec
 
         # remove proper motion columns if needed
         if remove_pmcolumns:
-            del table_gaia['pmra']
-            del table_gaia['pmdec']
+            del table_gaia[pmra_col]
+            del table_gaia[pmdec_col]
 
         # return Astropy table
         return table_gaia
@@ -8327,7 +8596,7 @@ def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
     else:
 
         # return the RA and DEC arrays
-        return coords_out.ra, coords_out.dec 
+        return coords_out.ra, coords_out.dec
 
 
 ################################################################################
@@ -8677,9 +8946,15 @@ def calc_zp (x_array, y_array, zp_array, filt, imtype, data_shape=None,
         nmax = get_par(set_zogy.phot_ncal_max,tel)
         if np.sum(zp_array != 0) >= 5:
 
-            # pick the brightest [nmax] calibration stars uniformly
-            # spread across the image
-            index_bright = uniform_subset (x_array, y_array, nmax, nregions=nmax)
+            fits_cal = get_par(set_zogy.cal_cat,tel)
+            if '20181115' in fits_cal:
+                # pick the brightest [nmax] calibration stars uniformly
+                # spread across the image
+                index_bright = uniform_subset (x_array, y_array, nmax, nregions=nmax)
+            else:
+                # in case of the DR3, this uniformization was built
+                # into the calibration catalog
+                index_bright = np.arange(nmax)
 
             __, zp_median, zp_std = sigma_clipped_stats (zp_array[index_bright]
                                                          .astype(float))
@@ -13724,7 +13999,7 @@ def update_bkgcol (base, header, imtype):
     """function to replace BACKGROUND column in the fits catalog with
        values from the improved background, if available; this is
        needed because the 2nd SExtractor run has been performed on a
-       background- subtracted image
+       background-subtracted image
 
     """
 
