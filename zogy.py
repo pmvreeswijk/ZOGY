@@ -108,7 +108,7 @@ import tensorflow as tf
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.1.1'
+__version__ = '1.1.2'
 
 
 ################################################################################
@@ -443,13 +443,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # so keep both
             ldac2fits (sexcat, '{}_cat.fits'.format(base))
 
-            # now that normal fits catalog is available, update its
-            # BACKGROUND column with improved background estimate -
-            # this was previously done inside [run_sextractor] but
-            # with large LDAC files this becomes very RAM-expensive -
-            # switching off so that background column lists the
-            # background of the reduced image, because the
-            # BACKPHOTO_TYPE is LOCAL
+            # now that normal fits catalog without thumbnails is
+            # available, update its BACKGROUND column with improved
+            # background estimate - this was previously done inside
+            # [run_sextractor] but with large LDAC files this becomes
+            # very RAM-expensive - switching off so that background
+            # column lists the background of the reduced image,
+            # because the BACKPHOTO_TYPE is LOCAL
             if False:
                 if get_par(set_zogy.bkg_method,tel)==2:
                     update_bkgcol (base, header, imtype)
@@ -4450,7 +4450,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     nsigma_fake=10., D_objmask=None, remove_psf=False,
                     replace_sat_psf=False, replace_sat_nmax=100,
                     set_zogy=None, tel=None, fwhm=None, diff=True,
-                    get_flags_mask_central=False, nthreads=1):
+                    get_flags_mask_central=False, local_bkg=None,
+                    nthreads=1):
 
 
     """Function that returns the optimal flux and its error (using the
@@ -4843,21 +4844,29 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                                        (ycoords[i]-9450)**2)
                     if dist_tmp < 50:
                         show=True
-                        print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
-                                                                       ycoords[i]))
+                        print ('xcoords[i]: {}, ycoords[i]: {}'
+                               .format(xcoords[i], ycoords[i]))
 
-                fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
-                bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
+
+                # pass input parameter [local_bkg] for this object to
+                # [flux_optimal] if it is defined
+                if local_bkg is not None:
+                    sky_bkg = local_bkg[i]
+                else:
+                    sky_bkg = None
+
+
                 flux_opt[i], fluxerr_opt[i], bkg_2dfit_sub = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fit_bkg=fit_bkg, bkg_order=bkg_order,
-                    D_objmask=D_objmask_sub, fwhm=fwhm_use, show=show)
+                    D_objmask=D_objmask_sub, fwhm=fwhm_use, sky_bkg=sky_bkg,
+                    show=show, tel=tel)
+
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
-                log.exception('problem running [flux_optimal] on object at pixel '
-                              'coordinates: x={}, y={}; returning zero flux '
-                              'and fluxerr'.format(xcoords[i], ycoords[i]))
+                log.exception('problem running [flux_optimal] on object at '
+                              'pixel coordinates: x={}, y={}; returning zero '
+                              'flux and fluxerr'.format(xcoords[i], ycoords[i]))
 
                 continue
                 
@@ -4893,10 +4902,11 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     # fit 2D gauss
                     x_moffat[i], xerr_moffat[i], y_moffat[i], yerr_moffat[i], \
                         fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
-                            fit_moffat_single (D_sub, D_sub_err, mask_use=mask_use, 
-                                               fit_gauss=gauss, fwhm=fwhm_fit_init,
-                                               P_shift=P_shift, show=False,
-                                               max_nfev=200)
+                            fit_moffat_single (
+                                D_sub, D_sub_err, mask_use=mask_use,
+                                fit_gauss=gauss, fwhm=fwhm_fit_init,
+                                P_shift=P_shift, show=False, max_nfev=200)
+
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
                     
@@ -4943,8 +4953,9 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                                (ycoords[i]-9450)**2) < 100:
                         log.info('xcoords[i]: {}, ycoords[i]: {}'
                                  .format(xcoords[i], ycoords[i]))
-                        log.info('nsat: {}, np.sum(mask_central & mask_region): {}'
-                                 .format(nsat, np.sum(mask_central & mask_region)))
+                        log.info('nsat: {}, sum(mask_central & mask_region): {}'
+                                 .format(nsat, np.sum(mask_central &
+                                                      mask_region)))
 
                     # check if there is overlap with central PSF region
                     if (np.sum(mask_central & mask_region) > 0 and
@@ -5076,7 +5087,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        nsigma_fake=10., D_objmask=None, remove_psf=False,
                        replace_sat_psf=False, replace_sat_nmax=100,
                        set_zogy=None, tel=None, fwhm=None, diff=True,
-                       get_flags_mask_central=False, nthreads=1):
+                       get_flags_mask_central=False, local_bkg=None,
+                       nthreads=1):
 
 
     log.info('executing get_psfoptflux_mp with {} thread(s) ...'
@@ -5180,8 +5192,6 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # multiprocessing breaking down
     psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
     source_minpixfrac = get_par(set_zogy.source_minpixfrac,tel)
-    fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
-    bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
     
     
     # list of parareters to provide to [get_psfoptflux_loop]
@@ -5193,7 +5203,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             gauss, get_limflux, limflux_nsigma, fwhm_fit_init, inject_fake,
             nsigma_fake, replace_sat_psf, replace_sat_nmax, remove_psf, fwhm_use,
             diff, get_flags_mask_central, psf_clean_factor, source_minpixfrac,
-            fit_bkg, bkg_order]
+            local_bkg, tel]
 
     # feed these lists to pool_func
     if nthreads == 1:
@@ -5235,7 +5245,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                          remove_psf=False, fwhm_use=None, diff=True,
                          get_flags_mask_central=False,
                          psf_clean_factor=None, source_minpixfrac=None,
-                         fit_bkg=False, bkg_order=None):
+                         local_bkg=None, tel=None):
 
 
 
@@ -5442,6 +5452,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                       'not understood'
                       .format('bkg_var', bkg_var, 'get_psfoptflux'))
 
+
         # initialize 2dfit to sky background, which will be updated in
         # [flux_optimal] and used in case saturated pixels are
         # replaced by the PSF
@@ -5529,12 +5540,18 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                         print ('xcoords[i]: {}, ycoords[i]: {}'.format(xcoords[i],
                                                                        ycoords[i]))
 
-                #fit_bkg = get_par(set_zogy.fit_bkg_opt,tel)
-                #bkg_order = get_par(set_zogy.poldeg_bkg_opt,tel)
+                # pass input parameter [local_bkg] for this object to
+                # [flux_optimal] if it is defined
+                if local_bkg is not None:
+                    sky_bkg = local_bkg[i]
+                else:
+                    sky_bkg = None
+
                 flux_opt[i], fluxerr_opt[i], bkg_2dfit_sub = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fit_bkg=fit_bkg, bkg_order=bkg_order,
-                    D_objmask=D_objmask_sub, fwhm=fwhm_use, show=show)
+                    D_objmask=D_objmask_sub, fwhm=fwhm_use, sky_bkg=sky_bkg,
+                    show=show, tel=tel)
+
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
@@ -6308,8 +6325,8 @@ def get_s2n_ZO (P, D, V):
 
 def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=10,
                   epsilon=0.1, mask_use=None, add_V_ast=False, D_objmask=None,
-                  fit_bkg=False, bkg_order=1, fwhm=None, dx2=0, dy2=0, dxy=0,
-                  show=False):
+                  fwhm=None, sky_bkg=None, dx2=0, dy2=0, dxy=0, show=False,
+                  tel=None):
 
     """Function that calculates optimal flux and corresponding error based
        on the PSF [P], sky-subtracted data [D] and background variance
@@ -6325,6 +6342,7 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
         dDdxy = D - np.roll(D,1,axis=(0,1))
         V_ast = np.abs(dx2) * dDdx**2 + np.abs(dy2) * dDdy**2 + np.abs(dxy) * dDdxy**2
 
+
     if mask_use is None: 
         # if input mask [mask_use] was not provided, create it with same
         # shape as D with all elements set to True.
@@ -6338,7 +6356,28 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
     # initialize bkg_2dfit
     bkg_2dfit = np.zeros(D.shape)
 
-    if fit_bkg:
+
+    # in case input [sky_bkg] is available
+    if sky_bkg is not None:
+
+        D = D - sky_bkg
+
+        # add Poisson noise of sky background level
+        if sky_bkg > 0:
+            bkg_var = bkg_var + sky_bkg
+
+        # add sky_bkg to bkg_2dfit (needed as ouput parameter so it
+        # can potentially be used to replace saturated pixels)
+        bkg_2dfit += sky_bkg
+
+
+    # CHECK!!! - for the moment, keep this old local background method
+    # for MeerLICHT processing; should remove this such that local
+    # background is assumed to be zero if sky_bkg is None
+    elif tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+        # old method of fitting polynomial surface
+        bkg_order=1
 
         # image size
         ysize, xsize = P.shape
@@ -6458,7 +6497,9 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
             V += V_ast
 
         # optimal flux
-        flux_opt, fluxerr_opt = get_optflux (P[mask_use], D[mask_use], V[mask_use])
+        flux_opt, fluxerr_opt = get_optflux (P[mask_use],
+                                             D[mask_use],
+                                             V[mask_use])
 
         #print ('i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt,
         #       abs(flux_opt_old-flux_opt)/flux_opt,
@@ -7192,7 +7233,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             zp, zp_std, ncal_used, airmass_cal = phot_calibrate (
                 fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
-                imtype, objmask, nthreads)
+                imtype, objmask, fwhm, nthreads)
 
             if zp is None or ncal_used==0:
                 pc_ok = False
@@ -7319,7 +7360,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     # read catalog fits table
     fits_cat = '{}_cat.fits'.format(base)
-    table_cat = Table.read (fits_cat)
+    table_cat = Table.read (fits_cat, memmap=True)
 
 
     # do not bother to execute block below if 'E_FLUX_OPT' is already
@@ -7378,7 +7419,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
                 table_cat, header, exptime, filt, obsdate, base, data_wcs,
-                data_bkg_std, data_mask, imtype, objmask, zp, zp_std,
+                data_bkg_std, data_mask, imtype, objmask, zp, zp_std, fwhm,
                 nthreads)
 
 
@@ -7674,7 +7715,7 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
 def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                            data_wcs, data_bkg_std, data_mask, imtype, objmask,
-                           zp, zp_std, nthreads):
+                           zp, zp_std, fwhm, nthreads):
 
 
     if get_par(set_zogy.timing,tel): t1 = time.time()
@@ -7686,15 +7727,53 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     ywin = table_cat['Y_POS']
 
 
+    # use local or global background?
+    bkg_global = (get_par(set_zogy.bkg_phototype,tel) == 'global')
+
+
+    # determine local sky background to be supplied to be used in
+    # [get_psfoptflux] as the background
+    if bkg_global:
+
+        local_bkg = None
+
+    else:
+
+        if False:
+
+            # determine sky background using force_phot.get_apertures_bkg
+            mask_comb = (objmask | (data_mask.astype(bool)))
+            xycoords = list(zip(xwin, ywin))
+            bkg_annulus_radii = get_par(set_zogy.bkg_annulus_radii,tel)
+            local_bkg = force_phot.get_aperture_bkg (data_wcs, mask_comb,
+                                                     xycoords,
+                                                     bkg_annulus_radii, fwhm)
+        else:
+
+            # for consistency, just read it from the BACKGROUND column
+            # in table_cat, which is the local background determined
+            # by source extractor; that background was also used by
+            # the aperture and optimal photometry measurements
+            local_bkg = table_cat['BACKGROUND']
+
+
+        # CHECK!!! - for the moment, set local_bkg to None for
+        # MeerLICHT, so that inside [get_psfoptflux] the old method of
+        # fitting a polynomial surface to the background is performed;
+        # for consistency with ongoing MeerLICHT processing run
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+            local_bkg = None
+
+
     # [mypsffit] determines if PSF-fitting part is also performed;
     # this is different from SExtractor PSF-fitting
     mypsffit = get_par(set_zogy.psffit,tel)
 
-    psfex_bintable = '{}_psf.fits'.format(base)
     # !!!CHECK!!! _mp or not
+    psfex_bintable = '{}_psf.fits'.format(base)
     results = get_psfoptflux (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
-        psffit=mypsffit, imtype=imtype, D_objmask=objmask,
+        psffit=mypsffit, imtype=imtype, D_objmask=objmask, local_bkg=local_bkg,
         set_zogy=set_zogy, nthreads=nthreads, tel=tel)
 
     if mypsffit:
@@ -7707,7 +7786,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     # if required, replace saturated+connected pixels with PSF
     # profile for the saturated objects
     if get_par(set_zogy.replace_sat_psf,tel):
-        
+
         # mask with objects identified as saturated
         value_sat = mask_value['saturated']
         mask_sat = (table_cat['FLAGS_MASK'] & value_sat == value_sat)
@@ -7719,6 +7798,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                         D_objmask=objmask, replace_sat_psf=True,
                         replace_sat_nmax=sat_nmax, set_zogy=set_zogy,
                         nthreads=nthreads, tel=tel)
+
 
         # save data_wcs after modification in [get_psfoptflux] if
         # temporary files are kept
@@ -7970,7 +8050,7 @@ def limit_cal (table_cal, filt):
 
 def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                     dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
-                    imtype, objmask, nthreads):
+                    imtype, objmask, fwhm, nthreads):
 
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -7985,7 +8065,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
         # read [fits_calcat_field]
         log.info ('reading {}'.format(fits_calcat_field))
-        table_cal = Table.read(fits_calcat_field)
+        table_cal = Table.read(fits_calcat_field, memmap=True)
 
     else:
 
@@ -8031,14 +8111,59 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                               'filter cut')
 
 
-    # infer their optimal fluxes
+    # infer the pixel positions
     ra_cal = table_cal['ra'].value
     dec_cal = table_cal['dec'].value
     xpos, ypos = WCS(header).all_world2pix(ra_cal, dec_cal, 1)
+
+
+    # use local or global background?
+    bkg_global = (get_par(set_zogy.bkg_phototype,tel) == 'global')
+
+    # determine local sky background to be supplied to be used in
+    # [get_psfoptflux] as the background
+    if bkg_global:
+
+        local_bkg = None
+
+    else:
+
+        if True:
+
+            # determine sky background using force_phot.get_apertures_bkg
+            mask_comb = (objmask | (data_mask.astype(bool)))
+            xycoords = list(zip(xpos, ypos))
+            bkg_annulus_radii = get_par(set_zogy.bkg_annulus_radii,tel)
+            local_bkg = force_phot.get_aperture_bkg (data_wcs, mask_comb,
+                                                     xycoords,
+                                                     bkg_annulus_radii, fwhm)
+        else:
+
+            # N.B.: this source-extractor background column is not
+            # readily available here; would first have to match the
+            # calibration stars with the source-extractor catalog
+            # entries
+            
+            # alternatively, just read it from the BACKGROUND column
+            # in table_cat, which is the local background determined
+            # by source extractor
+            local_bkg = table_cat['BACKGROUND']
+
+
+        # CHECK!!! - for the moment, set local_bkg to None for
+        # MeerLICHT, so that inside [get_psfoptflux] the old method of
+        # fitting a polynomial surface to the background is performed;
+        # for consistency with ongoing MeerLICHT processing run
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+            local_bkg = None
+
+
+
+    # infer their optimal fluxes
     psfex_bintable = '{}_psf.fits'.format(base)
     flux_opt, fluxerr_opt, flags_mask_opt = get_psfoptflux (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xpos, ypos,
-        imtype=imtype, D_objmask=objmask, set_zogy=set_zogy,
+        imtype=imtype, D_objmask=objmask, local_bkg=local_bkg, set_zogy=set_zogy,
         get_flags_mask_central=True, nthreads=nthreads, tel=tel)
 
 
@@ -8351,12 +8476,12 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     # set various parameters to be able to run forced photometry
     nsigma = get_par(set_zogy.source_nsigma,tel)
     apphot_radii = get_par(set_zogy.apphot_radii,tel)
-    # CHECK!!! - add sky radii to set_zogy; need to take care of doing
-    # the same in source extractor
-    apphot_sky_inout = get_par(set_zogy.apphot_sky_inout,tel)
+    bkg_annulus_radii = get_par(set_zogy.bkg_annulus_radii,tel)
     apphot_att2add = None
 
     # use local or global background?
+    bkg_global = (get_par(set_zogy.bkg_phototype,tel) == 'global')
+
     bkg_phototype = get_par(set_zogy.bkg_phototype,tel)
     bkg_global = (bkg_phototype == 'global')
 
@@ -8365,8 +8490,8 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     table_force_phot = force_phot.force_phot (
         table_gaia_image, image_indices_dict, mask_list=[fits_mask], trans=False,
         ref=False, fullsource=True, nsigma=nsigma, apphot_radii=apphot_radii,
-        apphot_sky_inout=apphot_sky_inout, apphot_att2add=apphot_att2add,
-        include_fluxes=True, bkg_global=bkg_global, ncpus=nthreads)
+        bkg_annulus_radii=bkg_annulus_radii, apphot_att2add=apphot_att2add,
+        include_fluxes=False, bkg_global=bkg_global, ncpus=nthreads)
 
 
     # delete columns that are not needed
@@ -12595,7 +12720,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # in this function)
     base = image_in.replace('.fits','')
     sexcat = '{}_cat.fits'.format(base)
-    table_sex = Table.read(sexcat)
+    table_sex = Table.read(sexcat, memmap=True)
 
 
     # feed Astrometry.net only with brightest sources; N.B.: keeping
@@ -13700,6 +13825,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
     cmd_dict['-BACK_SIZE'] = str(get_par(set_zogy.bkg_boxsize,tel))
     cmd_dict['-BACK_FILTERSIZE'] = str(get_par(set_zogy.bkg_filtersize,tel))
     cmd_dict['-BACKPHOTO_TYPE'] = get_par(set_zogy.bkg_phototype,tel).upper()
+    cmd_dict['-BACKPHOTO_THICK'] = str(get_par(set_zogy.bkg_photothick,tel))
     cmd_dict['-VERBOSE_TYPE'] = 'QUIET'
     cmd_dict['-CATALOG_NAME'] = cat_out
     cmd_dict['-PARAMETERS_NAME'] = file_params

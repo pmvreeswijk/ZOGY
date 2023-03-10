@@ -232,27 +232,32 @@ gaia_hplevel = 3
 gaia_epoch = 2016
 
 
-# aperture and sky background annulus radii in units of FWHM
-apphot_radii = [0.66, 1.5, 5] # aperture photometry radii in units of FWHM
-apphot_sky_inout = [4, 5]     # sky background annulus radii in units of FWHM
+# aperture photometry radii in units of FWHM
+apphot_radii = [0.66, 1.5, 5]
 
 # use local or global background for photometry
 bkg_phototype = 'local'
 
-                              
+# in case bkg_phototype = 'local':
+# if force_phot_gaia=False: thickness of the background LOCAL annulus
+# used in Source Extractor
+bkg_photothick = 24
+# if force_phot_gaia=True: background annulus radii in units of FWHM
+bkg_annulus_radii = [6, 7]
+
+
+
 # PSF fitting
 psffit = False                # perform PSF fitting using own function
 psffit_sex = False            # perform PSF fitting using SExtractor
 
 source_nsigma = 5             # required S/N in total flux (optimal or psffit)
-                              # for source to be included in output catalog
+                              # for source to be included in output catalog;
                               # this also determines level of limiting flux
                               # and magnitudes of images
 source_minpixfrac = 0.67      # required fraction of good pixels in footprint
                               # for source to be included in output catalog
-fit_bkg_opt = True            # perform polyfit to local background in optimal
-                              # photometry determination
-poldeg_bkg_opt = 1            # polynomial degree of background fit
+
 
 
 # Photometric calibration
