@@ -37,24 +37,21 @@ from astropy.stats import SigmaClip
 
 from fitsio import FITS
 
-#import sep as SEP
 from photutils.aperture import CircularAperture, aperture_photometry
 from photutils.aperture import CircularAnnulus, ApertureStats
-from photutils.utils import calc_total_error
 
-from multiprocessing import Pool
 
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '0.9.4'
+__version__ = '0.9.5'
 
 
 ################################################################################
 
 def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 ref=True, fullsource=False, nsigma=3, apphot_radii=None,
-                apphot_sky_inout=None, apphot_att2add=None, pm_epoch=2016.0,
+                bkg_annulus_radii=None, apphot_att2add=None, pm_epoch=2016.0,
                 include_fluxes=False, keys2add=None, keys2add_dtypes=None,
                 bkg_global=True, thumbnails=False, size_thumbnails=None,
                 tel=None, ncpus=1):
@@ -116,7 +113,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     trans: boolean (default=True), if True the transient magnitudes
            and limits will be extracted
-    
+
     ref: boolean (default=True), if True the reference magnitudes and
          limits will be extracted
 
@@ -130,11 +127,11 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     apphot_radii: list or numpy array of radii (default=None) to use
                   for aperture photometry
 
-    apphot_sky_inout: 2-element list or numpy array (default=None)
-                      indicating the inner and outer radius of the sky
-                      annulus used for the aperture photometry sky
-                      background determination
-                 
+    bkg_annulus_radii: 2-element list or numpy array (default=None)
+                       indicating the inner and outer radius of the
+                       sky annulus used for the local background
+                       determination
+
     apphot_att2add: list of strings, indicating any float or integer
                     attribute of photutils.aperture.ApertureStats
 
@@ -157,7 +154,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     bkg_global: boolean (default=True) determining whether to use the
                 global or local background determination in the
                 photometry
-    
+
     ncpus: int (default=1); number of processes/tasks to use
 
     thumbnails: boolean (default=None) determining whether to include
@@ -241,9 +238,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     if fullsource:
 
         # optimal photometry columns
-        names_fullsource = ['MAG_OPT', 'MAGERR_OPT', 'SNR_OPT', 'LIMMAG_OPT']
+        names_fullsource = ['BACKGROUND', 'MAG_OPT', 'MAGERR_OPT', 'SNR_OPT',
+                            'LIMMAG_OPT']
         names += names_fullsource
-        dtypes += ['float32', 'float32', 'float32', 'float32']
+        dtypes += ['float32', 'float32', 'float32', 'float32', 'float32']
 
 
         # add corresponding fluxes
@@ -317,10 +315,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
         # magnitude, snr and limiting magnitude columns
-        names_ref = ['MAG_OPT_REF', 'MAGERR_OPT_REF', 'SNR_OPT_REF',
-                     'LIMMAG_OPT_REF']
+        names_ref = ['BACKGROUND_REF', 'MAG_OPT_REF', 'MAGERR_OPT_REF',
+                     'SNR_OPT_REF', 'LIMMAG_OPT_REF']
         names += names_ref
-        dtypes += ['float32', 'float32', 'float32', 'float32']
+        dtypes += ['float32', 'float32', 'float32', 'float32', 'float32']
 
 
         # add corresponding fluxes
@@ -395,7 +393,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     # input parameters to [get_rows]
     pars = [table_in, trans, ref, fullsource, nsigma, apphot_radii,
-            apphot_sky_inout, apphot_att2add, pm_epoch, include_fluxes, keys2add,
+            bkg_annulus_radii, apphot_att2add, pm_epoch, include_fluxes, keys2add,
             add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails]
 
     if nimages == 1:
@@ -553,13 +551,15 @@ def add_drop_fz (filename):
     elif os.path.exists(filename.split('.fz')[0]):
         return filename.split('.fz')[0]
     else:
-        return None
+        #return None
+        log.warning ('no (un)compressed version of {} found'.format(filename))
+        return filename
 
 
 ################################################################################
 
 def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
-              apphot_radii, apphot_sky_inout, apphot_att2add, pm_epoch,
+              apphot_radii, bkg_annulus_radii, apphot_att2add, pm_epoch,
               include_fluxes, keys2add, add_keys, names, dtypes, bkg_global,
               thumbnails, size_thumbnails, ncpus=None):
 
@@ -691,7 +691,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer full-source magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            apphot_sky_inout, apphot_att2add, include_fluxes,
+                            bkg_annulus_radii, apphot_att2add, include_fluxes,
                             keys2add, add_keys, bkg_global, thumbnails, size_tn,
                             imtype='new', tel=tel, ncpus=ncpus)
 
@@ -703,7 +703,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer transient magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            apphot_sky_inout, apphot_att2add, include_fluxes,
+                            bkg_annulus_radii, apphot_att2add, include_fluxes,
                             keys2add, add_keys, bkg_global, thumbnails, size_tn,
                             imtype='trans', tel=tel, ncpus=ncpus)
 
@@ -729,7 +729,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer reference magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            apphot_sky_inout, apphot_att2add, include_fluxes,
+                            bkg_annulus_radii, apphot_att2add, include_fluxes,
                             keys2add, add_keys, bkg_global, thumbnails, size_tn,
                             imtype='ref', tel=tel, ncpus=ncpus)
 
@@ -810,7 +810,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 ################################################################################
 
 def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                apphot_sky_inout, apphot_att2add, include_fluxes, keys2add,
+                bkg_annulus_radii, apphot_att2add, include_fluxes, keys2add,
                 add_keys, bkg_global, thumbnails, size_tn, imtype='new',
                 tel='ML1', ncpus=None):
 
@@ -856,7 +856,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
     # check if required images/catalogs are available
     for fn in list2check:
-        if not os.path.exists (fn):
+        if fn is None or not os.path.exists (fn):
             log.warning ('{} not found; skipping extraction of {} magnitudes '
                          'for {}'.format(fn, label, basename))
             return table
@@ -981,17 +981,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
 
         else:
-            # if it does not exist, create an object masking depending
-            # on input parameter [bkg_global]
-            if bkg_global:
-                # if True, global background is used, i.e. any local flux
-                # due to nearby sources or galaxy is not taken into
-                # account
-                objmask = np.ones (data_shape, dtype=bool)
-            else:
-                # if False, a circular annulus around each object is used
-                # to estimate the sky background
-                objmask = np.zeros (data_shape, dtype=bool)
+            # if it does not exist, create an all-False object mask
+            objmask = np.zeros (data_shape, dtype=bool)
 
 
         # read reduced image; need to use astropy method, as otherwise
@@ -1020,6 +1011,52 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             get_flags_mask_comb(data_mask, xcoords, ycoords, fwhm, xsize, ysize))
 
 
+
+        # aperture magnitudes
+        # -------------------
+
+        # convert [data_mask] to boolean mask
+        mask_data = data_mask.astype(bool)
+
+        # combine objmask and mask_data into boolean [mask_comb],
+        # where True indicates a flagged pixel, either because it
+        # is within an object footprint (objmask) or it is a
+        # non-zero pixel in [data_mask] 
+        mask_comb = (objmask | mask_data)
+
+
+        # create list of (x,y) coordinates
+        xycoords = list(zip(xcoords, ycoords))
+
+
+        # determine aperture background
+        if bkg_global or bkg_annulus_radii is None:
+            local_bkg = None
+            # record zeros in table
+            table['BACKGROUND{}'.format(s2add)] = np.zeros(len(xcoords),
+                                                           dtype='float32')
+        else:            
+            local_bkg = get_aperture_bkg (data, mask_comb, xycoords,
+                                          bkg_annulus_radii, fwhm)
+            # record local background in table
+            table['BACKGROUND{}'.format(s2add)] = local_bkg.astype('float32')
+
+
+        # add aperture magnitudes using function [zogy.get_aperture_mags]
+        if apphot_radii is not None:
+            table = get_aperture_mags (
+                table, data, data_bkg_std, mask_data, xycoords, apphot_radii,
+                local_bkg, apphot_att2add, fwhm, exptime, filt, zp,
+                airmass, ext_coeff, s2add, include_fluxes)
+
+        else:
+            log.warning ('aperture photometry radii [apphot_radii] are not '
+                         'defined; aperture photometry is skipped')
+
+
+        # optimal magnitudes
+        # ------------------
+
         try:
             # determine optimal fluxes at pixel coordinates
             # !!! CHECK !!! _mp or not
@@ -1030,7 +1067,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
-                    set_zogy=set_zogy, tel=tel, nthreads=1)
+                    local_bkg=local_bkg, set_zogy=set_zogy, tel=tel, nthreads=1)
+
             else:
                 # submit to [get_psfoptflux_mp] with [ncpu] threads as
                 # this concerns a single image and the multiprocessing
@@ -1042,7 +1080,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
-                    set_zogy=set_zogy, tel=tel, nthreads=ncpus)
+                    local_bkg=local_bkg, set_zogy=set_zogy, tel=tel,
+                    nthreads=ncpus)
 
 
         except Exception as e:
@@ -1092,117 +1131,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             table[col_tmp] = (flux_opt/exptime).astype('float32')
             col_tmp = 'E_FLUXERR_OPT{}'.format(s2add)
             table[col_tmp] = (fluxerr_opt/exptime).astype('float32')
-
-
-
-        # add aperture measurements
-        if apphot_radii is not None:
-
-            t_ap = time.time()
-
-            # update type of background annulus
-            if bkg_global or apphot_sky_inout is None:
-                bkgann = None
-            else:
-                bkgann = tuple(np.array(apphot_sky_inout).astype(float) * fwhm)
-
-            apphot_radii_xfwhm = np.array(apphot_radii).astype(float) * fwhm
-            nrad = len(apphot_radii)
-
-
-            if False:
-                # use Source Extraction and Photometry
-                flux_ap, fluxerr_ap, flags_ap = SEP.sum_circle (
-                    data, xcoords-1, ycoords-1,
-                    np.expand_dims(apphot_radii_xfwhm, 1),
-                    err=data_bkg_std, gain=1.0, bkgann=bkgann, mask=data_mask)
-
-
-            # use photutils instead, as it has more freedom regarding
-            # background annulus subtraction (SEP only provides the
-            # mean value), and it can also provide Source Extractor
-            # quanities like FWHM and ELONGATION
-
-            xycoords = list(zip(xcoords, ycoords))
-            apertures = [CircularAperture(xycoords, r=rad)
-                         for rad in apphot_radii_xfwhm]
-
-            #data_err = calc_total_error(data, data_bkg_std, 1.0)
-            data_err = np.sqrt(np.abs(data) + data_bkg_std**2)
-
-            if bkgann is not None:
-                r_in, r_out = bkgann 
-                bkg_annuli = CircularAnnulus(xycoords, r_in=r_in, r_out=r_out)
-                sigma_clip = SigmaClip(sigma=3.0, maxiters=10)
-                bkg_stats = ApertureStats(data, bkg_annuli, error=data_err,
-                                          sigma_clip=sigma_clip)
-                local_bkg = bkg_stats.mean
-            else:
-                local_bkg = None
-
-
-            # perform aperture measurements (many attributes
-            # available, e.g. covar_sigx2 and y2, fwhm, elongation);
-            # unfortunately only single aperture can be processed at a
-            # time
-            for i, radius in enumerate(apphot_radii):
-                aper_stats = ApertureStats(data, apertures[i],
-                                           error=data_err,
-                                           mask=data_mask.astype(bool),
-                                           local_bkg=local_bkg)
-
-                # flux sum and corresponding error for this radius
-                flux_ap = aper_stats.sum
-                fluxerr_ap = aper_stats.sum_err
-
-
-                # infer calibrated magnitudes using the zeropoint
-                if zp is not None:
-                    mag_ap, magerr_ap = zogy.apply_zp (flux_ap, zp, airmass,
-                                                       exptime, filt, ext_coeff,
-                                                       fluxerr=fluxerr_ap)
-                    mask_pos = (flux_ap > 0)
-                    mag_ap[~mask_pos] = 99
-                    magerr_ap[~mask_pos] = 99
-
-                    # S/N
-                    mask_nonzero = (fluxerr_ap != 0)
-                    snr_ap = np.zeros_like(flux_ap, dtype='float32')
-                    snr_ap[mask_nonzero] = (flux_ap[mask_nonzero] /
-                                            fluxerr_ap[mask_nonzero])
-
-                    col_tmp = 'MAG_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = mag_ap.astype('float32')
-                    col_tmp = 'MAGERR_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = magerr_ap.astype('float32')
-                    col_tmp = 'SNR_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = snr_ap
-
-                else:
-                    log.warning ('keyword PC-ZP not in header; unable to infer {} '
-                                 'magnitudes for {}'.format(label, basename))
-
-
-                # add fluxes if needed
-                if include_fluxes:
-                    col_tmp = 'E_FLUX_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = (flux_ap/exptime).astype('float32')
-                    col_tmp = 'E_FLUXERR_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = (fluxerr_ap/exptime).astype('float32')
-                    
-
-
-                # add ApertureStats attribute(s) provided in [[apphot_att2add]
-                if apphot_att2add is not None:
-                    for att in apphot_att2add:
-                        vals_att = eval('aper_stats.{}'.format(att.lower()))
-                        col_tmp = '{}_APER_R{}xFWHM{}'.format(att.upper(),
-                                                              radius, s2add)
-                        table[col_tmp] = vals_att
-
-
-            log.info ('{} source(s), {} aperture(s), apphot time: {:.3f}s'
-                      .format(ncoords_ok, nrad, time.time()-t_ap))
 
 
         # add thumbnail image
@@ -1299,6 +1227,212 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                     log.warning ('{} not found; skipping extraction of {} for {}'
                                  .format(fn, key_tn, basename))
 
+
+
+    return table
+
+
+################################################################################
+
+def get_aperture_bkg (data, mask_comb, xycoords, bkg_annulus_radii, fwhm):
+
+    # determine the local_bkg for each object
+    # using the photutils.aperture package
+
+    # inner and outer radius
+    r1, r2 = tuple(np.array(bkg_annulus_radii).astype(float) * fwhm)
+
+    # create background annulus around each object
+    bkg_annulus = CircularAnnulus(xycoords, r_in=r1, r_out=r2)
+
+    # calculate statistics with sigma clipping
+    sigma_clip = SigmaClip(sigma=3.0, maxiters=10)
+    bkg_stats = ApertureStats(data, bkg_annulus, mask=mask_comb,
+                              sigma_clip=sigma_clip)
+    # use clipped median as local background value
+    local_bkg = bkg_stats.median
+
+
+    # now check if sufficient pixels were available;
+    # background annulus areas of unflagged pixels for all
+    # objects
+    bkg_area = bkg_annulus.area_overlap(data, mask=mask_comb)
+
+    # to be compared to all pixels in background annulus
+    npix_bkg = np.pi * (r2**2 - r1**2)
+
+    # identify the annuli with too few unflagged pixels
+    # for the background determination to become unreliable
+    # !!!CHECK!!! - which fraction to assume?
+    fraction = 0.5
+    mask_invalid = ((np.array(bkg_area) / npix_bkg) < fraction)
+
+    # add any non-finite values in [local_bkg] to this
+    # invalid mask
+    mask_invalid = ~np.isfinite(local_bkg)
+
+    # set invalid entries to zero, i.e. resorting to the
+    # global background determination
+    local_bkg[mask_invalid] = 0
+
+
+    return local_bkg
+
+
+################################################################################
+
+def get_aperture_mags (table, data, data_bkg_std, mask, xycoords, apphot_radii,
+                       local_bkg, apphot_att2add, fwhm, exptime, filt, zp,
+                       airmass, ext_coeff, s2add, include_fluxes):
+
+
+    t_ap = time.time()
+
+    # determination of aperture magnitudes
+    # ------------------------------------
+
+    # also looked at SEP, but use photutils instead, as it has
+    # more freedom regarding background annulus subtraction
+    # (SEP only provides the mean value), and it can also
+    # provide Source Extractor quanities like FWHM and
+    # ELONGATION
+    
+    # infer error image
+    data_err = np.sqrt(np.abs(data) + data_bkg_std**2)
+
+
+    # convert list of apphot_radii (which could be strings) to
+    # a numpy float array, and scale it with the image fwhm
+    apphot_radii_xfwhm = np.array(apphot_radii).astype(float) * fwhm
+    nrad = len(apphot_radii)
+
+
+    # define apertures at different radii for all objects
+    apertures = [CircularAperture(xycoords, r=rad) for rad in apphot_radii_xfwhm]
+
+
+    # use [aperture_photometry] to infer the total sum of flux
+    # and its associated error within the apertures,
+    # discarding flagged pixels
+    table_phot = aperture_photometry (data, apertures, error=data_err, mask=mask)
+
+    # subtract the local background from each aperture, taking
+    # into account that flagged pixels within the aperture
+    # were not used and therefore the background value in that
+    # pixel should not be counted
+    for i, radius in enumerate(apphot_radii):
+
+        # determine aperture area excluding flagged pixels
+        ap_area = np.array(apertures[i].area_overlap(data, mask=mask))
+
+        # ap_area can contain nans (probably if all pixels
+        # have been masked); set them to zero
+        mask_invalid = ~np.isfinite(ap_area)
+        ap_area[mask_invalid] = 0
+
+        # convert table_phot columns to numpy arrays; note that
+        # table_phot does not appear to contain any nans
+        flux_ap = table_phot['aperture_sum_{}'.format(i)].value
+        fluxerr_ap = table_phot['aperture_sum_err_{}'.format(i)].value
+
+        # subtract local_bkg from flux_ap
+        if local_bkg is not None:
+            flux_ap -= local_bkg * ap_area
+
+
+        # alternative method
+        if False:
+            aper_stats = ApertureStats(data, apertures[i], error=data_err,
+                                       mask=mask)
+            # flux sum and corresponding error for this aperture
+            flux_ap = aper_stats.sum.value
+            fluxerr_ap = aper_stats.sum_err.value
+
+            # aper_stats.sum and aper_stats.sum_err can
+            # contain nans (probably if all pixels have been
+            # masked); set them to zero
+            mask_invalid = ~(np.isfinite(flux_ap) &
+                             np.isfinite(fluxerr_ap))
+            flux_ap[mask_invalid] = 0
+            fluxerr_ap[mask_invalid] = 0
+
+            # this ap_area determination through aper_stats does not
+            # contain same number of nans as aper_stats.sum, while the
+            # aperture.area_overlap method does, so stick to the latter
+            # which is calculated above; speed is very similar
+            # ap_area = aper_stats.sum_aper_area.value
+
+            # subtract the background
+            if local_bkg is not None:
+                flux_ap -= local_bkg * ap_area
+
+
+
+        # infer calibrated magnitudes using the zeropoint
+        if zp is not None:
+            mag_ap, magerr_ap = zogy.apply_zp (flux_ap, zp, airmass,
+                                               exptime, filt, ext_coeff,
+                                               fluxerr=fluxerr_ap)
+            mask_pos = (flux_ap > 0)
+            mag_ap[~mask_pos] = 99
+            magerr_ap[~mask_pos] = 99
+
+            # S/N
+            mask_nonzero = (fluxerr_ap != 0)
+            snr_ap = np.zeros_like(flux_ap, dtype='float32')
+            snr_ap[mask_nonzero] = (flux_ap[mask_nonzero] /
+                                    fluxerr_ap[mask_nonzero])
+
+            col_tmp = 'MAG_APER_R{}xFWHM{}'.format(radius, s2add)
+            table[col_tmp] = mag_ap.astype('float32')
+            col_tmp = 'MAGERR_APER_R{}xFWHM{}'.format(radius, s2add)
+            table[col_tmp] = magerr_ap.astype('float32')
+            col_tmp = 'SNR_APER_R{}xFWHM{}'.format(radius, s2add)
+            table[col_tmp] = snr_ap
+
+        else:
+            log.warning ('keyword PC-ZP not in header; unable to infer {} '
+                         'magnitudes for {}'.format(label, basename))
+
+
+        # add fluxes if needed
+        if include_fluxes:
+            col_tmp = 'E_FLUX_APER_R{}xFWHM{}'.format(radius, s2add)
+            table[col_tmp] = (flux_ap/exptime).astype('float32')
+            col_tmp = 'E_FLUXERR_APER_R{}xFWHM{}'.format(radius, s2add)
+            table[col_tmp] = (fluxerr_ap/exptime).astype('float32')
+
+
+        # add ApertureStats attribute(s) provided in
+        # [[apphot_att2add] (many attributes available,
+        # e.g. covar_sigx2 and y2, fwhm, elongation, but it is
+        # very slow)
+        if apphot_att2add is not None:
+
+            # get aperture statistics
+            aper_stats = ApertureStats(data, apertures[i], error=data_err,
+                                       mask=mask)
+
+            for att in apphot_att2add:
+
+                # infer values for this attribute
+                values_att = eval('aper_stats.{}.value'
+                                  .format(att.lower()))
+                # set invalid values to zero
+                mask_invalid = ~np.isfinite(values_att)
+                values_att[mask_invalid] = 0
+
+                # add column to output table
+                col_tmp = '{}_APER_R{}xFWHM{}'.format(att.upper(),
+                                                      radius, s2add)
+                table[col_tmp] = values_att
+
+                log.info ('added aper_stats attribute {} to table '
+                          'column {}'.format(att, col_tmp))
+
+
+    log.info ('{} source(s), {} aperture(s), get_aperture_mags time: {:.3f}s'
+              .format(len(table), nrad, time.time()-t_ap))
 
 
     return table
@@ -1746,7 +1880,7 @@ def verify_lengths(p1, p2):
 
 # from
 # https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-def str2bool(v):
+def str2bool (v):
     if isinstance(v, bool):
         return v
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -1755,6 +1889,15 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+################################################################################
+
+def str2None (value):
+    if value == 'None':
+        return None
+    else:
+        return value
 
 
 ################################################################################
@@ -1776,12 +1919,16 @@ if __name__ == "__main__":
                         'degrees or in colon-separated sexagesimal hours and '
                         'degrees for RA and DEC, respectively')
 
-    parser.add_argument('fits_out', type=str,
-                        help='output fits table with resulting magnitudes')
+    parser.add_argument('file_out', type=str,
+                        help='output filename with resulting magnitudes, where '
+                        'the file type is based on the extension; if not '
+                        'recognized by astropy.Table, it is forced to be a fits '
+                        'file')
 
-    parser.add_argument('--radecs_file_format', type=str, default='fits',
+    parser.add_argument('--radecs_file_format', type=str, default=None,
                         help='astropy file format of [radecs] in case it points '
-                        'to a file, e.g. ascii or csv; default=fits')
+                        'to a file; (e)csv and fits files, a.o., are recognized '
+                        'through their extension by astropy.Table; default=None')
 
     parser.add_argument('--ra_col', type=str, default='RA',
                         help='name of input RA column in [radecs]; default=RA')
@@ -1831,9 +1978,11 @@ if __name__ == "__main__":
                         help='name of input filename column in [filenames]; '
                         'default=FILENAME')
 
-    parser.add_argument('--filenames_file_format', type=str, default='fits',
+    parser.add_argument('--filenames_file_format', type=str, default=None,
                         help='astropy file format of [filenames] in case it '
-                        'points to a file; default=fits')
+                        'points to a file; (e)csv and fits files, a.o., are '
+                        'recognized through their extension by astropy.Table; '
+                        'default=None')
 
     parser.add_argument('--filters', type=str, default='ugqriz',
                         help='consider images in these filters only; '
@@ -1867,15 +2016,15 @@ if __name__ == "__main__":
     parser.add_argument('--nsigma', type=int, default=3,
                         help='significance threshold for a detection; default=3')
 
-    parser.add_argument('--apphot_radii', type=str, default='0.66,1.5,5',
+    parser.add_argument('--apphot_radii', type=str2None, default='0.66,1.5,5',
                         help='radii in units of the image FWHM at which to '
                         'extract aperture photometry; default=0.66,1.5,5, '
                         'if set to None, no aperture photometry is performed')
 
-    parser.add_argument('--apphot_sky_inout', type=str, default='4,5',
+    parser.add_argument('--bkg_annulus_radii', type=str2None, default='5,7',
                         help='inner and outer radii in units of the image FWHM '
                         'of the sky annulus used to determine the aperture '
-                        'photometry local background; default=4,5; if set to '
+                        'photometry local background; default=6,7; if set to '
                         'None, no local background is subtracted (this also '
                         'depends on [bkg_global], i.e. if these sky radii are '
                         'defined but [bkg_global]=True, no background is '
@@ -1949,7 +2098,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-
+    
     # for timing
     t0 = time.time()
 
@@ -2008,15 +2157,16 @@ if __name__ == "__main__":
     if os.path.isfile(args.radecs):
 
         # if [args.radecs] is a file, read it into a table
-        table_in = Table.read(args.radecs, format=args.radecs_file_format)
+        if args.radecs_file_format is not None:
+            table_in = Table.read(args.radecs, format=args.radecs_file_format)
+        else:
+            table_in = Table.read(args.radecs)
+
         colnames = table_in.colnames
         log.info ('input table column names: {}'.format(colnames))
 
-
         if len(table_in) == 0:
-            log.critical('no input coordinates found; if the input is meant to '
-                         'be a file, check whether its format provided through '
-                         'the input parameter [radecs_file_format] is correct')
+            log.error ('no input coordinates found; exiting')
             raise SystemExit
         else:
             log.info ('{} lines in input file {}'
@@ -2028,9 +2178,9 @@ if __name__ == "__main__":
         # done with e.g. mask_dtime below
         table_in['NUMBER_IN'] = np.arange(1,len(table_in)+1)
 
-
+        
         # convert column [date_col] to list mjds_in
-        if str(args.date_col) != 'None' and args.date_col in colnames:
+        if args.date_col is not None and args.date_col in colnames:
 
             # if format is in mjd, use the args.date_col directly
             if args.date_format == 'mjd':
@@ -2192,8 +2342,12 @@ if __name__ == "__main__":
         try:
             # read it into a table using the format
             # [args.filenames_file_format]
-            table_filenames = Table.read(args.filenames,
-                                         format=args.filenames_file_format)
+            if args.filenames_file_format is not None:
+                table_filenames = Table.read(args.filenames,
+                                             format=args.filenames_file_format)
+            else:
+                table_filenames = Table.read(args.filenames)
+
             log.info ('{} line(s) in input file {}'
                       .format(len(table_filenames), args.filenames))
 
@@ -2401,12 +2555,12 @@ if __name__ == "__main__":
 
 
     # convert input keys2add and corresponding types to lists
-    if str(args.keys2add) != 'None':
+    if args.keys2add is not None:
         keys2add = args.keys2add.upper().split(',')
     else:
         keys2add = None
 
-    if str(args.keys2add_dtypes) != 'None':
+    if args.keys2add_dtypes is not None:
         keys2add_dtypes = args.keys2add_dtypes.split(',')
     else:
         keys2add_dtypes = None
@@ -2416,26 +2570,26 @@ if __name__ == "__main__":
 
     # change input [apphot_radii] from string to numpy array
     apphot_radii = args.apphot_radii
-    if str(apphot_radii) != 'None':
+    if apphot_radii is not None:
         apphot_radii = apphot_radii.split(',')
         log.info ('apphot_radii: {}'.format(apphot_radii))
     else:
         # or from 'None' to None
         apphot_radii = None
 
-    # change input [apphot_sky_inout] from string to numpy array
-    apphot_sky_inout = args.apphot_sky_inout
-    if str(apphot_sky_inout) != 'None':
-        apphot_sky_inout = apphot_sky_inout.split(',')
-        log.info ('apphot_sky_inout: {}'.format(apphot_sky_inout))
+    # change input [bkg_annulus_radii] from string to numpy array
+    bkg_annulus_radii = args.bkg_annulus_radii
+    if bkg_annulus_radii is not None:
+        bkg_annulus_radii = bkg_annulus_radii.split(',')
+        log.info ('bkg_annulus_radii: {}'.format(bkg_annulus_radii))
     else:
         # or from 'None' to None
-        apphot_sky_inout = None
+        bkg_annulus_radii = None
 
     # change input [apphot_att2add] from string to list of
     # attributes
     apphot_att2add = args.apphot_att2add
-    if str(apphot_att2add) != 'None':
+    if apphot_att2add is not None:
         apphot_att2add = apphot_att2add.split(',')
         log.info ('apphot_att2add: {}'.format(apphot_att2add))
     else:
@@ -2451,7 +2605,7 @@ if __name__ == "__main__":
     table_out = force_phot (
         table_in, image_indices_dict, mask_list=mask_list, trans=args.trans,
         ref=args.ref, fullsource=args.fullsource, nsigma=args.nsigma,
-        apphot_radii=apphot_radii, apphot_sky_inout=apphot_sky_inout,
+        apphot_radii=apphot_radii, bkg_annulus_radii=bkg_annulus_radii,
         apphot_att2add=apphot_att2add, pm_epoch=args.pm_epoch,
         include_fluxes=args.include_fluxes, keys2add=keys2add,
         keys2add_dtypes=keys2add_dtypes, bkg_global=args.bkg_global,
@@ -2474,12 +2628,14 @@ if __name__ == "__main__":
         table_out['RA_IN'].name = args.ra_col
         table_out['DEC_IN'].name = args.dec_col
 
-
+        
         # if [date_col] was provided and the MJD-OBS column is present
         # in the output table, the delta time between it and the image
         # date of observations can be determined
         colnames = table_out.colnames
-        if str(args.date_col) != 'None' and 'MJD-OBS' in colnames:
+        if (args.date_col is not None and 'MJD-IN' in colnames and
+            'MJD-OBS' in colnames):
+
             mjds_in = table_out['MJD_IN'].value
             dtime_days = np.abs(mjds_in - table_out['MJD-OBS'])
             table_out.add_column(dtime_days, name='DELTA_MJD',
@@ -2493,11 +2649,13 @@ if __name__ == "__main__":
 
 
         # rename proper motion columns if needed
-        cols2keep = args.input_cols2copy.split(',')
-        if ('PMRA_IN' in colnames and 'PMDEC_IN' in colnames and
-            args.pmra_col in cols2keep and args.pmdec_col in cols2keep):
-            table_out['PMRA_IN'].name = args.pmra_col
-            table_out['PMDEC_IN'].name = args.pmdec_col
+        if args.input_cols2copy is not None:
+            cols2copy += args.input_cols2copy.split(',')
+
+            if ('PMRA_IN' in colnames and 'PMDEC_IN' in colnames and
+                args.pmra_col in cols2copy and args.pmdec_col in cols2copy):
+                table_out['PMRA_IN'].name = args.pmra_col
+                table_out['PMDEC_IN'].name = args.pmdec_col
 
 
         # order the output table by original row number
@@ -2511,9 +2669,16 @@ if __name__ == "__main__":
 
 
     # write output table to fits
-    log.info ('writing output table {}'.format(args.fits_out))
+    log.info ('writing output file {}'.format(args.file_out))
     if table_out is not None:
-        table_out.write(args.fits_out, format='fits', overwrite=True)
+        try: 
+            # let format be auto-identified through the extension of
+            # file_out
+            table_out.write(args.file_out, overwrite=True)
+        except:
+            # otherwise, force output file to be fits
+            table_out.write('{}.fits'.format(args.file_out),
+                            format='fits', overwrite=True)
 
 
     # list memory used
