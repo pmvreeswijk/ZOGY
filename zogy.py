@@ -7742,7 +7742,10 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         if False:
 
             # determine sky background using force_phot.get_apertures_bkg
-            mask_comb = (objmask | (data_mask.astype(bool)))
+            mask_comb = data_mask.astype(bool)
+            if objmask is not None:
+                mask_comb |= objmask
+
             xycoords = list(zip(xwin, ywin))
             bkg_annulus_radii = get_par(set_zogy.bkg_annulus_radii,tel)
             local_bkg = force_phot.get_aperture_bkg (data_wcs, mask_comb,
@@ -8131,7 +8134,10 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         if True:
 
             # determine sky background using force_phot.get_apertures_bkg
-            mask_comb = (objmask | (data_mask.astype(bool)))
+            mask_comb = data_mask.astype(bool)
+            if objmask is not None:
+                mask_comb |= objmask
+
             xycoords = list(zip(xpos, ypos))
             bkg_annulus_radii = get_par(set_zogy.bkg_annulus_radii,tel)
             local_bkg = force_phot.get_aperture_bkg (data_wcs, mask_comb,
