@@ -2650,7 +2650,7 @@ if __name__ == "__main__":
 
         # rename proper motion columns if needed
         if args.input_cols2copy is not None:
-            cols2copy += args.input_cols2copy.split(',')
+            cols2copy = args.input_cols2copy.split(',')
 
             if ('PMRA_IN' in colnames and 'PMDEC_IN' in colnames and
                 args.pmra_col in cols2copy and args.pmdec_col in cols2copy):
