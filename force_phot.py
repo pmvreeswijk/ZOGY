@@ -1047,7 +1047,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             table = get_aperture_mags (
                 table, data, data_bkg_std, mask_data, xycoords, apphot_radii,
                 local_bkg, apphot_att2add, fwhm, exptime, filt, zp,
-                airmass, ext_coeff, s2add, include_fluxes)
+                airmass, ext_coeff, s2add, include_fluxes, label, basename)
 
         else:
             log.warning ('aperture photometry radii [apphot_radii] are not '
@@ -1283,7 +1283,8 @@ def get_aperture_bkg (data, mask_comb, xycoords, bkg_annulus_radii, fwhm):
 
 def get_aperture_mags (table, data, data_bkg_std, mask, xycoords, apphot_radii,
                        local_bkg, apphot_att2add, fwhm, exptime, filt, zp,
-                       airmass, ext_coeff, s2add, include_fluxes):
+                       airmass, ext_coeff, s2add, include_fluxes, label,
+                       basename):
 
 
     t_ap = time.time()
@@ -2548,6 +2549,15 @@ if __name__ == "__main__":
     log.info ('time spent to select relevant images: {:.1f}s'
               .format(time.time()-t0))
     t1 = time.time()
+
+
+    # now that relevant images have been selected, save these to an
+    # ASCII file that contains the date
+    matching_images_list = ['{}_red.fits.fz'.format(fn.split('_red')[0])
+                            for fn in image_indices_dict]
+    table_images = Table([matching_images_list])
+    name_tmp = 'matching_images_{}.txt'.format(Time.now().isot.split('T')[0])
+    table_images.write(name_tmp, format='ascii.no_header', overwrite=True)
 
 
     # could cut up dictionary in pieces if it turns out to be
