@@ -16,11 +16,11 @@ shape_new = (10560, 10560) # shape new image, ref image can have any shape
 
 
 # ZOGY parameters
-fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or full
-                         # frame (F)
+fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or
+                         # full frame (F)
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
-dxdy_local = False       # determine dx and dy from subimage (T) or full frame (F)
-transient_nsigma = 6     # required significance in Scorr for transient detection
+dxdy_local = False       # determine dx,dy from subimage (T) or full frame (F)
+transient_nsigma = 6     # required Scorr significance for transient detection
 chi2_max = float('inf')  # maximum reduced chi2 in PSF/Gauss fit to D to filter
                          # transients
 
@@ -126,7 +126,7 @@ key_satlevel = 'SATURATE'
 key_ra = 'RA'
 key_dec = 'DEC'
 key_pixscale = 'A-PSCALE'
-pixscale = 0.5642	# in arcsec/pixel
+pixscale = 0.564	# in arcsec/pixel
 key_exptime = 'EXPTIME'
 key_filter = 'FILTER'
 key_obsdate = 'DATE-OBS'
@@ -162,11 +162,11 @@ psf_sampling = 0.0       # PSF sampling step in image pixels used in PSFex
                          # step in both images.
 psf_samp_fwhmfrac = 1/4.5 # PSF sampling step in units of FWHM
                          # this is only used if [psf_sampling]=0.
-size_vignet = 99         # size of the square VIGNETs saved in the SExtractor
-#size_vignet = {'ML1': 99, 'BG': 49}  # size of the square VIGNETs saved in the SExtractor
-                         # LDAC catalog used by PSFEx; its value should be set to
-                         # ~ 2 * max(psf_rad_phot,psf_rad_zogy) * maximum
-                         # expected FWHM in any of the images.
+#size_vignet = 99         # size of the square VIGNETs saved in the SExtractor
+size_vignet = {'ML1': 99, 'BG': 49} # size of the square VIGNETs saved in the
+                         # SExtractor LDAC catalog used by PSFEx; its value should
+                         # be set to ~ 2 * max(psf_rad_phot,psf_rad_zogy) *
+                         # maximum expected FWHM in any of the images.
 psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
                          # (don't set this too high as otherwise the PSF
                          #  will be mainly based on bright stars)
@@ -188,14 +188,15 @@ astronet_radius = 30.
 pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
                            # be within this fraction of the assumed pixscale
 
-# calibration catalog used for both astrometry and photometry
-cal_cat = ('{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
-           .format(os.environ['ZOGYHOME']))
+
+# calibration catalog used for photometry and to check the astrometry
+#cal_cat = ('{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
+#           .format(os.environ['ZOGYHOME']))
+#cal_epoch = 2015.5
 # upcoming new catalog
-#cal_cat = ('{}/CalFiles/GaiaDR3_calcat_MLBG_HPlevel3_highPM.fits'
-#           .format(os.environ['ZOGYHOME']))
-#cal_cat = ('{}/CalFiles/GaiaDR3_calcat_MLBG_HPlevel3_highPM_glimit12-17_HPfine11.fits'
-#           .format(os.environ['ZOGYHOME']))
+cal_cat = ('{}/CalFiles/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine11.fits'
+           .format(os.environ['ZOGYHOME']))
+cal_epoch = 2016.0
 
 ast_nbright = 1500       # brightest no. of objects in the field to
                          # use for astrometric solution and crosscheck
@@ -215,21 +216,19 @@ ast_filter = 'r'         # magnitude column to sort in brightness
 # gaia_cat and adopting gaia_epoch for the input catalog EPOCH. For
 # quicker reading, the catalog is assumed to be split into multiple
 # extensions, where the extensions contain the entries corresponding
-# to healpixel of level [gaia_hplevel], where nside=2**level and
-# n_healpix = 12*nside**2 = 12*4**level. The output catalog will
-# contain the same number of entries as the number of sources in
-# gaia_cat within the image(s).
+# to healpixel of particular level (infer from name or LEVEL header
+# keyword), where nside=2**level and n_healpix = 12*nside**2 =
+# 12*4**level. The output catalog will contain the same number of
+# entries as the number of sources in gaia_cat within the image(s).
 #
 # if force_phot_gaia is False, the number of sources is determined by
 # the significant sources detected by Source Extractor, where the
 # threshold can be adjusted in the configuration file (see sex_cfg
 # further below)
-force_phot_gaia = False
-#gaia_cat = '/users/pmv/Gaia/DR3/Gaia_DR3_all_HPlevel3_highPM.fits'
-gaia_cat = ('{}/CalFiles/Gaia_DR3_all_HPlevel3_highPM.fits'
+force_phot_gaia = True
+gaia_cat = ('{}/CalFiles/GaiaDR3_all_HP4_highPM.fits'
             .format(os.environ['ZOGYHOME']))
-gaia_hplevel = 3
-gaia_epoch = 2016
+gaia_epoch = 2016.0
 
 
 # aperture photometry radii in units of FWHM
@@ -239,47 +238,58 @@ apphot_radii = [0.66, 1.5, 5]
 bkg_phototype = 'local'
 
 # in case bkg_phototype = 'local':
-# if force_phot_gaia=False: thickness of the background LOCAL annulus
-# used in Source Extractor
+# if force_phot_gaia=False: aperture photometry is performed by source
+# extractor with thickness of the background LOCAL annulus:
 bkg_photothick = 24
-# if force_phot_gaia=True: background annulus radii in units of FWHM
-bkg_annulus_radii = [6, 7]
 
+# if force_phot_gaia=True: apeture photometry is performed using
+# function [get_apflux] with the following parameters: background
+# annulus radii in units of FWHM
+bkg_radii = [5,7]
+# if the fraction of background annulus pixels affected by nearby
+# objects or masked pixels is higher than [bkg_limfrac], the global
+# background is adopted
+bkg_limfrac = 0.5
+# integer subsampling factor to be able to sum over fraction of a
+# pixel; a value of n will split a pixel into n**2 subpixels
+apphot_fzoom = 5
+
+
+source_nsigma = 5             # signal-to-noise ratio used in calculating
+                              # limiting magnitudes and - only in case
+                              # [force_phot_gaia] is False - for source to be
+                              # included in output catalog
+source_minpixfrac = 0.67      # required fraction of good pixels in footprint
+                              # for source to be included in output catalog
 
 
 # PSF fitting
 psffit = False                # perform PSF fitting using own function
 psffit_sex = False            # perform PSF fitting using SExtractor
 
-source_nsigma = 5             # required S/N in total flux (optimal or psffit)
-                              # for source to be included in output catalog;
-                              # this also determines level of limiting flux
-                              # and magnitudes of images
-source_minpixfrac = 0.67      # required fraction of good pixels in footprint
-                              # for source to be included in output catalog
-
-
 
 # Photometric calibration
-# telescope latitude in degrees (North)
-obs_lat = {'ML1': -32.3799, 'BG': -29.2575}  
-# telescope longitude in degrees (East); BlackGEM: -70.73797
+# telescope latitude in degrees (North); adopting the (middle)
+# longitude of BG3 for all three BGs; see email from PaulG on 19 March
+# 2019, 0.0001 degrees is accurate to 5-10m
+obs_lat = {'ML1': -32.3799, 'BG': -29.2575}
+# telescope longitude in degrees (East)
 obs_lon = {'ML1': 20.8112, 'BG': -70.7380}
-# telescope height in meters above sealevel; BlackGEM: 2343.
-obs_height = {'ML1': 1803, 'BG': 2348}
+# telescope height in meters above sealevel
+obs_height = {'ML1': 1802, 'BG': 2348}
 # observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
 obs_timezone = {'ML1': 'Africa/Johannesburg', 'BG': 'America/Santiago'}
 # these [ext_coeff] are mean extinction estimates for Sutherland in
 # the MeerLICHT filters:
 ext_coeff = {'ML1': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06},
-             'BG':  {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}}
-# and the same for La Silla in the BlackGEM filters:
-#ext_coeff = {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}
+             # and the same for La Silla in the BlackGEM filters:
+             'BG':  {'u':0.38, 'g':0.16, 'q':0.09, 'r':0.07, 'i':0.02, 'z':0.01}}
+
 # name of the photometric calibration catalog (in binary fits format)
 # with the stars' magnitudes converted to the same filter(s) as the
 # observations (in this case the MeerLICHT/BlackGEM filter set):
 # this is now the same as the astrometric catalog: [cal_cat] defined above
-phot_ncal_max = 100 # max no. of calibration stars used for a given field 
+phot_ncal_max = 100 # max no. of calibration stars used for a given field
 phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
@@ -290,6 +300,7 @@ zp_default = {'ML1': {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4
 #===============================================================================
 # Configuration
 #===============================================================================
+
 # path and names of configuration files
 cfg_dir = os.environ['ZOGYHOME']+'/Config/'
 sex_cfg = cfg_dir+'sex.config'               # SExtractor configuration file
