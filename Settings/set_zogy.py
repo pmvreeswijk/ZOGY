@@ -1,5 +1,8 @@
 import os
 
+# path to folder with calibration files
+cal_dir = os.environ['ZOGY_CALDIR']
+
 #===============================================================================
 # ZOGY
 #===============================================================================
@@ -21,8 +24,8 @@ fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx,dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required Scorr significance for transient detection
-chi2_max = float('inf')  # maximum reduced chi2 in PSF/Gauss fit to D to filter
-                         # transients
+chi2_max = 10            # maximum reduced chi2 in PSF/Gauss fit to D to filter
+                         # transients; float('inf') for infinity
 
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
@@ -77,9 +80,10 @@ ML_calc_prob = True
 ML_version = '2'
 # list of ML_models, where the model used is determined by the first
 # character of [ML_version]: ML_model = ML_models[int(ML_version[0]) - 1]
+caldir =
 ML_models = ['{}/meerCRAB_model/NET3_threshold_9_NRD'
              .format(os.environ['MEERCRABHOME']),
-             '{}/CalFiles/model270123.h5'.format(os.environ['ZOGYHOME'])]
+             '{}/model270123.h5'.format(cal_dir)]
 
 
 #===============================================================================
@@ -100,8 +104,9 @@ bkg_filtersize = 3       # size of filter used for smoothing the above
 
 # these parameters are related to MeerLICHT/BlackGEM images only
 MLBG_use2Dfit = True     # use 2D polynomial fit in background estimation
-MLBG_chancorr = True     # apply channel correction factor estimated while
-                         # performing a 2D polynomial fit to the background
+# apply channel correction factor estimated while
+# performing a 2D polynomial fit to the background
+MLBG_chancorr = {'ML1': True, 'BG': False}
 MLBG_chancorr_limdev = 0.05 # single channel correction limiting deviation
                             # above which none of the corrections are applied
 
@@ -194,8 +199,8 @@ pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
 #           .format(os.environ['ZOGYHOME']))
 #cal_epoch = 2015.5
 # upcoming new catalog
-cal_cat = ('{}/CalFiles/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine11.fits'
-           .format(os.environ['ZOGYHOME']))
+cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine11.fits'
+           .format(cal_dir))
 cal_epoch = 2016.0
 
 ast_nbright = 1500       # brightest no. of objects in the field to
@@ -226,8 +231,7 @@ ast_filter = 'r'         # magnitude column to sort in brightness
 # threshold can be adjusted in the configuration file (see sex_cfg
 # further below)
 force_phot_gaia = True
-gaia_cat = ('{}/CalFiles/GaiaDR3_all_HP4_highPM.fits'
-            .format(os.environ['ZOGYHOME']))
+gaia_cat = '{}/GaiaDR3_all_HP4_highPM.fits'.format(cal_dir)
 gaia_epoch = 2016.0
 
 
@@ -289,12 +293,20 @@ ext_coeff = {'ML1': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 # with the stars' magnitudes converted to the same filter(s) as the
 # observations (in this case the MeerLICHT/BlackGEM filter set):
 # this is now the same as the astrometric catalog: [cal_cat] defined above
-phot_ncal_max = 100 # max no. of calibration stars used for a given field
-phot_ncal_min = 10  # min no. of stars below which filter requirements are dropped
+
+
 # default zeropoints used if no photometric calibration catalog is
 # provided or a particular field does not contain any calibration stars
 zp_default = {'ML1': {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4},
               'BG':  {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4}}
+
+# for ML/BG only:
+# apply calibration per channel separately
+MLBG_phot_apply_chanzp = True
+# minimum number of non-saturated stars required per channel; if less
+# stars are available (irrespective of their brightness), the channel
+# is calibrated using the image zeropoint
+MLBG_phot_ncal_min_chan = 15
 
 
 #===============================================================================
