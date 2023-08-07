@@ -80,7 +80,6 @@ ML_calc_prob = True
 ML_version = '2'
 # list of ML_models, where the model used is determined by the first
 # character of [ML_version]: ML_model = ML_models[int(ML_version[0]) - 1]
-caldir =
 ML_models = ['{}/meerCRAB_model/NET3_threshold_9_NRD'
              .format(os.environ['MEERCRABHOME']),
              '{}/model270123.h5'.format(cal_dir)]
