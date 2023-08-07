@@ -1,7 +1,7 @@
 import os
 
-# path to folder with calibration files
-cal_dir = os.environ['ZOGY_CALDIR']
+# folder with calibration files
+cal_dir = '{}/CalFiles'.format(os.environ['DATAHOME'])
 
 #===============================================================================
 # ZOGY
