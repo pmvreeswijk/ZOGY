@@ -6777,7 +6777,11 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
     sky = result.params['sky'].value
     chi2 = result.chisqr
     chi2red = result.redchi
-    chi2_inner = np.sum(fcn2min(result.params, P, D, D_err, mask_inner, diff)**2)
+    if np.sum(mask_inner) != 0:
+        chi2_inner = np.sum(fcn2min(result.params, P, D, D_err, mask_inner,
+                                    diff)**2)
+    else:
+        chi2_inner = 0
 
 
     # in case fit did not succeed, stderrs will be None
@@ -6789,7 +6793,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
         # also set flux and chi2 to zero as it will not be reliable
         fluxerr = 0
         fluxerr_psf = 0
-        chi2red_inner = 0
+        chi2_inner = 0
 
 
     # reduced chi2_inner
@@ -6798,6 +6802,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
         chi2red_inner = chi2_inner / denom
     else:
         chi2red_inner = chi2_inner
+
 
     if show:
 
@@ -7650,8 +7655,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         zp = header['PC-ZP']
         zp_std = header['PC-ZPSTD']
 
-        log.warning ('skipping photometric calibration and creation of limiting '
-                     'magnitude image for {}'.format(base))
+        log.warning ('zeropoint present in header; skipping photometric '
+                     'calibration and creation of limiting magnitude image for '
+                     '{}'.format(base))
 
     else:
 
@@ -9168,10 +9174,9 @@ def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
     assumed to be in units of milli-arcseconds per year.  The input
     [obsdate] needs to be readable by astropy's time.Time, e.g. fits
     format yyyy-mm-ddThh:mm:ss.sss. That date is compared to the
-    catalog [epoch] - 2016 for Gaia DR3 - to calculate the total
-    offset due to the proper motion.
+    catalog [epoch] - 2016 for Gaia DR3 - to calculate the offset due
+    to the proper motion."""
 
-    """
 
     log.info('executing apply_gaia_pm ...')
 
@@ -9179,10 +9184,8 @@ def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
     # delta time in years between [obsdate] and epoch
     dtime_yr = Time(obsdate).decimalyear - epoch
 
+
     # convert table columns to numpy arrays
-    #ra = table_gaia[ra_col].value
-    #dec = table_gaia[dec_col].value
-    #coords_in = SkyCoord(ra*u.deg, dec*u.deg, frame='icrs')
     coords_in = SkyCoord(table_gaia[ra_col].value * u.deg,
                          table_gaia[dec_col].value * u.deg, frame='icrs')
 
@@ -9190,6 +9193,7 @@ def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
     # offset due to proper motion in arcseconds
     offset_ra = 1e-3 * table_gaia[pmra_col].value * dtime_yr
     offset_dec = 1e-3 * table_gaia[pmdec_col].value * dtime_yr
+
 
     # use astropy's SkyCoord.spherical_offsets_by method to calculate
     # coordinates corrected for offset due to proper motion
@@ -9215,7 +9219,7 @@ def apply_gaia_pm (table_gaia, obsdate, epoch=2016.0, return_table=False,
     else:
 
         # return the RA and DEC arrays
-        return coords_out.ra, coords_out.dec
+        return np.array(coords_out.ra), np.array(coords_out.dec)
 
 
 ################################################################################
@@ -12527,13 +12531,19 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     p = result.params.valuesdict()
     chi2red = result.redchi
 
+    # chi2 within mask_inner
+    if np.sum(mask_inner) != 0:
+        chi2_inner = np.sum(moffat2min(result.params, image, xx, yy, fit_gauss,
+                                       image_err, mask_inner)**2)
+    else:
+        chi2_inner = 0
+
 
     if fit_gauss:
         sigma1, sigma2, theta, switched = switch(p['sigma1'], p['sigma2'],
                                                  p['theta'])
         fwhm_max = sigma2fwhm(sigma1)
         fwhm_min = sigma2fwhm(sigma2)
-
     else:
         beta = p['beta']
         alpha1, alpha2, theta, switched = switch(p['alpha1'], p['alpha2'],
@@ -12548,7 +12558,6 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     amplitude = p['amplitude']
     background = p['background']
     background_err = result.params['background'].stderr
-
     fwhm_ave = (fwhm_min+fwhm_max)/2
 
     x0 = p['x0']
@@ -12562,12 +12571,10 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     if y0err is None:
         y0err = 0
 
-
-    if np.sum(mask_inner) != 0:
-        chi2_inner = np.sum(moffat2min(result.params, image, xx, yy, fit_gauss,
-                                       image_err, mask_inner)**2)
-    else:
+    # in that case, also set chi2_inner to zero
+    if x0err is None or y0err is None:
         chi2_inner = 0
+
 
     # reduced chi2_inner
     denom = max(1, (np.sum(mask_inner) - result.nvarys))
