@@ -1,7 +1,15 @@
 import os
 
-# folder with calibration files
-cal_dir = '{}/CalFiles'.format(os.environ['DATAHOME'])
+# folder with calibration files such as the real/bogus machine
+# learning model and (Gaia) photometric calibration and forced
+# photometry input catalogs referenced further down below; use
+# environment variable ZOGY_CALDIR if that is defined
+cal_dir = os.environ.get('ZOGY_CALDIR')
+if cal_dir is None:
+    # use the following in case CAL_DIR environment variable is not
+    # defined
+    cal_dir = '{}/CalFiles'.format(os.environ['HOME'])
+
 
 #===============================================================================
 # ZOGY
@@ -26,6 +34,11 @@ dxdy_local = False       # determine dx,dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required Scorr significance for transient detection
 chi2_max = 10            # maximum reduced chi2 in PSF/Gauss fit to D to filter
                          # transients; float('inf') for infinity
+chi2_snr_limit = 50      # transient signal-to-noise ratio limit above
+                         # which the reduced chi2 cut is not applied
+                         # (to avoid very bright targets possibly
+                         # being falsely discarded based on a poor fit)
+
 
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
@@ -184,8 +197,9 @@ skip_wcs = False         # skip Astrometry.net step if image already
                          # contains a reliable WCS solution
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
-# Astrometry.net configuration file
-astronet_config = '/etc/astrometry.cfg'
+# Astrometry.net configuration file that also defines the location of
+# the index files
+astronet_config = '{}/astrometry/astrometry.cfg'.format(cal_dir)
 # only search in Astrometry.net index files within this radius of the
 # header RA and DEC [deg]
 astronet_radius = 30.
@@ -197,7 +211,7 @@ pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
 #cal_cat = ('{}/CalFiles/ML_calcat_kur_allsky_ext1deg_20181115.fits'
 #           .format(os.environ['ZOGYHOME']))
 #cal_epoch = 2015.5
-# upcoming new catalog
+# new catalog based on DR3
 cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine11.fits'
            .format(cal_dir))
 cal_epoch = 2016.0
@@ -229,7 +243,7 @@ ast_filter = 'r'         # magnitude column to sort in brightness
 # the significant sources detected by Source Extractor, where the
 # threshold can be adjusted in the configuration file (see sex_cfg
 # further below)
-force_phot_gaia = True
+force_phot_gaia = {'ML1': False, 'BG': True}
 gaia_cat = '{}/GaiaDR3_all_HP4_highPM.fits'.format(cal_dir)
 gaia_epoch = 2016.0
 
@@ -332,7 +346,7 @@ mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
 dir_numpy = 'NumpyFiles'
 
 # switch to keep intermediate/temporary files
-keep_tmp = True
+keep_tmp = False
 
 # switch on/off different functions
 redo_new = False         # execute SExtractor, astrometry.net, PSFEx, optimal flux
