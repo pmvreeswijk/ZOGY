@@ -29,12 +29,11 @@ logFormatter = logging.Formatter(logfmt, datefmt)
 logging.Formatter.converter = time.gmtime #convert time in logger to UTC
 log = logging.getLogger()
 
-
-# setting environment variable OMP_NUM_THREADS to number of threads;
-# needs to be done before numpy is imported
-cpus_per_task = os.environ.get('SLURM_CPUS_PER_TASK')
-if cpus_per_task is not None:
-    os.environ['OMP_NUM_THREADS'] = str(cpus_per_task)
+# setting environment variable OMP_NUM_THREADS to number of threads,
+# use value from environment variable SLURM_CPUS_PER_TASK if it is
+# defined, otherwise set to 1; needs to be done before numpy is
+# imported
+os.environ['OMP_NUM_THREADS'] = str(os.environ.get('SLURM_CPUS_PER_TASK', 1))
 
 # to avoid tensorflow info and warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -117,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.2.1'
+__version__ = '1.2.2'
 
 
 ################################################################################
@@ -195,9 +194,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
     # if input [nthreads] is not set, use the value of environment
-    # variable 'OMP_NUM_THREADS', otherwise set it to 1
+    # variable 'OMP_NUM_THREADS' if that is present, otherwise set it
+    # to 1
     if nthreads is None:
-        nthreads = int(os.environ['OMP_NUM_THREADS'])
+        nthreads = int(os.environ.get('OMP_NUM_THREADS', 1))
 
     log.info ('nthreads:        {}'.format(nthreads))
 
@@ -3644,7 +3644,10 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     # filter out transient candidates with high chi2 and non-finite values
     chi2_max = get_par(set_zogy.chi2_max,tel)
-    mask_keep = (table_trans['CHI2_PSF_D'] <= chi2_max)
+    chi2_snr_limit = get_par(set_zogy.chi2_snr_limit,tel)
+    mask_keep = ((table_trans['CHI2_PSF_D'] <= chi2_max) |
+                 (np.abs(table_trans['SNR_ZOGY']) >= chi2_snr_limit))
+
 
     row_numbers = np.arange(len(table_trans))+1
     # discard rows where fit values are infinite or NaN
@@ -3713,7 +3716,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     # filter out transient candidates with high chi2 values
-    mask_keep = (table_trans['CHI2_GAUSS_D'] <= chi2_max)
+    mask_keep = ((table_trans['CHI2_GAUSS_D'] <= chi2_max) |
+                 (np.abs(table_trans['SNR_ZOGY']) >= chi2_snr_limit))
+
     # discard rows where fit values are infinite or NaN
     for col in colnames:
         mask_finite = np.isfinite(table_trans[col])
