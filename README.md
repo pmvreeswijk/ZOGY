@@ -5,7 +5,7 @@ This module accepts a new and a reference fits image, runs SExtractor on them, f
 
 It makes grateful use of the following programs:
 
-- Astrometry.net (in particular "solve-field" and index files): http://astrometry.net 
+- Astrometry.net (in particular "solve-field" and index files): http://astrometry.net
 - SExtractor: http://www.astromatic.net/software/sextractor
 - SWarp: http://www.astromatic.net/software/swarp
 - PSFex: http://www.astromatic.net/software/psfex
@@ -14,9 +14,7 @@ It makes grateful use of the following programs:
 - pyfftw to speed up the many FFTs performed
 - the other modules imported at the top (e.g. astropy, matplotlib, etc.)
 
-In InstallScripts you will find bash scripts to help with the full installation of ZOGY on Ubuntu and macOS; please read through them before running them to ensure they do not interfere with your current installation.
-
-Warning: this module is still being developed and has so far been tested on KMTNet and MeerLICHT images. It is designed specifically to be included in the MeerLICHT and BlackGEM pipelines, but we hope that it will be useful to apply to images of other telescopes as well.
+Warning: this module is written specifically to be included in the MeerLICHT and BlackGEM pipelines, but we hope that it will be useful to apply to images of other telescopes as well.
 
 
 Suggested steps to get started:
@@ -40,17 +38,17 @@ Suggested steps to get started:
     - run it on a "new.fits" and "ref.fits" using the default MeerLICHT settings:
 
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
-    
+
 
     - instead of MeerLICHT, use the dictionary keys corresponding to "my_tel" defined in the settings file:
-    
+
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --telescope my_tel
-      
+
 
     - instead of the default settings file (set_zogy.py), use a copy of it that was adapted to your images
-      (depending on whether copy contains dictionaries for some parameters or not, the telescope input 
+      (depending on whether copy contains dictionaries for some parameters or not, the telescope input
        parameter should be provided or not):
-    
+
     python [some path]/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
 
 
