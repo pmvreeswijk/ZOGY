@@ -35,9 +35,6 @@ log = logging.getLogger()
 # imported
 os.environ['OMP_NUM_THREADS'] = str(os.environ.get('SLURM_CPUS_PER_TASK', 1))
 
-# to avoid tensorflow info and warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
 import numpy as np
 from numpy.polynomial.polynomial import polyvander2d, polygrid2d, polyval2d
 
@@ -109,6 +106,9 @@ import healpy as hp
 
 # tensorflow
 import tensorflow as tf
+# to avoid tensorflow info and warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 # in case google cloud is being used
 from google.cloud import storage
