@@ -1,13 +1,6 @@
 import os
 import argparse
 import re
-from datetime import datetime
-from dateutil.tz import gettz
-import itertools
-from random import choice
-from string import ascii_uppercase
-import glob
-import sys
 
 # set up log
 import logging
@@ -39,7 +32,7 @@ from fitsio import FITS
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '0.9.6'
+__version__ = '0.9.7'
 
 
 ################################################################################
@@ -521,11 +514,11 @@ def remove_empty (list_in):
 
 def add_drop_fz (filename):
 
-    if os.path.exists(filename):
+    if zogy.isfile(filename):
         return filename
-    elif os.path.exists('{}.fz'.format(filename)):
+    elif zogy.isfile('{}.fz'.format(filename)):
         return '{}.fz'.format(filename)
-    elif os.path.exists(filename.split('.fz')[0]):
+    elif zogy.isfile(filename.split('.fz')[0]):
         return filename.split('.fz')[0]
     else:
         #return None
@@ -584,11 +577,11 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     fits_trans = '{}_trans.fits'.format(basename)
     # try to read transient catalog header, as it is more complete
     # than the full-source catalog header
-    if os.path.exists(fits_trans):
+    if zogy.isfile(fits_trans):
         fits2read = fits_trans
-    elif os.path.exists(fits_cat):
+    elif zogy.isfile(fits_cat):
         fits2read = fits_cat
-    elif os.path.exists(fits_red):
+    elif zogy.isfile(fits_red):
         fits2read = fits_red
     else:
         log.warning ('reduced image, full-source and transient catalog all '
@@ -835,7 +828,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
     # check if required images/catalogs are available
     for fn in list2check:
-        if fn is None or not os.path.exists (fn):
+        if fn is None or not zogy.isfile (fn):
             log.warning ('{} not found; skipping extraction of {} magnitudes '
                          'for {}'.format(fn, label, basename))
             return table
@@ -943,6 +936,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     exptime, filt, zp, airmass, ext_coeff = get_keys (
         header, table['RA_IN'], table['DEC_IN'], tel)
 
+
+    # if zogy.MLBG_phot_apply_chanzp is True, replace [zp]
+    # with array of zeropoints, one for each object; same for
+    # [zp_std]
+    if new and zogy.get_par(set_zogy.MLBG_phot_apply_chanzp,tel):
+        zp_chan = [header['PC-ZP{}'.format(i+1)] for i in range(16)]
+        zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
+
+
     if False:
         log.info ('exptime:   {}'.format(exptime))
         log.info ('filt:      {}'.format(filt))
@@ -960,7 +962,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # object mask - not always available, so first check if it
         # exists
-        if fits_objmask is not None and os.path.exists(fits_objmask):
+        if fits_objmask is not None and zogy.isfile(fits_objmask):
             objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
 
         else:
@@ -976,7 +978,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # corresponding mask may not be available, so first check if
         # it exists
-        if fits_mask is not None and os.path.exists(fits_mask):
+        if fits_mask is not None and zogy.isfile(fits_mask):
             log.info ('fits_mask used: {}'.format(fits_mask))
             data_mask = zogy.read_hdulist (fits_mask)
             # mask can be read using fitsio.FITS, but only little bit
@@ -1007,6 +1009,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             bkg_radii = None
 
 
+        # infer bkg_std at xcoords,ycoords; needed as input to apflux
+        # in case bkg_std cannot be determined from background annulus
+        bkg_std_coords = data_bkg_std[y_indices, x_indices]
+        #log.info ('xcoords[0:10]: {}'.format(xcoords[0:10]))
+        #log.info ('ycoords[0:10]: {}'.format(ycoords[0:10]))
+        #log.info ('bkg_std_coords[0:10]: {}'.format(bkg_std_coords[0:10]))
+
+
         try:
             # determine aperture fluxes at pixel coordinates
             if ncpus is None:
@@ -1019,7 +1029,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_aps, fluxerr_aps, local_bkg = zogy.get_apflux (
                     xcoords, ycoords, data, data_mask, fwhm, objmask=objmask,
                     apphot_radii=apphot_radii, bkg_radii=bkg_radii,
-                    set_zogy=set_zogy, nthreads=1)
+                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, nthreads=1)
 
             else:
                 # submit to [zogy.get_apflux] with [ncpu] threads
@@ -1032,7 +1042,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_aps, fluxerr_aps, local_bkg = zogy.get_apflux (
                     xcoords, ycoords, data, data_mask, fwhm, objmask=objmask,
                     apphot_radii=apphot_radii, bkg_radii=bkg_radii,
-                    set_zogy=set_zogy, nthreads=ncpus)
+                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy,
+                    nthreads=ncpus)
+
 
         except Exception as e:
             log.error ('exception was raised while executing '
@@ -1264,7 +1276,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 fn = fits_dict[key]
 
                 # check if file exists
-                if os.path.exists(fn):
+                if zogy.isfile(fn):
                     # read data using fitsio.FITS
                     data = FITS(fn)[-1]
                     table[key_tn] = get_thumbnail (
@@ -1329,7 +1341,7 @@ def get_limmags (fits_limmag, y_indices, x_indices, header, nsigma,
 
 
     # read limiting magnitude at pixel coordinates
-    if os.path.exists(fits_limmag):
+    if zogy.isfile(fits_limmag):
 
         # infer limiting magnitudes
         limmags = get_fitsio_values (fits_limmag, y_indices, x_indices)
@@ -1352,6 +1364,26 @@ def get_limmags (fits_limmag, y_indices, x_indices, header, nsigma,
 
 
     return limmags
+
+
+################################################################################
+
+def get_fitsio_values (filename, y_indices=None, x_indices=None):
+
+    # read data using fitsio.FITS
+    data = FITS(filename)[-1]
+
+    # infer data values at indices
+    if y_indices is None or x_indices is None:
+        values = data[:,:]
+    else:
+        nvalues = len(y_indices)
+        values = np.zeros(nvalues)
+        for i in range(nvalues):
+            values[i] = data[y_indices[i]:y_indices[i]+1,
+                             x_indices[i]:x_indices[i]+1]
+
+    return values
 
 
 ################################################################################
@@ -1392,7 +1424,7 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
 
     # background STD
     fits_bkg_std = '{}_bkg_std.fits.fz'.format(basename)
-    if os.path.exists(fits_bkg_std):
+    if zogy.isfile(fits_bkg_std):
         data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
         # only little bit faster with fitsio.FITS
         #data_bkg_std = FITS(fits_bkg_std)[-1][:,:]
@@ -1431,26 +1463,6 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
 
 
     return data_bkg_std
-
-
-################################################################################
-
-def get_fitsio_values (filename, y_indices=None, x_indices=None):
-
-    # read data using fitsio.FITS
-    data = FITS(filename)[-1]
-
-    # infer data values at indices
-    if y_indices is None or x_indices is None:
-        values = data[:,:]
-    else:
-        nvalues = len(y_indices)
-        values = np.zeros(nvalues)
-        for i in range(nvalues):
-            values[i] = data[y_indices[i]:y_indices[i]+1,
-                             x_indices[i]:x_indices[i]+1]
-
-    return values
 
 
 ################################################################################
@@ -1748,7 +1760,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Perform (transient) forced '
                                      'photometry on MeerLICHT/BlackGEM data')
-
 
     parser.add_argument('radecs', type=str,
                         help='comma-separated list of RA,DEC coordinates '
@@ -2298,7 +2309,7 @@ if __name__ == "__main__":
 
 
     # if [radecs_cntr] is not defined yet because the default fits
-    # header was not used as args.filenames,
+    # header was not used as args.filenames, exit
     if radecs_cntr is None:
         log.error ('radecs_cntr is None; exiting')
         raise SystemExit
