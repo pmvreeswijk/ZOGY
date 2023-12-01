@@ -9,7 +9,8 @@ setup(
     python_requires='>=3.6',
     license='MIT',
     packages=find_packages(),
-    install_requires=['numpy', 'astropy', 'matplotlib', 'scipy', 'pyfftw',
-                      'lmfit', 'sip_tpv', 'scikit-image', 'healpy', 'photutils',
-                      'tensorflow==2.13', 'fitsio', 'fsspec', 'gcsfs']
+    install_requires=['numpy', 'astropy==5.3.4', 'matplotlib', 'scipy',
+                      'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
+                      'photutils', 'tensorflow==2.13', 'fitsio',
+                      'fsspec', 'gcsfs']
 )
