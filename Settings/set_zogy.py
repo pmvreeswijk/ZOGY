@@ -3,11 +3,10 @@ import os
 # folder with calibration files such as the real/bogus machine
 # learning model and (Gaia) photometric calibration and forced
 # photometry input catalogs referenced further down below; use
-# environment variable ZOGY_CALDIR if that is defined
-cal_dir = os.environ.get('ZOGY_CALDIR')
+# environment variable MLBG_CALDIR if that is defined
+cal_dir = os.environ.get('MLBG_CALDIR')
 if cal_dir is None:
-    # use the following in case CAL_DIR environment variable is not
-    # defined
+    # in case MLBG_CALDIR environment variable is not set, use:
     cal_dir = '{}/CalFiles'.format(os.environ['HOME'])
 
 
@@ -293,7 +292,7 @@ obs_lat = {'ML1': -32.3799, 'BG': -29.2575}
 # telescope longitude in degrees (East)
 obs_lon = {'ML1': 20.8112, 'BG': -70.7380}
 # telescope height in meters above sealevel
-obs_height = {'ML1': 1802, 'BG': 2348}
+obs_height = {'ML1': 1802, 'BG': 2383}
 # observatory time zone (see /usr/share/zoneinfo); BlackGEM: 'America/Santiago'
 obs_timezone = {'ML1': 'Africa/Johannesburg', 'BG': 'America/Santiago'}
 # these [ext_coeff] are mean extinction estimates for Sutherland in
