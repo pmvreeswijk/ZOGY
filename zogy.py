@@ -8808,6 +8808,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 plt.close()
 
 
+
         # for MeerLICHT and BlackGEM only
         if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
 
@@ -8820,9 +8821,11 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 zp_type='channels')
 
 
-            # replace channels points with zero values (due to them
-            # having less than ncal_use_chan stars available) with the
-            # image zp
+            # replace channels points that have zero values (due to
+            # them having less than ncal_use_chan stars available)
+            # with the image zp; N.B.: the number of stars actually
+            # used, denoted by ncal_chan, can be a bit less than the
+            # number available due to sigma clipping in calc_zp
             mask_zero = (zp_chan == 0)
             zp_chan[mask_zero] = zp
             zp_std_chan[mask_zero] = zp_std
