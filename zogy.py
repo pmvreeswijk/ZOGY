@@ -18,6 +18,13 @@ import gc
 import numbers
 import psutil
 
+
+import multiprocessing as mp
+# define mp start method through context; this same method is used in
+# blackbox, buildref and force_phot
+mp_ctx = mp.get_context('spawn')
+
+
 # set up log
 import logging
 import time
@@ -70,10 +77,6 @@ from skimage.util.shape import view_as_windows
 #from skimage.util.shape import view_as_blocks
 
 
-from multiprocessing import Pool, set_start_method
-#set_start_method('spawn')
-
-
 #import scipy.fft as fft
 #import numpy.fft as fft
 # these are important to speed up the FFTs
@@ -98,9 +101,6 @@ matplotlib.use('Agg')
 # needed for Zafiirah's machine learning package MeerCRAB
 from meerCRAB_code import prediction_phase
 
-# import forced photometry
-import force_phot
-
 # healpy
 import healpy as hp
 
@@ -116,7 +116,23 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.2.2'
+__version__ = '1.2.3'
+
+
+################################################################################
+
+# functions to let blackbox define multiprocessing instances of
+# Lock(), Queue() and Pool() while using mp start method defined at
+# top of this module
+
+def get_mp_Lock():
+    return mp_ctx.Lock()
+
+def get_mp_Queue():
+    return mp_ctx.Queue()
+
+def get_mp_Pool(nproc=1):
+    return mp_ctx.Pool(nproc)
 
 
 ################################################################################
@@ -2358,6 +2374,7 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
             fits_file_read = fits_file.replace('.gz','')
         else:
             raise FileNotFoundError ('file not found: {}'.format(fits_file))
+
 
 
     with fits.open(fits_file_read, memmap=memmap) as hdulist:
@@ -5404,7 +5421,7 @@ def pool_func (func, itemlist, *args, nproc=1):
         # list to record the results
         results = []
         # create pool of workers
-        pool = Pool(nproc)
+        pool = mp_ctx.Pool(nproc)
         # loop items in itemlist
         for item in itemlist:
             args_tmp = [item]
@@ -5431,9 +5448,37 @@ def pool_func (func, itemlist, *args, nproc=1):
 
 ################################################################################
 
+def pool_func_lists (func, list_of_imagelists, *args, nproc=1):
+
+    try:
+        results = []
+        pool = mp_ctx.Pool(nproc)
+        for nlist, filelist in enumerate(list_of_imagelists):
+            args_temp = [filelist]
+            for arg in args:
+                args_temp.append(arg[nlist])
+
+            results.append(pool.apply_async(func, args_temp))
+
+        pool.close()
+        pool.join()
+        results = [r.get() for r in results]
+        #    log.info ('result from pool.apply_async: {}'.format(results))
+        return results
+
+    except Exception as e:
+        #log.exception (traceback.format_exc())
+        log.exception ('exception was raised during [pool.apply_async({})]: '
+                       '{}'.format(func, e))
+
+        raise RuntimeError
+
+
+################################################################################
+
 def get_apflux (xcoords, ycoords, data, data_mask, fwhm, objmask=None,
                 apphot_radii=None, bkg_radii=None, bkg_std_coords=None,
-                set_zogy=None, nthreads=1):
+                set_zogy=None, tel=None, nthreads=1):
 
 
     """function to infer total local-background subtracted aperture
@@ -5483,7 +5528,10 @@ def get_apflux (xcoords, ycoords, data, data_mask, fwhm, objmask=None,
     if apphot_radii is not None:
         apphot_radii = np.array(apphot_radii) * fwhm
 
+
     if bkg_radii is not None:
+        # bkg_radii could be list of strings, so convert to numpy
+        # float array
         bkg_radii = np.array(bkg_radii) * fwhm
 
 
@@ -7722,8 +7770,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         lat = get_par(set_zogy.obs_lat,tel)
         lon = get_par(set_zogy.obs_lon,tel)
         height = get_par(set_zogy.obs_height,tel)
-        airmass_center = get_airmass (ra_center, dec_center, obsdate,
-                                      lat, lon, height)
+        airmass_center, alt_center, az_center = get_airmass (
+            ra_center, dec_center, obsdate, lat, lon, height, get_altaz=True)
+
         # in case of reference image and header airmass==1 (set to
         # unity in refbuild module used for ML/BG) then force
         # airmasses calculated above to be unity.  If the reference
@@ -7736,6 +7785,34 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         log.info('airmass at image center: {:.3f}'.format(airmass_center))
         header['AIRMASSC'] = (airmass_center, 'airmass at image center')
+
+
+        # also add altitude and azimuth corrsponding to the image center
+        header['ALT-CNTR'] = (alt_center, '[deg] altitude at image center')
+        header['AZ-CNTR'] = (az_center, '[deg] azimuth at image center')
+
+
+        # using image center and location, calculate the barycentric
+        # julian date corresponding to it; see:
+        # https://docs.astropy.org/en/stable/time/index.html#barycentric-and-heliocentric-light-travel-time-corrections
+        if 'MJD-OBS' in header:
+            mjd_obs = header['MJD-OBS']
+        elif 'DATE-OBS' in header:
+            mjd_obs = Time(header['DATE-OBS'], format='isot').mjd
+        else:
+            log.error ('neither MJD-OBS nor DATE-OBS keyword found in header; '
+                       'unable to determine Barycentric JD for {}'
+                       .format(input_fits))
+
+        if 'mjd_obs' in locals():
+            location = EarthLocation(lat=lat, lon=lon, height=height)
+            time_obs = Time(mjd_obs, format='mjd', scale='utc',
+                            location=location)
+            coords_center = SkyCoord(ra_center*u.deg, dec_center*u.deg)
+            ltt_bary = time_obs.light_travel_time(coords_center)
+            bjd_obs = (time_obs.tdb + ltt_bary).mjd
+            header['BJD-OBS'] = (bjd_obs, '[d] Barycentric JD (based on '
+                                 'DATE-OBS, RA/DEC-CNTR)')
 
 
 
@@ -8620,7 +8697,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         bkg_radii = get_par(set_zogy.bkg_radii,tel)
         __, __, local_bkg = get_apflux (
             xpos, ypos, data_wcs, data_mask, fwhm, objmask=objmask,
-            bkg_radii=bkg_radii, set_zogy=set_zogy, nthreads=1)
+            bkg_radii=bkg_radii, set_zogy=set_zogy, tel=tel, nthreads=1)
 
 
 
@@ -8876,14 +8953,6 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
     # end of block: if ncalstars > 0
 
-    # add a few additional header keywords
-    # now obsolete with the weighted zeropoints
-    if False:
-        header['PC-NCMAX'] = (get_par(set_zogy.phot_ncal_use,tel),
-                              'input max. number of photcal stars to use')
-        header['PC-NCMIN'] = (get_par(set_zogy.phot_ncal_min,tel),
-                              'input min. number of stars to apply filter '
-                              'cut')
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='phot_calibrate')
@@ -8923,6 +8992,11 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     proper motion is applied.
 
     """
+
+    # import forced photometry; done here and not at the top to try to
+    # avoid cyclical imports as force_phot module contains import zogy
+    import force_phot
+
 
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -13695,7 +13769,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
            '--width', str(width),
            '--height', str(height),
            #'--keep-xylist', sexcat,
-           # ignore existing WCS headers in FITS input images
+           # ignore existing WCS headers in fits input images
            #'--no-verify',
            #'--verbose',
            #'--verbose',
@@ -14273,8 +14347,8 @@ def get_matches_pix (x1, y1, x2, y2, dist_max=None, return_offsets=True):
 
 def ldac2fits_alt (cat_ldac, cat_fits):
 
-    """This function converts the LDAC binary FITS table from SExtractor
-    to a common binary FITS table (that can be read by Astrometry.net).
+    """This function converts the LDAC binary fits table from SExtractor
+    to a common binary fits table (that can be read by Astrometry.net).
     It is taking up more memory for a very large LDAC file:
 
       memory use [GB]: rss=1.607, maxrss=1.735, vms=12.605 in ldac2fits
@@ -14314,8 +14388,8 @@ def ldac2fits_alt (cat_ldac, cat_fits):
 
 def ldac2fits (cat_ldac, cat_fits):
 
-    """This function converts the LDAC binary FITS table from SExtractor
-    to a common binary FITS table (that can be read by Astrometry.net) """
+    """This function converts the LDAC binary fits table from SExtractor
+    to a common binary fits table (that can be read by Astrometry.net) """
 
     if get_par(set_zogy.timing,tel):
         t = time.time()
