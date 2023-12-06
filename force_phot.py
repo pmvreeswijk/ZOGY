@@ -1,6 +1,12 @@
 import os
 import argparse
 import re
+import traceback
+
+
+#import multiprocessing as mp
+#mp_ctx = mp.get_context('spawn')
+
 
 # set up log
 import logging
@@ -13,10 +19,6 @@ logFormatter = logging.Formatter(logfmt, datefmt)
 logging.Formatter.converter = time.gmtime #convert time in logger to UTC
 log = logging.getLogger()
 
-import zogy
-import set_zogy
-set_zogy.verbose=False
-
 import numpy as np
 
 import astropy.io.fits as fits
@@ -26,6 +28,10 @@ from astropy.time import Time
 from astropy import units as u
 from astropy.wcs import WCS
 from astropy.stats import SigmaClip
+
+import zogy
+import set_zogy
+set_zogy.verbose=False
 
 from fitsio import FITS
 
@@ -374,12 +380,17 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         table = get_rows (image_indices_list[0], *pars, ncpus=ncpus)
         table_list = [table]
 
-
     else:
-        # for multiple images, execute [get_rows] with pool_func, such
-        # that the different cpus process different images
-        table_list = zogy.pool_func (get_rows, image_indices_list, *pars,
-                                     nproc=ncpus)
+
+        if ncpus > 1:
+            # for multiple images, execute [get_rows] with pool_func, such
+            # that the different cpus process different images
+            table_list = zogy.pool_func (get_rows, image_indices_list, *pars,
+                                         nproc=ncpus)
+        else:
+            table_list = []
+            for image_indices in image_indices_list:
+                table_list.append(get_rows(image_indices, *pars))
 
 
     # remove None entries, e.g. due to coordinates off the field
@@ -593,7 +604,11 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     # read header
     try:
         log.info ('reading header of {}'.format(fits2read))
-        header = FITS(fits2read)[-1].read_header()
+        # fitsio
+        #header = FITS(fits2read)[-1].read_header()
+        # astropy
+        header = zogy.read_hdulist (fits2read, get_data=False, get_header=True,
+                                    memmap=True)
     except:
         log.exception ('trouble reading header of {}; skipping its extraction'
                        .format(fits2read))
@@ -612,6 +627,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
             table, obsdate, epoch=pm_epoch, return_table=True, ra_col='RA_IN',
             dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN',
             remove_pmcolumns=False)
+
 
 
     # need to define proper shapes for thumbnail columns; if
@@ -652,7 +668,6 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
                     table['TQC-FLAG'] = None
                     log.warning ('keyword TQC-FLAG not in header of {}'
                                  .format(basename))
-
 
 
 
@@ -786,6 +801,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 tel='ML1', ncpus=None):
 
 
+    # is google cloud being used?
+    google_cloud = (basename[0:5] == 'gs://')
+
+
     # label in logging corresponding to 'new', 'ref' and 'trans' imtypes
     label_dict = {'new': 'full-source', 'ref': 'reference', 'trans': 'transient'}
     label = label_dict[imtype]
@@ -841,7 +860,11 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         else:
             fits2read = fits_red
 
-        header = FITS(fits2read)[-1].read_header()
+        # fitsio
+        #header = FITS(fits2read)[-1].read_header()
+        # astropy
+        header = zogy.read_hdulist (fits2read, get_data=False, get_header=True)
+
 
     except:
         log.exception ('trouble reading header of {}; skipping extraction of {} '
@@ -853,9 +876,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
     # read FWHM from the header
     if 'S-FWHM' in header:
-        fwhm = header['PSF-FWHM']
-    elif 'PSF-FWHM' in header:
         fwhm = header['S-FWHM']
+    elif 'PSF-FWHM' in header:
+        fwhm = header['PSF-FWHM']
     else:
         fwhm = 5
         log.warning ('keywords S-FWHM nor PSF-FWHM present in the header '
@@ -864,7 +887,13 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
     # data_shape from header
     if ref:
-        data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
+        if 'ZNAXIS2' in header and 'ZNAXIS1' in header:
+            data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
+        elif 'NAXIS2' in header and 'NAXIS1' in header:
+            data_shape = (header['NAXIS2'], header['NAXIS1'])
+        else:
+            log.error ('not able to infer data shape from header of {}'
+                       .format(fits2read))
     else:
         data_shape = zogy.get_par(set_zogy.shape_new,tel)
 
@@ -941,7 +970,13 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     # with array of zeropoints, one for each object; same for
     # [zp_std]
     if new and zogy.get_par(set_zogy.MLBG_phot_apply_chanzp,tel):
-        zp_chan = [header['PC-ZP{}'.format(i+1)] for i in range(16)]
+        # even though MLBG_phot_apply_chanzp is True, channel
+        # zeropoints may not be available and moreover they could be
+        # zero; use image zp in those cases
+        zp_chan = [header['PC-ZP{}'.format(i+1)]
+                   if 'PC-ZP{}'.format(i+1) in header
+                   and header['PC-ZP{}'.format(i+1)] != 0
+                   else zp for i in range(16)]
         zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
 
 
@@ -1011,13 +1046,18 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # infer bkg_std at xcoords,ycoords; needed as input to apflux
         # in case bkg_std cannot be determined from background annulus
-        bkg_std_coords = data_bkg_std[y_indices, x_indices]
+        if len(y_indices)==1:
+            bkg_std_coords = np.array([data_bkg_std])
+        else:
+            bkg_std_coords = data_bkg_std[y_indices, x_indices]
+
         #log.info ('xcoords[0:10]: {}'.format(xcoords[0:10]))
         #log.info ('ycoords[0:10]: {}'.format(ycoords[0:10]))
         #log.info ('bkg_std_coords[0:10]: {}'.format(bkg_std_coords[0:10]))
 
 
         try:
+
             # determine aperture fluxes at pixel coordinates
             if ncpus is None:
                 # submit to [zogy.get_apflux] with single thread,
@@ -1029,7 +1069,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_aps, fluxerr_aps, local_bkg = zogy.get_apflux (
                     xcoords, ycoords, data, data_mask, fwhm, objmask=objmask,
                     apphot_radii=apphot_radii, bkg_radii=bkg_radii,
-                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, nthreads=1)
+                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, tel=tel,
+                    nthreads=1)
 
             else:
                 # submit to [zogy.get_apflux] with [ncpu] threads
@@ -1042,7 +1083,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_aps, fluxerr_aps, local_bkg = zogy.get_apflux (
                     xcoords, ycoords, data, data_mask, fwhm, objmask=objmask,
                     apphot_radii=apphot_radii, bkg_radii=bkg_radii,
-                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy,
+                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, tel=tel,
                     nthreads=ncpus)
 
 
@@ -1050,6 +1091,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             log.error ('exception was raised while executing '
                        '[zogy.get_apflux]; skipping extraction of {} '
                        'magnitudes for {}: {}'.format(label, basename, e))
+            log.error (traceback.format_exc())
             return table
 
 
@@ -1165,8 +1207,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
         # infer limiting magnitudes
-        limmags = get_limmags (fits_limmag, y_indices, x_indices, header, nsigma,
-                               nsigma_orig=5, label=label)
+        limmags = get_limmags (fits_limmag, google_cloud, y_indices, x_indices,
+                               header, nsigma, nsigma_orig=5, label=label)
 
 
         # calculate signal-to-noise ratio; applies to either the SNR
@@ -1210,15 +1252,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     else:
 
         # read flux values at xcoords, ycoords
-        Fpsf = get_fitsio_values (fits_Fpsf, y_indices, x_indices)
+        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices)
 
         # get transient limiting magnitude at xcoord, ycoord
         # and convert it back to Fpsferr
 
         # read limiting magnitude at pixel coordinates
         nsigma_trans_orig = 6
-        tlimmags = get_limmags (fits_tlimmag, y_indices, x_indices, header,
-                                nsigma, nsigma_orig=nsigma_trans_orig,
+        tlimmags = get_limmags (fits_tlimmag, google_cloud, y_indices, x_indices,
+                                header, nsigma, nsigma_orig=nsigma_trans_orig,
                                 label=label)
 
 
@@ -1232,7 +1274,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
         # read off transient S/N from Scorr image
-        snr_zogy = get_fitsio_values (fits_Scorr, y_indices, x_indices)
+        snr_zogy = get_pixel_values (fits_Scorr, google_cloud,
+                                     y_indices, x_indices)
 
 
         if zp is not None:
@@ -1277,8 +1320,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
                 # check if file exists
                 if zogy.isfile(fn):
-                    # read data using fitsio.FITS
-                    data = FITS(fn)[-1]
+
+                    if google_cloud:
+                        # read data using astropy
+                        data = zogy.read_hdulist(fn)
+                    else:
+                        # read data using fitsio.FITS
+                        data = FITS(fn)[-1]
+
                     table[key_tn] = get_thumbnail (
                         data, data_shape, xcoords, ycoords, size_tn, key_tn,
                         header, tel)
@@ -1336,15 +1385,16 @@ def get_thumbnail (data, data_shape, xcoords, ycoords, size_tn, key_tn, header,
 
 ################################################################################
 
-def get_limmags (fits_limmag, y_indices, x_indices, header, nsigma,
-                 nsigma_orig=5, label='full-source'):
+def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
+                 nsigma, nsigma_orig=5, label='full-source'):
 
 
     # read limiting magnitude at pixel coordinates
     if zogy.isfile(fits_limmag):
 
         # infer limiting magnitudes
-        limmags = get_fitsio_values (fits_limmag, y_indices, x_indices)
+        limmags = get_pixel_values (fits_limmag, google_cloud,
+                                    y_indices, x_indices)
 
         # convert limmag from number of sigma listed
         # in the image header to input [nsigma]
@@ -1368,20 +1418,38 @@ def get_limmags (fits_limmag, y_indices, x_indices, header, nsigma,
 
 ################################################################################
 
-def get_fitsio_values (filename, y_indices=None, x_indices=None):
+def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
 
-    # read data using fitsio.FITS
-    data = FITS(filename)[-1]
+    if google_cloud:
 
-    # infer data values at indices
-    if y_indices is None or x_indices is None:
-        values = data[:,:]
+        # use astropy.io.fits for google_cloud bucket files
+        data = zogy.read_hdulist(filename)
+
+        if y_indices is None or x_indices is None:
+            values = data
+        else:
+            values = data[y_indices, x_indices]
+
     else:
-        nvalues = len(y_indices)
-        values = np.zeros(nvalues)
-        for i in range(nvalues):
-            values[i] = data[y_indices[i]:y_indices[i]+1,
-                             x_indices[i]:x_indices[i]+1]
+
+        # use fitsio otherwise
+        data = FITS(filename)[-1]
+
+        # infer data values at indices
+        if y_indices is None or x_indices is None:
+            values = data[:,:]
+        else:
+            # fitsio data indices must be slices, so need to extract
+            # indices one by one instead of data[y_indices, x_indices]
+            nvalues = len(y_indices)
+            # determine dtype of data
+            dtype = data[y_indices[0]:y_indices[0]+1,
+                         x_indices[0]:x_indices[0]+1].dtype
+            values = np.zeros(nvalues, dtype=dtype)
+            for i in range(nvalues):
+                values[i] = data[y_indices[i]:y_indices[i]+1,
+                                 x_indices[i]:x_indices[i]+1][0][0]
+
 
     return values
 
@@ -1424,8 +1492,8 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
 
     # background STD
     fits_bkg_std = '{}_bkg_std.fits.fz'.format(basename)
-    if zogy.isfile(fits_bkg_std):
-        data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
+    if zogy.isfile (fits_bkg_std):
+        data_bkg_stdx = zogy.read_hdulist (fits_bkg_std, dtype='float32')
         # only little bit faster with fitsio.FITS
         #data_bkg_std = FITS(fits_bkg_std)[-1][:,:]
     else:
@@ -1564,7 +1632,7 @@ def index_images (indices, table_in, mjds_obs, dtime_max, basenames,
     if 'PMRA_IN' in table_in.colnames and 'PMDEC_IN' in table_in.colnames:
         pm_buffer = (30/3.6e6) * np.concatenate(
             [table_in['PMRA_IN'].value, table_in['PMDEC_IN'].value]).max()
-        log.info ('proper motion buffer: {:.2f} arcmin'.format(pm_buffer * 60))
+        log.info ('proper motion buffer: {:.1f} arcsec'.format(3600*pm_buffer))
         hfov_deg += pm_buffer
 
 
@@ -1667,7 +1735,12 @@ def get_headkeys (filenames):
         # read header
         #with fits.open('{}_hdr.fits'.format(basename)) as hdulist:
         #    header = hdulist[-1].header
-        header = FITS('{}_hdr.fits'.format(basename))[-1].read_header()
+        # fitsio
+        #header = FITS('{}_hdr.fits'.format(basename))[-1].read_header()
+        # astropy
+        header = zogy.read_hdulist ('{}_hdr.fits'.format(basename),
+                                    get_data=False, get_header=True)
+
 
 
         objects[nfile] = int(header['OBJECT'])
@@ -1998,7 +2071,7 @@ if __name__ == "__main__":
     # infer RAs and DECs to go through from [args.radecs]
     # ---------------------------------------------------
     mjds_in = None
-    if os.path.isfile(args.radecs):
+    if zogy.isfile (args.radecs):
 
         # if [args.radecs] is a file, read it into a table
         if args.radecs_file_format is not None:
@@ -2177,7 +2250,7 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     radecs_cntr = None
 
-    if os.path.isfile(args.filenames):
+    if zogy.isfile (args.filenames):
 
         # if the input is a single file, it could be a single image or
         # a fits table/file containing multiple files; to test between
@@ -2422,19 +2495,20 @@ if __name__ == "__main__":
     verify_lengths (keys2add, keys2add_dtypes)
 
 
-    # change input [apphot_radii] from string to numpy array
-    apphot_radii = args.apphot_radii
-    if apphot_radii is not None:
-        apphot_radii = apphot_radii.split(',')
+    # change input [apphot_radii] from string list of floats/ints
+    if args.apphot_radii is not None:
+        apphot_radii = [float(rad) if '.' in rad else int(rad)
+                        for rad in args.apphot_radii.split(',')]
         log.info ('apphot_radii: {}'.format(apphot_radii))
     else:
         # or from 'None' to None
         apphot_radii = None
 
-    # change input [bkg_radii] from string to numpy array
-    bkg_radii = args.bkg_radii
-    if bkg_radii is not None:
-        bkg_radii = bkg_radii.split(',')
+
+    # change input [bkg_radii] from string to list of floats/ints
+    if args.bkg_radii is not None:
+        bkg_radii = [float(rad) if '.' in rad else int(rad)
+                     for rad in args.bkg_radii.split(',')]
         log.info ('bkg_radii: {}'.format(bkg_radii))
     else:
         # or from 'None' to None
