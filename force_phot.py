@@ -351,6 +351,11 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         image_indices_list.append([k,v])
 
 
+    # for testing, limit the number of images
+    #ntest = 100
+    #image_indices_list = image_indices_list[:ntest]
+
+
     # if mask_list is not None, add the masks in the above list as a
     # third item, which will be unpacked correctly in [get_rows]
     # there must be a better way of doing this
@@ -615,18 +620,27 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         return [None]
 
 
-    # if proper motion need to be corrected for (if [pm_epoch] is not
-    # None and [table_in] columns PMRA_IN and PMDEC_IN exist),
-    # extract the image date of observation and apply the proper motion
-    # correction
-    if (pm_epoch is not None and 'PMRA_IN' in colnames and 'PMDEC_IN' in colnames
-        and 'DATE-OBS' in header):
+    if False:
 
-        obsdate = header['DATE-OBS']
-        table = zogy.apply_gaia_pm (
-            table, obsdate, epoch=pm_epoch, return_table=True, ra_col='RA_IN',
-            dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN',
-            remove_pmcolumns=False)
+        # this proper motion correction was moved to the function
+        # [infer_mags] to be able to do it correctly for the reference
+        # image also in case trans is True or fullsource is True; if
+        # done here, then proper motion is corrected for to the epoch
+        # of the reduced/transient image and that RA,DEC is then used
+        # to infer the x,y position on the reference image
+
+        # if proper motion need to be corrected for (if [pm_epoch] is
+        # not None and [table_in] columns PMRA_IN and PMDEC_IN exist),
+        # extract the image date of observation and apply the proper
+        # motion correction
+        if (pm_epoch is not None and 'PMRA_IN' in colnames and
+            'PMDEC_IN' in colnames and 'DATE-OBS' in header):
+
+            obsdate = header['DATE-OBS']
+            table = zogy.apply_gaia_pm (
+                table, obsdate, epoch=pm_epoch, return_table=True, ra_col='RA_IN',
+                dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN',
+                remove_pmcolumns=False)
 
 
 
@@ -677,9 +691,9 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer full-source magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            bkg_radii, include_fluxes, keys2add, add_keys,
-                            bkg_global, thumbnails, size_tn, imtype='new',
-                            tel=tel, ncpus=ncpus)
+                            bkg_radii, pm_epoch, include_fluxes, keys2add,
+                            add_keys, bkg_global, thumbnails, size_tn,
+                            imtype='new', tel=tel, ncpus=ncpus)
 
 
 
@@ -689,15 +703,16 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer transient magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            bkg_radii, include_fluxes, keys2add, add_keys,
-                            bkg_global, thumbnails, size_tn, imtype='trans',
-                            tel=tel, ncpus=ncpus)
+                            bkg_radii, pm_epoch, include_fluxes, keys2add,
+                            add_keys, bkg_global, thumbnails, size_tn,
+                            imtype='trans', tel=tel, ncpus=ncpus)
 
 
 
     # reference; determining optimal fluxes
     # -------------------------------------
     if ref:
+
 
         # infer path to ref folder from basename
         ref_dir = '{}/ref'.format(basename.split('/red/')[0])
@@ -715,9 +730,9 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer reference magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            bkg_radii, include_fluxes, keys2add, add_keys,
-                            bkg_global, thumbnails, size_tn, imtype='ref',
-                            tel=tel, ncpus=ncpus)
+                            bkg_radii, pm_epoch, include_fluxes, keys2add,
+                            add_keys, bkg_global, thumbnails, size_tn,
+                            imtype='ref', tel=tel, ncpus=ncpus)
 
 
         # for transients, add any potential source in the reference
@@ -796,7 +811,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 ################################################################################
 
 def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                bkg_radii, include_fluxes, keys2add, add_keys,
+                bkg_radii, pm_epoch, include_fluxes, keys2add, add_keys,
                 bkg_global, thumbnails, size_tn, imtype='new',
                 tel='ML1', ncpus=None):
 
@@ -900,14 +915,35 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     ysize, xsize = data_shape
 
 
+    # if proper motion need to be corrected for (if [pm_epoch] is not
+    # None and [table_in] columns PMRA_IN and PMDEC_IN exist), extract
+    # the image date of observation and apply the proper motion
+    # correction; N.B.: this needs to be done here so that it is
+    # correctly done also for the reference image, which has a
+    # different DATE-OBS
+    colnames = table.colnames
+    if (pm_epoch is not None and 'DATE-OBS' in header and
+        'PMRA_IN' in colnames and 'PMDEC_IN' in colnames):
+
+        obsdate = header['DATE-OBS']
+        ra, dec = zogy.apply_gaia_pm (
+            table, obsdate, epoch=pm_epoch, return_table=False, ra_col='RA_IN',
+            dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN',
+            remove_pmcolumns=False)
+
+    else:
+        ra = table['RA_IN'].value
+        dec = table['DEC_IN'].value
+
+
+
     # convert input RA/DEC from table to pixel coordinates; needs to
     # be done from table as it may shrink in size between different
     # calls to [infer_mags]
-    xcoords, ycoords = WCS(header).all_world2pix(table['RA_IN'],
-                                                 table['DEC_IN'], 1)
+    xcoords, ycoords = WCS(header).all_world2pix(ra, dec, 1)
 
 
-    # discard entries that were not finite or off the image NB; this
+    # discard entries that were not finite or off the image; NB: this
     # means that any source that is off the reduced image, but present
     # in the reference image will not appear in the reference part of
     # the output table. A way around this is to set both [fullsource]
@@ -1632,7 +1668,7 @@ def index_images (indices, table_in, mjds_obs, dtime_max, basenames,
     if 'PMRA_IN' in table_in.colnames and 'PMDEC_IN' in table_in.colnames:
         pm_buffer = (30/3.6e6) * np.concatenate(
             [table_in['PMRA_IN'].value, table_in['PMDEC_IN'].value]).max()
-        log.info ('proper motion buffer: {:.1f} arcsec'.format(3600*pm_buffer))
+        #log.info ('proper motion buffer: {:.1f} arcsec'.format(3600*pm_buffer))
         hfov_deg += pm_buffer
 
 
@@ -2560,21 +2596,17 @@ if __name__ == "__main__":
             table_out.add_column(dtime_days, name='DELTA_MJD',
                                  index=colnames.index('MJD-OBS')+1)
 
-            # if args.date_format is mjd, then can rename 'MJD_IN'
-            # back to the original name, unless the original name is
-            # the same as MJD-OBS - the MJD of the images
+            # if args.date_format is mjd, then rename 'MJD_IN' back to
+            # the original name, unless the original name is the same
+            # as MJD-OBS - the MJD of the images
             if args.date_format == 'mjd' and args.date_col != 'MJD-OBS':
                 table_out['MJD_IN'].name = args.date_col
 
 
         # rename proper motion columns if needed
-        if args.input_cols2copy is not None:
-            cols2copy = args.input_cols2copy.split(',')
-
-            if ('PMRA_IN' in colnames and 'PMDEC_IN' in colnames and
-                args.pmra_col in cols2copy and args.pmdec_col in cols2copy):
-                table_out['PMRA_IN'].name = args.pmra_col
-                table_out['PMDEC_IN'].name = args.pmdec_col
+        if 'PMRA_IN' in colnames and 'PMDEC_IN' in colnames:
+            table_out['PMRA_IN'].name = args.pmra_col
+            table_out['PMDEC_IN'].name = args.pmdec_col
 
 
         # order the output table by original row number
