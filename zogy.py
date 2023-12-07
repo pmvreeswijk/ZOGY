@@ -4982,7 +4982,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         psf_ima, __ = get_psf_ima (
             data_psf, xcoords[i], ycoords[i], psf_size,
             psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-            imtype=imtype, psf_clean_factor=psf_clean_factor)
+            imtype=imtype, psf_clean_factor=psf_clean_factor, tel=tel)
 
 
         if i % 10000 == 0:
@@ -5020,7 +5020,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
                 polscal2_ref, poldeg_ref, imtype='ref',
                 remap=True, header=header_ref, header_new=header_new,
-                psf_clean_factor=psf_clean_factor)
+                psf_clean_factor=psf_clean_factor, tel=tel)
 
 
             # [psf_ima_ref] needs to be rotated to the orientation of
@@ -5918,7 +5918,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     value_satcon = mask_value['saturated-connected']
 
 
-    log.info ('psf_size used in [get_psfoptflux]: {} pix for imtype: {}'
+    log.info ('psf_size used in [get_psfoptflux_mp]: {} pix for imtype: {}'
               .format(psf_size, imtype))
 
 
@@ -6071,7 +6071,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
         psf_ima, __ = get_psf_ima (
             data_psf, xcoords[i], ycoords[i], psf_size,
             psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-            imtype=imtype, psf_clean_factor=psf_clean_factor)
+            imtype=imtype, psf_clean_factor=psf_clean_factor, tel=tel)
 
 
         if i % 1000 == 0:
@@ -6111,7 +6111,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                 psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
                 polscal2_ref, poldeg_ref, imtype='ref',
                 psf_clean_factor=psf_clean_factor,
-                remap=True, header=header_ref, header_new=header_new)
+                remap=True, header=header_ref, header_new=header_new, tel=tel)
 
 
             # setting image standard deviations and flux ratios to
@@ -6507,7 +6507,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
 def get_psf_ima (data, xcoord, ycoord, psf_size, psf_samp, polzero1,
                  polscal1, polzero2, polscal2, poldeg, xshift=0, yshift=0,
                  imtype=None, remap=False, header=None, header_new=None,
-                 psf_clean_factor=0):
+                 psf_clean_factor=0, tel=None):
 
     """function to infer the PSF image with shape (psfsize, psfsize) at
     the original pixel scale at the input pixel coordinates (xcoord,
