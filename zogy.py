@@ -7463,7 +7463,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                dtype=data2remap.dtype.name,
                                value_edge=value_edge,
                                timing=get_par(set_zogy.timing,tel),
-                               nthreads=nthreads)
+                               nthreads=nthreads, tel=tel, set_zogy=set_zogy)
             data_remapped = read_hdulist (fits_out)
 
             return data_remapped
@@ -14429,7 +14429,8 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
               config=None, resample='Y', resampling_type='LANCZOS3',
               projection_err=0.001, mask=None, header_only='N',
               resample_suffix='_resamp.fits', resample_dir='.', dtype='float32',
-              value_edge=0, timing=True, nthreads=0, oversampling=0):
+              value_edge=0, timing=True, nthreads=0, oversampling=0, tel=None,
+              set_zogy=None):
 
     """Function that remaps [image_ref] onto the coordinate grid of
        [image_new] and saves the resulting image in [image_out] with
