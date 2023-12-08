@@ -7,7 +7,7 @@ import os
 cal_dir = os.environ.get('MLBG_CALDIR')
 if cal_dir is None:
     # in case MLBG_CALDIR environment variable is not set, use:
-    cal_dir = '{}/CalFiles'.format(os.environ['HOME'])
+    cal_dir = '/idia/projects/meerlicht/CalFiles'
 
 
 #===============================================================================
