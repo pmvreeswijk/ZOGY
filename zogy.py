@@ -9032,8 +9032,10 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     apphot_radii = get_par(set_zogy.apphot_radii,tel)
     bkg_radii = get_par(set_zogy.bkg_radii,tel)
 
+
     # use local or global background?
     bkg_global = (get_par(set_zogy.bkg_phototype,tel) == 'global')
+
 
     # run forced photometry
     table_force_phot = force_phot.force_phot (
@@ -9185,6 +9187,11 @@ def get_imagestars_hpindex (fits_gaia, obsdate, ra_center, dec_center,
                               ra_center, dec_center, fov_half_deg, search='box',
                               rot=rot)
     table_gaia = table_gaia[index_field]
+
+
+    # select the unique entries as the high proper motion stars can
+    # appear twice
+    table_gaia = unique(table_gaia, keys='source_id', keep='first')
 
 
     if get_par(set_zogy.timing,tel):
