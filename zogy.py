@@ -7867,8 +7867,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # ------------------------------------
 
         # create limiting magnitude image; no need to do so for ML/BG
-        # reference images
-        if not (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and imtype=='ref'):
+        # reference images except when zogy is run on reference image
+        # only, i.e. remap=False
+        if not (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and imtype=='ref' and remap):
 
             fits_limmag = '{}_limmag.fits'.format(base)
             create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
