@@ -66,7 +66,7 @@ from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
 #iers.conf.iers_auto_url_mirror = \
 #    'http://maia.usno.navy.mil/ser7/finals2000A.all'
 
-from fitsio import FITS
+import fitsio
 
 from scipy import ndimage
 from scipy import interpolate
@@ -116,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.2.3'
+__version__ = '1.2.4'
 
 
 ################################################################################
@@ -455,7 +455,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # SExtractor version
                 cmd = ['source-extractor', '-v']
                 result = subprocess.run(cmd, capture_output=True)
-                version = str(result.stdout).split()[3]
+                version = str(result.stdout).split()[-2]
                 header['S-V'] = (version.strip(), 'SExtractor version used')
                 if not SE_processed:
                     return False
@@ -706,7 +706,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # SWarp version
             cmd = ['swarp', '-v']
             result = subprocess.run(cmd, capture_output=True)
-            version = str(result.stdout).split()[2]
+            version = str(result.stdout).split()[-1]
             header_trans['SWARP-V'] = (version.strip(), 'SWarp version used')
 
 
@@ -2467,7 +2467,7 @@ def read_exts_fitsio (fits_file, ext_name_indices):
     for i_ext, ext in enumerate(ext_name_indices):
 
         # read extension
-        data_temp = FITS(fits_file)[ext][:]
+        data_temp = fitsio.FITS(fits_file)[ext][:]
 
         # convert to table, as otherwise concatenation of
         # extensions below using [stack_arrays] is slow
@@ -12045,7 +12045,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
             # run PSFEx:
             result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel),
                                psfexcat, imtype, poldeg, nsnap=nsnap,
-                               limit_ldac=False, nthreads=nthreads)
+                               limit_ldac=True, nthreads=nthreads)
 
         except Exception as e:
             PSFEx_processed = False
@@ -12061,7 +12061,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
         # PSFex version
         cmd = ['psfex', '-v']
         result = subprocess.run(cmd, capture_output=True)
-        version = str(result.stdout).split()[2]
+        version = str(result.stdout).split()[-2]
         header['PSF-V'] = (version.strip(), 'PSFEx version used')
 
         # now that header is updated, raise exception that will be caught
@@ -12903,14 +12903,13 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     # x, y and normalisation factor from the PSF stars
     def readcat (psfcat):
         table = ascii.read(psfcat, format='sextractor')
-        # In PSFEx version 3.18.2 all objects from the input
-        # SExtractor catalog are recorded, and in that case the
+        # In PSFEx version 3.18.2 and higher all objects from the
+        # input SExtractor catalog are recorded, and in that case the
         # entries with FLAGS_PSF=0 need to be selected.
         if 'FLAGS_PSF' in table.colnames:
             mask_psfstars = (table['FLAGS_PSF']==0)
-        # In PSFEx version 3.17.1 (last stable version), only stars
-        # with zero flags are recorded in the output catalog, so use
-        # the entire table
+        # In PSFEx version 3.17.1, only stars with zero flags are
+        # recorded in the output catalog, so use the entire table
         else:
             mask_psfstars = np.ones(len(table), dtype=bool)
 
@@ -14120,6 +14119,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
         if get_par(set_zogy.make_plots,tel) or is_adcfile:
 
+            log.info ('creating dRA vs dDEC plot, including histograms')
+
             # plot of dra vs. ddec in arcseconds, including histograms
             dr = np.sqrt(dra_std**2+ddec_std**2)
             dr = max(dr, 0.05)
@@ -14127,26 +14128,29 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
             mask_nonzero = ((dra_array!=0) & (ddec_array!=0))
             label1 = 'dRA={:.3f}$\pm${:.3f}"'.format(dra_median, dra_std)
             label2 = 'dDEC={:.3f}$\pm${:.3f}"'.format(ddec_median, ddec_std)
+            title = '{}\n{}'.format(base.split('/')[-1], header['ORIGFILE'])
+
             result = plot_scatter_hist(
                 dra_array[mask_nonzero], ddec_array[mask_nonzero], limits,
                 xlabel='delta RA [arcsec]', ylabel='delta DEC [arcsec]',
                 label=[label1,label2], labelpos=[(0.77,0.9),(0.77,0.85)],
-                filename='{}_dRADEC.pdf'.format(base),
-                title=base.split('/')[-1])
+                filename='{}_dRADEC.pdf'.format(base), title=title)
 
 
             # plot of dra vs. color and ddec vs. color, to check for
             # offset dependence on stellar color
-            col = ['g', 'r']
+            col = ['g_{}'.format(tel[0:2]), 'r_{}'.format(tel[0:2])]
             if (col[0] in table_cal.colnames and
                 col[1] in table_cal.colnames and np.sum(mask_nonzero) >= 10):
+
+                log.info ('creating dRA and dDEC vs color plots')
 
                 col_array = (table_cal[col[0]][index_ast] -
                              table_cal[col[1]][index_ast])
 
                 fig, (ax0, ax1) = plt.subplots(2, 1, sharex=True, sharey=False)
                 fig.subplots_adjust(hspace=0, wspace=0)
-                fig.suptitle(base.split('/')[-1], fontsize=10)
+                fig.suptitle(title, fontsize=10)
 
                 # dRA subplot
                 ax0.plot(col_array, dra_array, 'o', color='tab:blue',
@@ -14230,35 +14234,56 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 def uniform_subset (xcoords, ycoords, nselect, nregions=128):
 
-    """Subdivide input coordinates over [nregions] of equal surface and
-    return the indices of the first ~[nselect]/[nregions] entries for
-    each region."""
+    """Subdivide input coordinates over [nregions] of equal surface
+    and return the indices of the first ~[nselect]/[nregions] entries
+    for each region. If the input coordinates are ordered, the same
+    order is preserved for the output indices; e.g. if sorted by
+    brightness, the brightest objects for each region are returned.
 
+    """
+
+    # minimum and maximum coordinates
     xmin = min(xcoords)
     xmax = max(xcoords)
     ymin = min(ycoords)
     ymax = max(ycoords)
     xsize = xmax - xmin
     ysize = ymax - ymin
+
+    # total image size set by min and max coordinates divided into
+    # nregions, resulting in approximate size of square region (of
+    # which nregions fit into entire image)
     size_region = int(np.sqrt(xsize*ysize/nregions))
+
+    # number of coordinates to be selected per pixel
     n_perpix = nselect / (xsize*ysize)
 
+    # list to record indices of uniform set of coordinates
     indices_out = []
+
+    # loop over regions in x
     for x in np.arange(xmin, xmax, size_region):
+
+        # effective region xsize; number of regions that fit into
+        # total xsize is not an integer, so while normally dx =
+        # size_region, it will be smaller when x is nearing xmax
         dx = min(size_region, xmax-x)
+
+        # loop over regions in y
         for y in np.arange(ymin, ymax, size_region):
             dy = min(size_region, ymax-y)
+
+            # indices of all coordinates in this region
             indices_tmp = np.nonzero((xcoords>=x) & (xcoords<(x+size_region)) &
                                      (ycoords>=y) & (ycoords<(y+size_region)))[0]
+
+            # record subset of coordinates in this region in indices_out
             n = max(int(dx*dy*n_perpix+0.5),1)
             indices_out += list(indices_tmp[0:n])
 
 
-    # shuffling the indices in place
-    rng = np.random.default_rng()
-    rng.shuffle(indices_out)
-
-
+    # return indices_out, which might have slightly more entries than
+    # nselect
     return indices_out[0:nselect]
 
 
@@ -15398,7 +15423,7 @@ def rename_catcols (cat_in, hdu_ext=1):
 ################################################################################
 
 def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
-               limit_ldac=False, nthreads=0):
+               limit_ldac=True, nthreads=0):
 
     """Function that runs PSFEx on [cat_in] (which is a SExtractor output
        catalog in FITS_LDAC format) using the configuration file
@@ -15416,66 +15441,98 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
 
 
     # select a subset of entries in the input ldac catalog to speed up
-    # psfex
+    # psfex; need to use fitsio to keep RAM memory under control as
+    # even with memmap=True, astropy.io.fits will access entire table
+    # even if selection on single column is needed
     if limit_ldac:
 
         mem_use ('before limiting LDAC')
 
-        with fits.open(cat_in, mode='update') as hdulist:
-            data_ldac = hdulist[-1].data
-            # SExtractor flags 0 or 1 and S/N larger than value
-            # defined in settings file; note that this is the same as
-            # the default rejection mask on SExtractor FLAGS defined
-            # in the psfex.config file: SAMPLE_FLAGMASK = 0x00fe
-            # (=254) or '0b11111110'
-            s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
-            index_ok = np.nonzero((data_ldac['FLAGS']<=1) &
-                                  (data_ldac['SNR_WIN']>=s2n) &
-                                  (data_ldac['IMAFLAGS_ISO']==0))[0]
+        # info from astropy site:
+        # For FITS binary tables, the data is stored row by row, and
+        # it is possible to read only a subset of rows, but reading a
+        # full column loads the whole table data into memory.
+        #
+        # options:
+        # (1) loop table with large step and keep relevant rows;
+        #     --> this will still access the entire table
+        # (2) read table, delete thumbnail columns, make selection
+        #     of rows in light table, read full table again and
+        #     select relevant rows
+        #     --> not working after testing it
+        # (3) fitsio - yes!
+
+        # read all rows but only specific columns from 2nd extension
+        # of input catalog, where output data is a numpy recarray
+        data_ldac = fitsio.read(cat_in, ext=2,
+                                columns=['FLAGS', 'SNR_WIN', 'IMAFLAGS_ISO',
+                                         'XWIN_IMAGE', 'YWIN_IMAGE'])
+
+        # SExtractor flags 0 or 1 and S/N larger than value
+        # defined in settings file; note that this is the same as
+        # the default rejection mask on SExtractor FLAGS defined
+        # in the psfex.config file: SAMPLE_FLAGMASK = 0x00fe
+        # (=254) or '0b11111110'
+        s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
+        index_ok = np.nonzero((data_ldac['FLAGS']<=1) &
+                              (data_ldac['SNR_WIN']>=s2n) &
+                              (data_ldac['IMAFLAGS_ISO']==0))[0]
+        log.info ('number of PSF stars available with FLAGS<=1, SNR>{} '
+                  'and IMAFLAGS_ISO==0: {}'.format(s2n, len(index_ok)))
 
 
-            mem_use ('after index_ok filter')
+        psf_stars_nmax = get_par(set_zogy.psf_stars_nmax,tel)
+        if len(index_ok) > psf_stars_nmax:
 
-            log.info ('number of PSF stars available with FLAGS<=1, SNR>{} '
-                      'and IMAFLAGS_ISO==0: {}'.format(s2n, len(index_ok)))
-
-
-            # select random set of PSF stars, not more than [nlimit],
-            # uniformly spread across the image
-            nlimit = 10000
-            # shuffle indices
+            # shuffling the indices in place, so coordinates
+            # are picked randomly irrespective of input order
             rng = np.random.default_rng()
             rng.shuffle(index_ok)
+
+            # select [psf_stars_nmax] random set of PSF stars,
+            # uniformly spread across the image
             index_uniform = uniform_subset (data_ldac['XWIN_IMAGE'][index_ok],
                                             data_ldac['YWIN_IMAGE'][index_ok],
-                                            nlimit)
-            hdulist[2].data = data_ldac[index_ok][index_uniform]
+                                            psf_stars_nmax)
+
+            log.info ('too many PSFEx input stars ({}) available; narrowing it '
+                      'down by randomly selecting {} stars uniformly spread '
+                      'across the image'
+                      .format(len(index_ok), len(index_uniform)))
+
+            # update index_ok
+            index_ok = index_ok[index_uniform]
 
 
-            if False:
-                # old method
-                nlimit = 20000
-                nok = len(index_ok)
-                if nok > nlimit:
-                    index_keep = (np.random.rand(nlimit) * nok).astype(int)
-                    log.info ('using random subset of {} of these'
-                              .format(len(index_keep)))
-                else:
-                    index_keep = np.arange(nok)
 
-                hdulist[2].data = data_ldac[index_ok][index_keep]
+        # read input catalog again, now all columns but only specific rows
+        data_ldac_ok = fitsio.read(cat_in, ext=2, rows=index_ok)
 
+
+        # write data_ldac_ok to 2nd extension of input table, first
+        # need to delete the 2nd extension of the input table as
+        # otherwise the existing rows will not be deleted but
+        # overwritten
+        with fits.open(cat_in, mode='update', memmap=True) as hdulist:
+            del hdulist[2]
+
+        # write data_ldac_ok; 2nd extension is newly created
+        with fitsio.FITS(cat_in, 'rw') as fits_tmp:
+            fits_tmp.write(data_ldac_ok, extname='LDAC_OBJECTS')
 
 
         if get_par(set_zogy.make_plots,tel):
             result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
-                                     data_ldac['XWIN_IMAGE'][index_ok][index_uniform],
-                                     data_ldac['YWIN_IMAGE'][index_ok][index_uniform],
+                                     data_ldac_ok['XWIN_IMAGE'],
+                                     data_ldac_ok['YWIN_IMAGE'],
                                      radius=5., width=2, color='red')
+
 
         if get_par(set_zogy.timing,tel):
             log_timing_memory (
                 t0=t,label='limiting entries in LDAC input catalog for PSFEx')
+
+
 
 
     # use function [get_samp_PSF_config_size] to determine [psf_samp]
@@ -15638,6 +15695,7 @@ def get_samp_PSF_config_size (imtype):
         fwhm = fwhm_new
     elif imtype=='ref':
         fwhm = fwhm_ref
+
 
     # If [set_zogy.psf_sampling] is set to nonzero, then:
     #   [psf_samp] = [psf_samling]
