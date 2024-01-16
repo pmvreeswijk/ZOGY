@@ -184,8 +184,10 @@ size_vignet = {'ML1': 99, 'BG': 49} # size of the square VIGNETs saved in the
                          # be set to ~ 2 * max(psf_rad_phot,psf_rad_zogy) *
                          # maximum expected FWHM in any of the images.
 psf_stars_s2n_min = 20   # minimum signal-to-noise ratio for PSF stars
-                         # (don't set this too high as otherwise the PSF
+                         # (do not set this too high as otherwise the PSF
                          #  will be mainly based on bright stars)
+psf_stars_nmax = 30000   # maximum number of stars to provide as input to PSFEx,
+                         # in case the image is very crowded
 
 
 #===============================================================================
