@@ -1721,6 +1721,12 @@ def robust_Z_norm (ims):
     med = np.median(flat, axis = 1).reshape(org_shape[0],1,org_shape[3])
     mad = np.median(np.abs(flat-med), axis = 1).reshape(org_shape[0],1,
                                                         org_shape[3])
+
+    # suggested addition by Fiore to avoid dividing by zero
+    # when returning values
+    epsilon = 1e-6
+    mad = np.maximum(mad, epsilon)
+
     # Apply robust Z score formula according to:
     # "https://cloudxlab.com/assessment/displayslide/6286/robust-z-score-method"
     return ((0.6745*(flat-med))/ mad).reshape(org_shape)
