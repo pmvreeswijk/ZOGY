@@ -899,7 +899,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
         if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t_zogy, label='after run_ZOGY finshed')
+            log_timing_memory (t0=t_zogy, label='after run_ZOGY finished')
 
 
 
@@ -3628,7 +3628,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     #     and Fpsferr, which should be possible as the PSF is
     #     better sampled than the image pixels
 
-    def help_psffit_D (psffit, moffat, gauss):
+    def help_psffit_D (psffit, moffat, gauss, get_flags_mask_central=False):
 
         # use [get_psfoptflux] to perform a PSF fit to D
         # !!!CHECK!!! - _mp or not?
@@ -3639,6 +3639,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
             header_new=header_new, header_ref=header_ref,
             Scorr_peak=table_trans['SNR_ZOGY'], set_zogy=set_zogy,
+            get_flags_mask_central=get_flags_mask_central,
             nthreads=nthreads, tel=tel)
 
         return results
@@ -3647,8 +3648,10 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     # PSF fit to D, directly added as columns to table_trans
     colnames = ['X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
-                'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D']
-    table_trans.add_columns(help_psffit_D (True, False, False), names=colnames)
+                'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D', 'FLAGS_CENTRAL']
+    table_trans.add_columns(
+        help_psffit_D (True, False, False, get_flags_mask_central=True),
+        names=colnames)
 
     log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
 
@@ -3670,6 +3673,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     chi2_snr_limit = get_par(set_zogy.chi2_snr_limit,tel)
     mask_keep = ((table_trans['CHI2_PSF_D'] <= chi2_max) |
                  (np.abs(table_trans['SNR_ZOGY']) >= chi2_snr_limit))
+
 
 
     row_numbers = np.arange(len(table_trans))+1
@@ -3716,6 +3720,17 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         table_trans = table_trans[mask_keep]
 
     log.info('ntrans after PSF_D fit S/N filter: {}'.format(len(table_trans)))
+
+
+    # filter on FLAGS_CENTRAL (determined while performing PSF fit to D above)
+    # =======================
+
+    # require central flags to be zero
+    mask_keep = (table_trans['FLAGS_CENTRAL'] == 0)
+    if not keep_all:
+        table_trans = table_trans[mask_keep]
+
+    log.info('ntrans after FLAGS_CENTRAL filter: {}'.format(len(table_trans)))
 
 
     # Gauss fit to D
@@ -5397,9 +5412,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # or flux of an artificial/fake object that was added
     list2return = [flux_opt, fluxerr_opt]
 
-    # if specified, add combined flags_mask of central PSF area
-    if get_flags_mask_central:
-        list2return += [flags_mask_central]
 
     # PSF fit arrays to return
     if psffit:
@@ -5412,6 +5424,12 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     if moffat or gauss:
         list2return = [x_moffat, xerr_moffat, y_moffat, yerr_moffat,
                        fwhm_moffat, elong_moffat, chi2_moffat]
+
+
+    # if specified, add combined flags_mask of central PSF area
+    if get_flags_mask_central:
+        list2return += [flags_mask_central]
+
 
     #list2return = [elem for sublist in list2return for elem in sublist]
     #list2return = list(itertools.chain.from_iterable(list2return))
@@ -6487,10 +6505,6 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
     # or flux of an artificial/fake object that was added
     list2return = [flux_opt, fluxerr_opt]
 
-    # if specified, add combined flags_mask of central PSF area
-    if get_flags_mask_central:
-        list2return += [flags_mask_central]
-
 
     # PSF fit arrays to return
     if psffit:
@@ -6503,6 +6517,11 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
     if moffat or gauss:
         list2return = [x_moffat, xerr_moffat, y_moffat, yerr_moffat,
                        fwhm_moffat, elong_moffat, chi2_moffat]
+
+
+    # if specified, add combined flags_mask of central PSF area
+    if get_flags_mask_central:
+        list2return += [flags_mask_central]
 
 
     return list2return
