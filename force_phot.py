@@ -33,7 +33,7 @@ import zogy
 import set_zogy
 set_zogy.verbose=False
 
-from fitsio import FITS
+import fitsio
 
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
@@ -610,7 +610,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     try:
         log.info ('reading header of {}'.format(fits2read))
         # fitsio
-        #header = FITS(fits2read)[-1].read_header()
+        #header = fitsio.FITS(fits2read)[-1].read_header()
         # astropy
         header = zogy.read_hdulist (fits2read, get_data=False, get_header=True,
                                     memmap=True)
@@ -876,7 +876,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             fits2read = fits_red
 
         # fitsio
-        #header = FITS(fits2read)[-1].read_header()
+        #header = fitsio.FITS(fits2read)[-1].read_header()
         # astropy
         header = zogy.read_hdulist (fits2read, get_data=False, get_header=True)
 
@@ -1054,7 +1054,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             data_mask = zogy.read_hdulist (fits_mask)
             # mask can be read using fitsio.FITS, but only little bit
             # faster than astropy.io.fits
-            #data_mask = FITS(fits_mask)[-1][:,:]
+            #data_mask = fitsio.FITS(fits_mask)[-1][:,:]
         else:
             log.warning ('fits_mask {} does not exist; assuming that none of '
                          'the pixels are flagged'.format(fits_mask))
@@ -1362,7 +1362,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                         data = zogy.read_hdulist(fn)
                     else:
                         # read data using fitsio.FITS
-                        data = FITS(fn)[-1]
+                        data = fitsio.FITS(fn)[-1]
 
                     table[key_tn] = get_thumbnail (
                         data, data_shape, xcoords, ycoords, size_tn, key_tn,
@@ -1469,7 +1469,7 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
     else:
 
         # use fitsio otherwise
-        data = FITS(filename)[-1]
+        data = fitsio.FITS(filename)[-1]
 
         # infer data values at indices
         if y_indices is None or x_indices is None:
@@ -1531,7 +1531,7 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
     if zogy.isfile (fits_bkg_std):
         data_bkg_stdx = zogy.read_hdulist (fits_bkg_std, dtype='float32')
         # only little bit faster with fitsio.FITS
-        #data_bkg_std = FITS(fits_bkg_std)[-1][:,:]
+        #data_bkg_std = fitsio.FITS(fits_bkg_std)[-1][:,:]
     else:
         # if it does not exist, create it from the background mesh
         fits_bkg_std_mini = '{}_bkg_std_mini.fits'.format(basename)
@@ -1772,7 +1772,7 @@ def get_headkeys (filenames):
         #with fits.open('{}_hdr.fits'.format(basename)) as hdulist:
         #    header = hdulist[-1].header
         # fitsio
-        #header = FITS('{}_hdr.fits'.format(basename))[-1].read_header()
+        #header = fitsio.FITS('{}_hdr.fits'.format(basename))[-1].read_header()
         # astropy
         header = zogy.read_hdulist ('{}_hdr.fits'.format(basename),
                                     get_data=False, get_header=True)
@@ -2198,6 +2198,10 @@ if __name__ == "__main__":
 
 
     else:
+
+        log.info ('input parameter [radecs] {} is apparently not a file; '
+                  'assuming it is a comma-separated list of RA,DEC coordinates'
+                  .format(args.radecs))
 
         # split input [radecs] into list of strings ['ra1', 'dec1', ...]
         radecs_list0 = re.sub('\(|\)|\[|\]|\{|\}', '', args.radecs)
