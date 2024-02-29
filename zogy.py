@@ -1811,7 +1811,7 @@ def get_probability (events, model_file, normed_size = 40):
 
 ################################################################################
 
-def get_ML_prob_real_Diederik (dict_thumbnails, model):
+def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
 
     """function based on training by Diederik de Vries and Fiorenzo
     Stoppa of the 2nd vetting data set collected during 2022.  The
@@ -1826,6 +1826,29 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model):
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info ('executing get_ML_prob_real_Diederik ...')
 
+
+    # size of thumbnails
+    size_tn = get_par(set_zogy.size_thumbnails,tel)
+
+    # thumbnail images are 100x100 pixels (default size_tn is 100),
+    # need to extract the central 40x40 pixels for Diederiks model;
+    # this is also done in function [central_crop] supplied by
+    # Diederik, but to save memory usage crop the images as they are
+    # read into memory
+
+    if size_tn > size_use:
+        border = (size_tn - size_use)//2
+        i1 = border
+        i2 = border+size_use
+
+        # first slice/dimension is nrows
+        index = (slice(None,None), slice(i1,i2), slice(i1,i2))
+
+    else:
+        # otherwise, use full thumbnail imagse
+        index = (slice(None,None), slice(None,None), slice(None,None))
+
+
     # initially list with data to be stacked after the loop
     list_2stack = []
 
@@ -1833,7 +1856,10 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model):
     for key in dict_thumbnails.keys():
 
         # data_thumbnail will have shape (nrows, 100, 100)
-        data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')
+        data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')[index]
+        # following line is like the old 100x100 thumbnails that are
+        # cropped in central_crop, i.e. without [index]
+        #data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')
 
         # add them to list to stack
         list_2stack.append(data_thumbnail)
@@ -1845,17 +1871,21 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model):
     data_stack = np.stack(list_2stack, axis=-1)
 
 
+    # obtain probabilities
+    prob_real = get_probability(data_stack, model)
+
+
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='get_ML_prob_real_Diederik')
 
 
-    # obtain and return probabilities
-    return get_probability(data_stack, model)
+    # return probabilities
+    return prob_real
 
 
 ################################################################################
 
-def get_ML_prob_real_Zafiirah (dict_thumbnails, model, use_30x30=True,
+def get_ML_prob_real_Zafiirah (dict_thumbnails, model, size_use=30,
                                factor_norm=255.):
 
     """function based on Zafiirah's Jupyter notebook (see
@@ -1884,10 +1914,20 @@ def get_ML_prob_real_Zafiirah (dict_thumbnails, model, use_30x30=True,
 
     # thumbnail images are 100x100 pixels, need to extract the central
     # 30x30 pixels for most of Zafiirah's models
-    if use_30x30:
+
+    # size of thumbnails
+    size_tn = get_par(set_zogy.size_thumbnails,tel)
+
+    if size_tn > size_use:
+        border = (size_tn - size_use)//2
+        i1 = border
+        i2 = border+size_use
+
         # first slice/dimension is nrows
-        index = (slice(None,None), slice(35,65), slice(35,65))
+        index = (slice(None,None), slice(i1,i2), slice(i1,i2))
+
     else:
+        # otherwise, use full thumbnail imagse
         index = (slice(None,None), slice(None,None), slice(None,None))
 
 
