@@ -50,6 +50,10 @@ size_thumbnails = 100    # size of square thumbnail arrays in (new) image pixels
 orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
+# switch to use old or new (~Feb 2024) transient catalog definition
+use_new_transcat = {'ML1': False, 'BG': False}
+
+
 #===============================================================================
 # Replacement of saturated pixels to avoid artefacts in image subtraction
 #===============================================================================
@@ -247,6 +251,10 @@ ast_filter = 'r'         # magnitude column to sort in brightness
 force_phot_gaia = {'ML1': False, 'BG': True}
 gaia_cat = '{}/GaiaDR3_all_HP4_highPM.fits'.format(cal_dir)
 gaia_epoch = 2016.0
+
+
+# switch to record fluxes in microJy instead of AB mags in full-source catalog
+record_fnu = {'ML1': False, 'BG': False}
 
 
 # aperture photometry radii in units of FWHM
