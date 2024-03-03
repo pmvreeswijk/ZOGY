@@ -116,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.2.5'
+__version__ = '1.3.0'
 
 
 ################################################################################
