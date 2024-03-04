@@ -1157,13 +1157,21 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         # for ML/BG delete unnecesary images
         if (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-            not get_par(set_zogy.keep_tmp,tel) and
-            not (new and ref)):
+            not get_par(set_zogy.keep_tmp,tel)):
+
             fits_new_bkg = '{}_bkg.fits'.format(base_newref)
             ref_fits_bkg_std = '{}_bkg_std.fits'.format(base_remap)
-            remove_files ([ref_fits, ref_fits_mask, ref_fits_bkg_std,
+            list2remove = [fits_new_bkg, fits_new_bkg_std,
                            fits_ref, fits_ref_mask, fits_ref_bkg_std,
-                           fits_new_bkg_std, fits_new_bkg], verbose=True)
+                           ref_fits_bkg_std]
+
+            if not get_par(set_zogy.use_new_transcat,tel):
+                # these images below are used in the crossmatching
+                # further below
+                list2remove += [ref_fits, ref_fits_mask]
+
+            # remove
+            remove_files (list2remove, verbose=True)
 
 
 
@@ -1325,7 +1333,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_trans_out = '{}_trans.fits'.format(base_newref)
 
         # CHECK!!! - switch off for now
-        if False:
+        if get_par(set_zogy.use_new_transcat,tel):
+
             # add some additional columns to transient catalog, by crossmatching
             # with Gaia and reference catalogs, and performing forced photometry
             # at transients positions in new and ref image
@@ -1333,15 +1342,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                     ref_fits, ref_fits_mask, cat_ref,
                                     nthreads=nthreads)
 
+            # for ML/BG delete unnecesary images
+            if (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
+                not get_par(set_zogy.keep_tmp,tel)):
 
-        # for ML/BG delete unnecesary images
-        if (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-            not get_par(set_zogy.keep_tmp,tel)):
-            fits_new_bkg = '{}_bkg.fits'.format(base_newref)
-            ref_fits_bkg_std = '{}_bkg_std.fits'.format(base_remap)
-            remove_files ([ref_fits, ref_fits_mask, ref_fits_bkg_std,
-                           fits_ref, fits_ref_mask, fits_ref_bkg_std,
-                           fits_new_bkg_std, fits_new_bkg], verbose=True)
+                # remove
+                list2remove = [ref_fits, ref_fits_mask]
+                remove_files (list2remove, verbose=True)
+
 
 
         # need to take care of objects closer than 32/2 pixels to
@@ -3251,6 +3259,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
                 hdu.data[key] = np.load(dict_thumbnails[key], mmap_mode='c')
                 mem_use (label='after adding column {} to hdu.data in '
                          'format_cat'.format(key))
+
+                # delete numpy file if not keeping
+                # intermediate/temporary files
+                if not get_par(set_zogy.keep_tmp,tel):
+                    remove_files ([dict_thumbnails[key]])
+
 
 
     if False:
@@ -9444,7 +9458,7 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     table_force_phot = force_phot.force_phot (
         table_gaia_image, image_indices_dict, mask_list=[fits_mask], trans=False,
         ref=False, fullsource=True, nsigma=nsigma, apphot_radii=apphot_radii,
-        bkg_radii=bkg_radii, include_fluxes=False, bkg_global=bkg_global,
+        bkg_radii=bkg_radii, include_fluxes=True, bkg_global=bkg_global,
         tel=tel, ncpus=nthreads)
 
 
@@ -16721,13 +16735,22 @@ def log_timing_memory(t0, label=''):
 def disk_use (path=None, label=''):
 
     if path is None:
-        path = '/'
+        # it is is defined, use global parameter base_new, which
+        # refers to base_ref if only ref image is provided
+        if 'base_new' in globals():
+            path = os.path.dirname(base_new)
+        else:
+            # otherwise use current working directory
+            path = os.getcwd()
+
 
     total, used, free = shutil.disk_usage(path)
     norm = 1024**3
 
-    log.info ('disk use [GiB]: total={:.3f}, used={:.3f}, free={:.3f} {}'
-              .format(total, used, free, label))
+    log.info ('disk use [GiB]: total={:.3f}, used={:.3f}, free={:.3f} (path: '
+              '{}) {}'.format(total/norm, used/norm, free/norm, path, label))
+
+    return
 
 
 ################################################################################
@@ -16757,7 +16780,7 @@ def mem_use (label=''):
               .format(uss, rss, maxrss, vms, swap, label))
 
     # also report disk use
-    disk_use (label)
+    disk_use (label=label)
 
     return
 
