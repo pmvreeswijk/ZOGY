@@ -38,7 +38,7 @@ import fitsio
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '0.9.7'
+__version__ = '0.9.8'
 
 
 ################################################################################
@@ -130,7 +130,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
               using this reference epoch
 
     include_fluxes: boolean (default=False) deciding whether the
-                    electron fluxes (e-/s) corresponding to the
+                    fluxes in microJy corresponding to the
                     magnitudes are included in the output table
 
     keys2add: list of strings (default=None); header keywords that
@@ -235,7 +235,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
         # add corresponding fluxes
         if include_fluxes:
-            names += ['E_FLUX_OPT', 'E_FLUXERR_OPT']
+            names += ['FNU_OPT', 'FNUERR_OPT']
             dtypes += ['float32', 'float32']
 
 
@@ -251,8 +251,8 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
                 # add corresponding fluxes
                 if include_fluxes:
-                    names += ['E_FLUX_APER_R{}xFWHM'.format(radius),
-                              'E_FLUXERR_APER_R{}xFWHM'.format(radius)]
+                    names += ['FNU_APER_R{}xFWHM'.format(radius),
+                              'FNUERR_APER_R{}xFWHM'.format(radius)]
                     dtypes += ['float32', 'float32']
 
 
@@ -273,7 +273,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
         # add corresponding fluxes
         if include_fluxes:
-            names += ['E_FLUX_ZOGY', 'E_FLUXERR_ZOGY']
+            names += ['FNU_ZOGY', 'FNUERR_ZOGY']
             dtypes += ['float32', 'float32']
 
 
@@ -306,7 +306,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
         # add corresponding fluxes
         if include_fluxes:
-            names += ['E_FLUX_OPT_REF', 'E_FLUXERR_OPT_REF']
+            names += ['FNU_OPT_REF', 'FNUERR_OPT_REF']
             dtypes += ['float32', 'float32']
 
 
@@ -322,8 +322,8 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
                 # add corresponding fluxes
                 if include_fluxes:
-                    names += ['E_FLUX_APER_R{}xFWHM_REF'.format(radius),
-                              'E_FLUXERR_APER_R{}xFWHM_REF'.format(radius)]
+                    names += ['FNU_APER_R{}xFWHM_REF'.format(radius),
+                              'FNUERR_APER_R{}xFWHM_REF'.format(radius)]
                     dtypes += ['float32', 'float32']
 
 
@@ -414,7 +414,6 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         # old simple method
         if True:
             table = vstack(table_list)
-
         else:
             # new method: keep adding tables in pairs until there is a
             # single table left
@@ -900,19 +899,19 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                      'for {}; assuming fwhm=5 pix'.format(basename))
 
 
-    # data_shape from header
-    if ref:
-        if 'ZNAXIS2' in header and 'ZNAXIS1' in header:
-            data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
-        elif 'NAXIS2' in header and 'NAXIS1' in header:
-            data_shape = (header['NAXIS2'], header['NAXIS1'])
-        else:
-            log.error ('not able to infer data shape from header of {}'
-                       .format(fits2read))
+    # infer data_shape from header
+    if 'ZNAXIS2' in header and 'ZNAXIS1' in header:
+        data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
+    elif 'NAXIS2' in header and 'NAXIS1' in header:
+        data_shape = (header['NAXIS2'], header['NAXIS1'])
     else:
-        data_shape = zogy.get_par(set_zogy.shape_new,tel)
+        log.error ('not able to infer data shape from header of {}'
+                   .format(fits2read))
+
 
     ysize, xsize = data_shape
+    log.info ('data shape inferred from header of {}: {}'
+              .format(basename, data_shape))
 
 
     # if proper motion need to be corrected for (if [pm_epoch] is not
@@ -1035,7 +1034,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         # exists
         if fits_objmask is not None and zogy.isfile(fits_objmask):
             objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
-
         else:
             # if it does not exist, create an all-False object mask
             objmask = np.zeros (data_shape, dtype=bool)
@@ -1145,14 +1143,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             fluxerr_ap = fluxerr_aps[i_rad]
 
 
-            # add fluxes to table if needed
-            if include_fluxes:
-                col_tmp = 'E_FLUX_APER_R{}xFWHM{}'.format(radius, s2add)
-                table[col_tmp] = (flux_ap/exptime).astype('float32')
-                col_tmp = 'E_FLUXERR_APER_R{}xFWHM{}'.format(radius, s2add)
-                table[col_tmp] = (fluxerr_ap/exptime).astype('float32')
-
-
             # signal-to-noise ratio
             mask_nonzero = (fluxerr_ap != 0)
             snr_ap = np.zeros_like(flux_ap, dtype='float32')
@@ -1164,9 +1154,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
             # infer calibrated magnitudes using the zeropoint
             if zp is not None:
-                mag_ap, magerr_ap = zogy.apply_zp (flux_ap, zp, airmass,
-                                                   exptime, filt, ext_coeff,
-                                                   fluxerr=fluxerr_ap)
+                mag_ap, magerr_ap, fnu_ap, fnuerr_ap = zogy.apply_zp (
+                    flux_ap, zp, airmass, exptime, ext_coeff, fluxerr=fluxerr_ap,
+                    return_fnu=True)
+
                 mask_pos = (flux_ap > 0)
                 mag_ap[~mask_pos] = 99
                 magerr_ap[~mask_pos] = 99
@@ -1175,6 +1166,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 table[col_tmp] = mag_ap.astype('float32')
                 col_tmp = 'MAGERR_APER_R{}xFWHM{}'.format(radius, s2add)
                 table[col_tmp] = magerr_ap.astype('float32')
+
+
+                # add fluxes to table if needed
+                if include_fluxes:
+                    col_tmp = 'FNU_APER_R{}xFWHM{}'.format(radius, s2add)
+                    table[col_tmp] = fnu_ap.astype('float32')
+                    col_tmp = 'FNUERR_APER_R{}xFWHM{}'.format(radius, s2add)
+                    table[col_tmp] = fnuerr_ap.astype('float32')
+
 
             else:
                 if i_rad==0:
@@ -1230,9 +1230,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         if zp is not None:
             # infer calibrated magnitudes using the zeropoint
-            mag_opt, magerr_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
-                                                 filt, ext_coeff,
-                                                 fluxerr=fluxerr_opt)
+            mag_opt, magerr_opt, fnu_opt, fnuerr_opt = zogy.apply_zp (
+                flux_opt, zp, airmass, exptime, ext_coeff, fluxerr=fluxerr_opt,
+                return_fnu=True)
+
             mask_pos = (flux_opt > 0)
             mag_opt[~mask_pos] = 99
             magerr_opt[~mask_pos] = 99
@@ -1264,10 +1265,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # add fluxes if needed
         if include_fluxes:
-            col_tmp = 'E_FLUX_OPT{}'.format(s2add)
-            table[col_tmp] = (flux_opt/exptime).astype('float32')
-            col_tmp = 'E_FLUXERR_OPT{}'.format(s2add)
-            table[col_tmp] = (fluxerr_opt/exptime).astype('float32')
+            col_tmp = 'FNU_OPT{}'.format(s2add)
+            table[col_tmp] = fnu_opt.astype('float32')
+            col_tmp = 'FNUERR_OPT{}'.format(s2add)
+            table[col_tmp] = fnuerr_opt.astype('float32')
 
 
         # add thumbnail image
@@ -1316,9 +1317,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         if zp is not None:
             # infer calibrated magnitudes using the zeropoint
-            mag_zogy, magerr_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
-                                                   exptime, filt, ext_coeff,
-                                                   fluxerr=Fpsferr)
+            mag_zogy, magerr_zogy, fnu_zogy, fnuerr_zogy = zogy.apply_zp (
+                np.abs(Fpsf), zp, airmass, exptime, ext_coeff, fluxerr=Fpsferr,
+                return_fnu=True)
+
             mask_zero = (Fpsf==0)
             mag_zogy[mask_zero] = 99
             magerr_zogy[mask_zero] = 99
@@ -1340,8 +1342,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # add fluxes if needed
         if include_fluxes:
-            table['E_FLUX_ZOGY'] = (Fpsf/exptime).astype('float32')
-            table['E_FLUXERR_ZOGY'] = (Fpsferr/exptime).astype('float32')
+            table['FNU_ZOGY'] = fnu_zogy.astype('float32')
+            table['FNUERR_ZOGY'] = fnuerr_zogy.astype('float32')
 
 
         # add transient thumbnail images
@@ -1527,11 +1529,16 @@ def get_keys (header, ra_in, dec_in, tel):
 def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
 
     # background STD
-    fits_bkg_std = '{}_bkg_std.fits.fz'.format(basename)
+    fits_bkg_std = '{}_bkg_std.fits'.format(basename)
     if zogy.isfile (fits_bkg_std):
-        data_bkg_stdx = zogy.read_hdulist (fits_bkg_std, dtype='float32')
+        data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
         # only little bit faster with fitsio.FITS
         #data_bkg_std = fitsio.FITS(fits_bkg_std)[-1][:,:]
+
+    elif zogy.isfile ('{}.fz'.format(fits_bkg_std)):
+        data_bkg_std = zogy.read_hdulist ('{}.fz'.format(fits_bkg_std),
+                                          dtype='float32')
+
     else:
         # if it does not exist, create it from the background mesh
         fits_bkg_std_mini = '{}_bkg_std_mini.fits'.format(basename)
@@ -1995,7 +2002,7 @@ if __name__ == "__main__":
     parser.add_argument('--include_fluxes', type=str2bool, default=False,
                         help='besides the optimal/aperture magnitudes, also '
                         'include the corresponding fluxes and their errors, '
-                        'in units of e-/s, in the output table; default=False')
+                        'in units of microJy, in the output table; default=False')
 
     parser.add_argument('--thumbnails', type=str2bool, default=False,
                         help='extract thumbnail images around input coordinates? '
