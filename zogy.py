@@ -1332,7 +1332,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
 
-        # CHECK!!! - switch off for now
+
         if get_par(set_zogy.use_new_transcat,tel):
 
             # add some additional columns to transient catalog, by crossmatching
@@ -16734,21 +16734,29 @@ def log_timing_memory(t0, label=''):
 
 def disk_use (path=None, label=''):
 
+
     if path is None:
         # it is is defined, use global parameter base_new, which
         # refers to base_ref if only ref image is provided
         if 'base_new' in globals():
             path = os.path.dirname(base_new)
         else:
-            # otherwise use current working directory
-            path = os.getcwd()
+            # otherwise use current directory
+            path = '.'
 
 
-    total, used, free = shutil.disk_usage(path)
-    norm = 1024**3
+    # if path does not exist, shutil command will fail
+    if isdir(path):
 
-    log.info ('disk use [GiB]: total={:.3f}, used={:.3f}, free={:.3f} (path: '
-              '{}) {}'.format(total/norm, used/norm, free/norm, path, label))
+        total, used, free = shutil.disk_usage(path)
+        norm = 1024**3
+        log.info ('disk use [GiB]: total={:.3f}, used={:.3f}, free={:.3f} (path: '
+                  '{}) {}'.format(total/norm, used/norm, free/norm, path, label))
+
+    else:
+
+        log.warn ('path {} not found in zogy.disk_use')
+
 
     return
 
