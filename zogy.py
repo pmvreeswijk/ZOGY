@@ -116,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.0'
+__version__ = '1.3.1'
 
 
 ################################################################################
@@ -706,7 +706,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # SWarp version
             cmd = ['swarp', '-v']
             result = subprocess.run(cmd, capture_output=True)
-            version = str(result.stdout).split()[-1]
+            version = str(result.stdout).split()[-2]
             header_trans['SWARP-V'] = (version.strip(), 'SWarp version used')
 
 
@@ -919,7 +919,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         log.info ('creating full D, Scorr, Fpsf and Fpsferr images from '
                   'subimages and writing them to disk')
 
-        header_tmp = header_new + header_trans
+
+        #header_tmp = header_new + header_trans
+
+        # merge header_new and header_trans
+        header_tmp = header_new.copy(strip=True)
+        header_tmp.update(header_trans.copy(strip=True))
+
 
         # assemble and write full output images, one by one using
         # function [create_full]
@@ -1263,28 +1269,25 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
 
-        # write full ZOGY output images to fits
+        # updating headers of ZOGY images
         if get_par(set_zogy.timing,tel):
             t_fits = time.time()
 
-        header_tmp = header_new + header_trans
-        header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        fits_D = '{}_D.fits'.format(base_newref)
-        fits_Scorr = '{}_Scorr.fits'.format(base_newref)
-        fits_Fpsf = '{}_Fpsf.fits'.format(base_newref)
-        fits_Fpsferr = '{}_Fpsferr.fits'.format(base_newref)
+
+        #header_tmp = header_new + header_trans
+        #header_tmp['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+
+        # merge header_new and header_trans
+        header_tmp = header_new.copy(strip=True)
+        header_tmp.update(header_trans.copy(strip=True))
+
 
         # images were already created above, just update the headers here
-        with fits.open(fits_D, 'update', memmap=True) as hdulist:
-            hdulist[0].header = header_tmp
-        with fits.open(fits_Scorr, 'update', memmap=True) as hdulist:
-            hdulist[0].header = header_tmp
-        with fits.open(fits_Fpsf, 'update', memmap=True) as hdulist:
-            hdulist[0].header = header_tmp
-        with fits.open(fits_Fpsferr, 'update', memmap=True) as hdulist:
-            hdulist[0].header = header_tmp
-        with fits.open(fits_tlimmag, 'update', memmap=True) as hdulist:
-            hdulist[0].header = header_tmp
+        for ext_tmp in ['D', 'Scorr', 'Fpsf', 'Fpsferr', 'trans_limmag']:
+
+            fn_tmp = '{}_{}.fits'.format(base_newref, ext_tmp)
+            update_imcathead (fn_tmp, header_tmp)
+
 
 
         if get_par(set_zogy.timing,tel):
@@ -1308,8 +1311,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         header_new_cat = read_hdulist(cat_new, get_data=False, get_header=True)
         if not ('FORMAT-P' in header_new_cat and header_new_cat['FORMAT-P']):
 
+            header2add = header_new.copy(strip=True)
+
             format_cat (cat_new, cat_new_out, cat_type='new',
-                        header_toadd=header_new, exptime=exptime_new,
+                        header2add=header2add, exptime=exptime_new,
                         apphot_radii=get_par(set_zogy.apphot_radii,tel),
                         nfakestars= get_par(set_zogy.nfakestars,tel),
                         tel=tel, set_zogy=set_zogy)
@@ -1322,8 +1327,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         header_ref_cat = read_hdulist(cat_ref, get_data=False, get_header=True)
         if not ('FORMAT-P' in header_ref_cat and header_ref_cat['FORMAT-P']):
 
+            header2add = header_ref.copy(strip=True)
+
             format_cat (cat_ref, cat_ref_out, cat_type='ref',
-                        header_toadd=header_ref, exptime=exptime_ref,
+                        header2add=header2add, exptime=exptime_ref,
                         apphot_radii=get_par(set_zogy.apphot_radii,tel),
                         tel=tel, set_zogy=set_zogy)
 
@@ -1355,8 +1362,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # need to take care of objects closer than 32/2 pixels to
         # the full image edge in creation of thumbnails - results
         # in an error if transients are close to the edge
+
+        # update header_new with header_trans
+        header2add = header_new.copy(strip=True)
+        header2add.update(header_trans.copy(strip=True))
+
         format_cat (cat_trans, cat_trans_out, cat_type='trans',
-                    header_toadd=(header_new+header_trans),
+                    header2add=header2add,
                     exptime=exptime_new,
                     apphot_radii=get_par(set_zogy.apphot_radii,tel),
                     dict_thumbnails=dict_thumbnails,
@@ -1401,6 +1413,26 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         return header_new
     elif ref:
         return header_ref
+
+
+################################################################################
+
+def strip_hdrkeys (header, keys2strip=None):
+
+    # copy of input header
+    header = header.copy()
+
+    # strip image- and table-dependent keywords using astropy strip
+    header.strip()
+
+    # strip additional keywords if provided
+    if keys2strip is not None:
+        for key in keys2strip:
+            if key in header:
+                del header[key]
+
+
+    return header
 
 
 ################################################################################
@@ -1653,7 +1685,7 @@ def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='trans_crossmatch_fphot')
+        log_timing_memory (t0=t, label='in trans_crossmatch_fphot')
 
 
     return
@@ -2160,7 +2192,7 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_ML_prob_real_Diederik')
+        log_timing_memory (t0=t, label='in get_ML_prob_real_Diederik')
 
 
     # return probabilities
@@ -2254,7 +2286,7 @@ def get_ML_prob_real_Zafiirah (dict_thumbnails, model, size_use=30,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_ML_prob_real_Zafiirah')
+        log_timing_memory (t0=t, label='in get_ML_prob_real_Zafiirah')
 
 
     return ML_real_prob
@@ -2827,9 +2859,88 @@ def read_exts_fitsio (fits_file, ext_name_indices):
     return data
 
 
+
+
 ################################################################################
 
-def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
+def update_imcathead (filename, header, create_hdrfile=False, use_fitsio=False):
+
+
+    """Update the existing header of input fits file [filename] (which
+    can be compressed) with [header]; if create_hdrfile is True, an
+    additional fits file with just the header is also created, ending
+    with "_hdr.fits". Alternatively, the input fits file can also be
+    updated using fitsio.
+
+    This function replaces obsolete update_cathead() and
+    update_imhead() (and related copy_header() and process_keys()
+    functions.
+
+    """
+
+    t = time.time()
+
+
+    # add DATEFILE time stamp
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+
+
+    if use_fitsio:
+
+        # caveat: fitsio.write_keys results in slightly different
+        # floating point values in the headers, e.g. 2016.0 is
+        # converted to 2016., and other floats are rounded to a
+        # precision a decimal or two less than the original header
+        log.info ('updating header of {} with input header (using fitsio)'
+                  .format(filename))
+        header = header.copy(strip=True)
+        with fitsio.FITS(filename, 'rw') as hdulist:
+            for key in header:
+                hdulist[-1].write_key(key, header[key], header.comments[key])
+
+
+        if create_hdrfile:
+            # read header in astropy format to make separate header
+            # file further down below
+            with fits.open(filename, memmap=True) as hdulist:
+                header_updated = hdulist[-1].header
+
+
+    else:
+
+        # using astropy, open fits file in update mode
+        with fits.open(filename, 'update', memmap=True,
+                       output_verify='warn') as hdulist:
+
+
+            # update header using header update method
+            log.info ('updating header of {} with input header (using '
+                      'astropy update)' .format(filename))
+            hdulist[-1].header.update(header.copy(strip=True))
+
+
+            if create_hdrfile:
+                # save updated header to create header file below
+                header_updated = hdulist[-1].header.copy()
+
+
+
+    # create separate header file with updated header
+    if create_hdrfile:
+        hdulist = fits.HDUList(fits.PrimaryHDU(header=header_updated))
+        hdulist.writeto('{}_hdr.fits'.format(filename.split('.fits')[0]),
+                        overwrite=True, output_verify='warn')
+
+
+    log_timing_memory (t0=t, label='in update_imcathead')
+
+
+    return
+
+
+################################################################################
+
+def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                 exptime=0, apphot_radii=None, dict_thumbnails=None,
                 save_thumbnails=False, size_thumbnails=100, ML_calc_prob=False,
                 ML_prob_real=None, nfakestars=0, tel=None, set_zogy=None):
@@ -2859,8 +2970,14 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
             header = hdulist[1].header
             data = hdulist[1].data
 
-        if header_toadd is not None:
-            header += header_toadd
+
+        # strip header from image- or table-specific keywords
+        header.strip()
+
+
+        if header2add is not None:
+            header.update(header2add.copy(strip=True))
+
 
         log.info ('format catalog: {}, type: {}: column names: {}'
                   .format(cat_in, cat_type, data.dtype.names))
@@ -2868,8 +2985,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     else:
 
         # if no [cat_in] is provided, just define the header using
-        # [header_toadd]
-        header = header_toadd
+        # [header2add]
+        header = header2add.copy(strip=True)
 
 
 
@@ -3223,16 +3340,24 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     mem_use (label='after hdu creation in format_cat')
 
 
+
+    # save light version of transient catalog before heavy
+    # thumbnails are added
+    if cat_type == 'trans':
+
+        header['FORMAT-P'] = (True, 'successfully formatted catalog')
+        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+
+        #hdu.header += header
+        hdu.header.update(header.copy(strip=True))
+        hdu.writeto(cat_out.replace('.fits', '_light.fits'), overwrite=True)
+        #del hdu
+
+
+
     # add [thumbnails] column definition and the corresponding data
     if save_thumbnails:
 
-        # save light version of transient catalog before heavy
-        # thumbnails are added
-        header['FORMAT-P'] = (True, 'successfully formatted catalog')
-        header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-        hdu.header += header
-        hdu.writeto(cat_out.replace('.fits', '_light.fits'), overwrite=True)
-        del hdu
 
         # add column definitions
         dim_str = '({},{})'.format(size_thumbnails, size_thumbnails)
@@ -3280,18 +3405,20 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
     # add header keyword indicating catalog was successfully formatted
     header['FORMAT-P'] = (True, 'successfully formatted catalog')
     header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-    hdu.header += header
+
+
+    # update hdu header
+    hdu.header.update(header.copy(strip=True))
 
     # save hdu to fits
     hdu.writeto(cat_out, overwrite=True)
 
-    # also write separate header fits file
-    hdulist = fits.HDUList(fits.PrimaryHDU(header=hdu.header))
-    hdulist.writeto(cat_out.replace('.fits', '_hdr.fits'), overwrite=True)
+    # update header and create separate header fits file
+    update_imcathead(cat_out, header, create_hdrfile=True)
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='format_cat')
+        log_timing_memory (t0=t, label='in format_cat')
 
 
     return
@@ -3299,7 +3426,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header_toadd=None,
 
 ################################################################################
 
-def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
+def format_cat_old (cat_in, cat_out, cat_type=None, header2add=None,
                     exptime=0, apphot_radii=None, dict_thumbnails=None,
                     save_thumbnails=False, size_thumbnails=100,
                     ML_calc_prob=False, ML_prob_real=None, nfakestars=0,
@@ -3328,14 +3455,14 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
             header = hdulist[1].header
             data = hdulist[1].data
 
-        if header_toadd is not None:
-            header += header_toadd
+        if header2add is not None:
+            header += header2add
 
     else:
 
         # if no [cat_in] is provided, just define the header using
-        # [header_toadd]
-        header = header_toadd
+        # [header2add]
+        header = header2add
 
 
     # this [formats] dictionary contains the output format, the output
@@ -3639,7 +3766,7 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header_toadd=None,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='format_cat_old')
+        log_timing_memory (t0=t, label='in format_cat_old')
 
 
     return
@@ -4359,7 +4486,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                         # reference image and its orientation is
                         # the same as that of the new, D and Scorr
                         # images, and so the same header
-                        # (header_toadd=header_newzogy) should be
+                        # (header2add=header_newzogy) should be
                         # used rather than the reference image
                         # header header_ref
                         #data_thumbnails[i_tn, i_pos] = orient_data (
@@ -4387,7 +4514,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_trans')
+        log_timing_memory (t0=t, label='in get_trans')
 
     return table_trans, dict_thumbnails
 
@@ -5008,7 +5135,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
                         # reference image and its orientation is
                         # the same as that of the new, D and Scorr
                         # images, and so the same header
-                        # (header_toadd=header_newzogy) should be
+                        # (header2add=header_newzogy) should be
                         # used rather than the reference image
                         # header header_ref
                         #data_thumbnails[i_tn, i_pos] = orient_data (
@@ -5029,7 +5156,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_trans_old')
+        log_timing_memory (t0=t, label='in get_trans_old')
 
     return ntrans, data_thumbnails
 
@@ -5794,7 +5921,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_psfoptflux')
+        log_timing_memory (t0=t, label='in get_psfoptflux')
 
 
     # return optimal flux, which can refer to a limiting flux
@@ -5972,7 +6099,7 @@ def get_apflux (xcoords, ycoords, data, data_mask, fwhm, objmask=None,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_apflux')
+        log_timing_memory (t0=t, label='in get_apflux')
 
 
     return list2return
@@ -6379,7 +6506,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_psfoptflux_mp')
+        log_timing_memory (t0=t, label='in get_psfoptflux_mp')
 
 
     return list2return
@@ -7629,7 +7756,7 @@ def clipped_stats(array, nsigma=3, max_iters=10, epsilon=1e-6, clip_upper_frac=0
         plt.close()
 
     if verbose and get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='clipped_stats')
+        log_timing_memory (t0=t, label='in clipped_stats')
 
     if get_mode:
         if get_median:
@@ -7854,17 +7981,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                         fits2remap2='{}.fits'.format(base_new), value_edge=0,
                         resampling_type='NEAREST', update_header=False):
 
-            # update header of fits image with that of the original
-            # wcs-corrected reference image (needed if header does not
-            # correspond to that of the reference image, e.g. for the mask)
+
+            # update header of fits2remap image with that of the
+            # original wcs-corrected reference image (needed if header
+            # does not correspond to that of the reference image,
+            # e.g. for the mask)
             if update_header:
                 log.info('updating header of {}'.format(fits2remap))
-                header2remap['DATEFILE'] = (Time.now().isot,
-                                            'UTC date of writing file')
-                with fits.open(fits2remap, 'update', memmap=True) as hdulist:
-                    hdulist[0].header = header2remap
-                # previously overwrote not just header but also the data:
-                #fits.writeto(fits2remap, data2remap, header2remap, overwrite=True)
+                update_imcathead(fits2remap, header2remap)
 
 
             # project fits image to new image
@@ -7879,6 +8003,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                timing=get_par(set_zogy.timing,tel),
                                nthreads=nthreads, tel=tel, set_zogy=set_zogy)
             data_remapped = read_hdulist (fits_out)
+
 
             return data_remapped
 
@@ -8329,8 +8454,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # update header of input fits image with keywords added by
             # PSFEx and [phot_calibrate]; the function [run_force_phot]
             # requires the zeropoint to be present in the header
-            with fits.open(input_fits, 'update', memmap=True) as hdulist:
-                hdulist[0].header = header
+            update_imcathead (input_fits, header)
 
 
             # perform forced photometry on input_fits at relevant
@@ -8419,8 +8543,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     # update header of input fits image with keywords added by
     # different functions
-    with fits.open('{}.fits'.format(base), 'update', memmap=True) as hdulist:
-        hdulist[0].header = header
+    update_imcathead ('{}.fits'.format(base), header)
 
 
     # ------------------------
@@ -8501,7 +8624,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t2, label='filling fftdata cubes')
+        log_timing_memory (t0=t2, label='in filling fftdata cubes')
 
 
     # call function [prep_plots] to make various plots
@@ -8522,7 +8645,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='prep_optimal_subtraction')
+        log_timing_memory (t0=t, label='in prep_optimal_subtraction')
 
 
     return dict_fftdata, dict_psf, psf_orig, dict_fftdata_bkg_std
@@ -8815,7 +8938,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t1, label='deriving optimal fluxes')
+        log_timing_memory (t0=t1, label='in deriving optimal fluxes')
 
 
     if get_par(set_zogy.timing,tel): t2 = time.time()
@@ -9371,7 +9494,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='phot_calibrate')
+        log_timing_memory (t0=t, label='in phot_calibrate')
 
 
     return zp, zp_std, ncal_used, airmass_cal
@@ -9490,7 +9613,7 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='run_force_phot')
+        log_timing_memory (t0=t, label='in run_force_phot')
 
 
     return table_force_phot
@@ -9527,7 +9650,7 @@ def get_imagestars_zones (fits_cal, obsdate, ra_center, dec_center,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_imagestars_zones')
+        log_timing_memory (t0=t, label='in get_imagestars_zones')
 
 
     # return relevant indices as an astropy Table
@@ -9612,7 +9735,7 @@ def get_imagestars_hpindex (fits_gaia, obsdate, ra_center, dec_center,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_imagestars_hpindex')
+        log_timing_memory (t0=t, label='in get_imagestars_hpindex')
 
 
     # return relevant indices
@@ -10153,7 +10276,7 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
                  .format(zp, zp_std, nused))
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='calc_zp')
+        log_timing_memory (t0=t, label='in calc_zp')
 
 
     return zp, zp_std, nused
@@ -10651,7 +10774,7 @@ def find_stars (ra_cat, dec_cat, ra, dec, dist, rot=0, search='box', sort=False)
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='find_stars')
+        log_timing_memory (t0=t, label='in find_stars')
 
 
     return index_dist
@@ -10695,7 +10818,7 @@ def find_stars_orig (ra_cat, dec_cat, ra, dec, dist, search='box',
         index_dist = index_dist[index_sort]
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='find_stars')
+        log_timing_memory (t0=t, label='in find_stars')
 
     return index_dist
 
@@ -10885,7 +11008,7 @@ def fixpix (data, satlevel=60000, data_bkg_std=None, data_mask=None,
 
 
     if timing:
-        log_timing_memory (t0=t, label='fixpix')
+        log_timing_memory (t0=t, label='in fixpix')
 
     return data_fixed
 
@@ -11200,7 +11323,7 @@ def get_back_orig (data, header, objmask, imtype, clip=True, fits_mask=None):
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_back')
+        log_timing_memory (t0=t, label='in get_back')
 
 
     if False:
@@ -11501,7 +11624,7 @@ def get_back (data, header, fits_objmask, fits_mask=None,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_back')
+        log_timing_memory (t0=t, label='in get_back')
 
 
     # mini_bkg and mini_std are float64 (which is what
@@ -11628,7 +11751,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing bkg_corr_MLBG ...')
-    mem_use (label='start of bkg_corr_MLBG')
+    mem_use (label='at start of bkg_corr_MLBG')
 
 
     # determine channel pixels for full and mini images
@@ -11882,7 +12005,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='bkg_corr_MLBG')
+        log_timing_memory (t0=t, label='in bkg_corr_MLBG')
 
 
     return bkg_corr, mini_median_2Dfit
@@ -12294,7 +12417,7 @@ def mini2back (data_mini, output_shape, order_interp=3, bkg_boxsize=None,
 
 
     if timing:
-        log_timing_memory (t0=t, label='mini2back')
+        log_timing_memory (t0=t, label='in mini2back')
 
 
     return data_full
@@ -12754,7 +12877,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_psf')
+        log_timing_memory (t0=t, label='in get_psf')
 
     return dict_psf_ima_shift, psf_ima
 
@@ -13008,7 +13131,7 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, fit_gauss=False)
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='fit_moffat')
+        log_timing_memory (t0=t, label='in fit_moffat')
 
 
 ################################################################################
@@ -13730,7 +13853,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_fratio_dxdy')
+        log_timing_memory (t0=t, label='in get_fratio_dxdy')
 
     return success, x_psf_new_match, y_psf_new_match, fratio_match, \
         dx_match, dy_match, fratio_subs, dx_subs, dy_subs
@@ -14066,7 +14189,7 @@ def get_fratio_dxdy_orig (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_fratio_dxdy')
+        log_timing_memory (t0=t, label='in get_fratio_dxdy')
 
     return success, x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
         fratio_subs, dx_subs, dy_subs
@@ -14459,10 +14582,11 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # place; compared to the old version this saves an image write
     result = sip_to_pv(header_wcs, tpv_format=True, preserve=False)
 
-    # update input header with [header_wcs]
-    #header += header_wcs
-    for key in header_wcs:
-        header[key] = (header_wcs[key], header_wcs.comments[key])
+    # strip header_wcs from any image- or table-dependent keywords
+    header_wcs.strip()
+
+    # update header with wcs keywords
+    header.update(header_wcs)
 
 
     # use astropy.WCS to find RA, DEC corresponding to X_POS,
@@ -14691,9 +14815,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 
     # update header of input image
-    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
-    with fits.open(image_in, 'update', memmap=True) as hdulist:
-        hdulist[0].header = header
+    update_imcathead (image_in, header)
 
 
     # remove file(s) if not keeping intermediate/temporary files
@@ -14711,10 +14833,10 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t3, label='calculate offset wrt external catalog')
+        log_timing_memory (t0=t3, label='to calculate offset wrt external catalog')
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='run_wcs')
+        log_timing_memory (t0=t, label='in run_wcs')
 
     return
 
@@ -14904,7 +15026,7 @@ def ldac2fits_alt (cat_ldac, cat_fits):
     table.write (cat_fits, format='fits', overwrite=True)
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='ldac2fits_alt')
+        log_timing_memory (t0=t, label='in ldac2fits_alt')
 
     return
 
@@ -14940,7 +15062,7 @@ def ldac2fits (cat_ldac, cat_fits):
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='ldac2fits')
+        log_timing_memory (t0=t, label='in ldac2fits')
 
     return
 
@@ -14974,7 +15096,7 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
     header_ref = read_hdulist (image_ref, get_data=False, get_header=True)
 
     # create .head file with header info from [image_new]
-    header_out = header_new
+    header_out = header_new.copy()
 
     # not necessary to copy these reference image keywords to the
     # remapped image as its header is not used anyway
@@ -15108,7 +15230,7 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
 
 
     if timing:
-        log_timing_memory (t0=t, label='run_remap')
+        log_timing_memory (t0=t, label='in run_remap')
 
     return
 
@@ -15258,7 +15380,7 @@ def get_fwhm (fits_cat, fraction, class_sort=False, get_elong=False, nmin=5):
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='get_fwhm')
+        log_timing_memory (t0=t, label='in get_fwhm')
 
 
     if get_elong:
@@ -15570,7 +15692,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
             raise Exception(msg)
 
         if get_par(set_zogy.timing,tel):
-            log_timing_memory (t0=t, label='run_sextractor before get_back')
+            log_timing_memory (t0=t, label='in run_sextractor before get_back')
 
 
         # improve background and its standard deviation estimate if
@@ -15719,7 +15841,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='run_sextractor')
+        log_timing_memory (t0=t, label='in run_sextractor')
 
     return fwhm, fwhm_std, elong, elong_std
 
@@ -16019,7 +16141,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
 
         if get_par(set_zogy.timing,tel):
             log_timing_memory (
-                t0=t,label='limiting entries in LDAC input catalog for PSFEx')
+                t0=t,label='in limiting entries in LDAC input catalog for PSFEx')
 
 
 
@@ -16181,7 +16303,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='run_psfex')
+        log_timing_memory (t0=t, label='in run_psfex')
 
     return
 
@@ -16611,7 +16733,7 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
 
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='run_ZOGY')
+        log_timing_memory (t0=t, label='in run_ZOGY')
 
     #return D, S, Scorr, alpha, alpha_std
     return D, Scorr, alpha, alpha_std
@@ -16715,7 +16837,7 @@ def run_ZOGY_backup(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
     alpha_std[V_S>=0] = np.sqrt(V_S[V_S>=0]) / F_S
 
     if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='run_ZOGY')
+        log_timing_memory (t0=t, label='in run_ZOGY')
 
     return D, S, Scorr, alpha, alpha_std
 
@@ -16724,7 +16846,7 @@ def run_ZOGY_backup(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
 
 def log_timing_memory(t0, label=''):
 
-    log.info ('wall-time spent in {}: {:.3f} s'.format(label, time.time()-t0))
+    log.info ('wall-time spent {}: {:.3f} s'.format(label, time.time()-t0))
     mem_use (label=label)
 
     return
@@ -16745,8 +16867,9 @@ def disk_use (path=None, label=''):
             path = '.'
 
 
-    # if path does not exist, shutil command will fail
-    if isdir(path):
+    # if path does not exist, or is a google cloud bucket, shutil
+    # command will fail
+    if path[0:5] != 'gs://' and os.path.exists(path):
 
         total, used, free = shutil.disk_usage(path)
         norm = 1024**3
@@ -16755,7 +16878,7 @@ def disk_use (path=None, label=''):
 
     else:
 
-        log.warn ('path {} not found in zogy.disk_use')
+        log.warn ('invalid path {} in zogy.disk_use')
 
 
     return
