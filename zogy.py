@@ -4192,8 +4192,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         nbad = np.sum(~mask_finite)
         if nbad > 0:
             mask_keep &= mask_finite
-            log.warning ('column {} contains {} infinite or NaN value(s) for image '
-                         '{}; discarding the corresponding row(s): {}'
+            log.warning ('column {} contains {} infinite or NaN value(s) for '
+                         'image {}; discarding the corresponding row(s): {}'
                          .format(col, nbad, fits_new, row_numbers[~mask_finite]))
     # filter
     if not keep_all:
@@ -4252,9 +4252,11 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         # Gauss fit to D, directly added as columns to table_trans
         colnames = ['X_GAUSS_D', 'XERR_GAUSS_D', 'Y_GAUSS_D', 'YERR_GAUSS_D',
                     'FWHM_GAUSS_D', 'ELONG_GAUSS_D', 'CHI2_GAUSS_D']
-        table_trans.add_columns(help_psffit_D (False, False, True), names=colnames)
+        table_trans.add_columns(help_psffit_D (False, False, True),
+                                names=colnames)
 
-        log.info ('[get_trans] time after Gauss fit to D: {}'.format(time.time()-t))
+        log.info ('[get_trans] time after Gauss fit to D: {}'
+                  .format(time.time()-t))
 
 
         if get_par(set_zogy.make_plots,tel):
@@ -4276,14 +4278,15 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             nbad = np.sum(~mask_finite)
             if nbad > 0:
                 mask_keep &= mask_finite
-                log.warning ('column {} contains {} infinite or NaN values for image '
-                             '{}; discarding the corresponding row(s)'
+                log.warning ('column {} contains {} infinite or NaN values for '
+                             'image {}; discarding the corresponding row(s)'
                              .format(col, nbad, fits_new))
         # filter
         if not keep_all:
             table_trans = table_trans[mask_keep]
 
-        log.info('ntrans after Gauss fit chi2 filter: {}'.format(len(table_trans)))
+        log.info('ntrans after Gauss fit chi2 filter: {}'
+                 .format(len(table_trans)))
 
 
         if get_par(set_zogy.make_plots,tel):
@@ -5191,7 +5194,8 @@ def get_edge_coords (data_mask):
 
 ################################################################################
 
-def prep_ds9regions(filename, x, y, radius=5, width=2, color='green', value=None):
+def prep_ds9regions(filename, x, y, radius=5, width=2, color='green',
+                    value=None):
 
     """Function that creates a text file with the name [filename] that
     can be used to mark objects at an array of pixel positions (x,y)
@@ -5257,9 +5261,11 @@ def trans_measure(I, x_index, y_index, var_bkg=0):
 
     # use function [get_shape_parameters] to get A, B, THETA and their
     # errors
-    A, B, THETA, ERRA, ERRB, ERRTHETA = get_shape_parameters (X2, Y2, XY, ERRX2, ERRY2, ERRXY)
+    A, B, THETA, ERRA, ERRB, ERRTHETA = get_shape_parameters (
+        X2, Y2, XY, ERRX2, ERRY2, ERRXY)
 
-    return X, Y, X2, Y2, XY, ERRX2, ERRY2, ERRXY, A, B, THETA, ERRA, ERRB, ERRTHETA
+    return X, Y, X2, Y2, XY, ERRX2, ERRY2, ERRXY, A, B, THETA, \
+        ERRA, ERRB, ERRTHETA
 
 
 ################################################################################
@@ -14292,6 +14298,73 @@ def ds9_arrays(regions=None, **kwargs):
 
 ################################################################################
 
+def create_brightcat (table_sex, nbright, base, use_allstars=False):
+
+    # feed Astrometry.net only with brightest sources; N.B.: keeping
+    # only objects with zero FLAGS does not work well in crowded
+    # fields select stars for finding WCS solution
+    #mask_use = (data_sexcat['FLAGS']<=1)
+
+    # the above selection is not working well for crowded images
+    # either; Danielle found the following to work well for both
+    # non-crowded as crowded images, i.e. use all objects that are not
+    # masked according to the input mask (any pixel within the
+    # isophotal area of an object):
+    if 'FLAGS_MASK' in table_sex.colnames:
+        mask_use = (table_sex['FLAGS_MASK']==0)
+    else:
+        mask_use = (table_sex['FLAGS']<=3)
+
+
+    # Gavin suggested using saturated stars is not much of an issue:
+    # if use_allstars is True, disregard the FLAGs
+    if use_allstars:
+        mask_use = np.ones(len(table_sex), dtype=bool)
+
+
+    # sort in brightness (E_FLUX_AUTO)
+    if 'E_FLUX_AUTO' in table_sex.colnames:
+        column_sort = 'E_FLUX_AUTO'
+    elif 'E_FLUX_OPT' in table_sex.colnames:
+        column_sort = 'E_FLUX_OPT'
+    else:
+        column_sort = 'E_FLUX_APER_R5xFWHM'
+
+
+    index_sort = np.argsort(table_sex[mask_use][column_sort])
+    # sorting is done by flux, so reverse [index_sort] to have the
+    # brightest objects first
+    index_sort = index_sort[::-1]
+
+
+    # subset of table_sex, sorted in brightness
+    table_sex_use_sort = table_sex[mask_use][index_sort]
+
+
+    # select the brightest objects
+    index_bright = uniform_subset (table_sex_use_sort['X_POS'].value,
+                                   table_sex_use_sort['Y_POS'].value, nbright)
+    table_sex_bright = table_sex_use_sort[index_bright]
+
+    # save to fits
+    sexcat_bright = '{}_cat_bright.fits'.format(base)
+    table_sex_bright.write(sexcat_bright, format='fits', overwrite=True)
+
+
+    # create ds9 regions text file to show the brightest stars
+    if get_par(set_zogy.make_plots,tel):
+        prep_ds9regions('{}_cat_bright_ds9regions.txt'.format(base),
+                        table_sex_bright['X_POS'].value,
+                        table_sex_bright['Y_POS'].value,
+                        radius=5., width=2, color='green',
+                        value=np.arange(1,nbright+1))
+
+
+    return mask_use, column_sort, index_sort, index_bright
+
+
+################################################################################
+
 def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -14311,59 +14384,6 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     table_sex = Table.read(sexcat, memmap=True)
 
 
-    # feed Astrometry.net only with brightest sources; N.B.: keeping
-    # only objects with zero FLAGS does not work well in crowded
-    # fields select stars for finding WCS solution
-    #mask_use = (data_sexcat['FLAGS']<=1)
-
-    # the above selection is not working well for crowded images
-    # either; Danielle found the following to work well for both
-    # non-crowded as crowded images, i.e. use all objects that are not
-    # masked according to the input mask (any pixel within the
-    # isophotal area of an object):
-    if 'FLAGS_MASK' in table_sex.colnames:
-        mask_use = (table_sex['FLAGS_MASK']==0)
-    else:
-        mask_use = (table_sex['FLAGS']<=3)
-
-    # sort in brightness (E_FLUX_AUTO)
-    if 'E_FLUX_AUTO' in table_sex.colnames:
-        column_sort = 'E_FLUX_AUTO'
-    elif 'E_FLUX_OPT' in table_sex.colnames:
-        column_sort = 'E_FLUX_OPT'
-    else:
-        column_sort = 'E_FLUX_APER_R5xFWHM'
-
-    index_sort = np.argsort(table_sex[mask_use][column_sort])
-    # sorting is done by flux, so reverse [index_sort] to have the
-    # brightest objects first
-    index_sort = index_sort[::-1]
-
-
-    # subset of table_sex, sorted in brightness
-    table_sex_use_sort = table_sex[mask_use][index_sort]
-
-
-    # select the brightest objects
-    nbright = get_par(set_zogy.ast_nbright,tel)
-    index_bright = uniform_subset (table_sex_use_sort['X_POS'].value,
-                                   table_sex_use_sort['Y_POS'].value, nbright)
-    table_sex_bright = table_sex_use_sort[index_bright]
-
-    # save to fits
-    sexcat_bright = '{}_cat_bright.fits'.format(base)
-    table_sex_bright.write(sexcat_bright, format='fits', overwrite=True)
-
-
-    # create ds9 regions text file to show the brightest stars
-    if get_par(set_zogy.make_plots,tel):
-        result = prep_ds9regions('{}_cat_bright_ds9regions.txt'.format(base),
-                                 table_sex_bright['X_POS'].value,
-                                 table_sex_bright['Y_POS'].value,
-                                 radius=5., width=2, color='green',
-                                 value=np.arange(1,nbright+1))
-
-
     # output folder
     dir_out = '.'
     if '/' in base:
@@ -14371,9 +14391,16 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         #dir_out = '/'.join(base.split('/')[:-1])
 
 
+    # use brightest nbright stars from catalog
+    nbright = get_par(set_zogy.ast_nbright,tel)
+
+    # name of bright star catalog
+    sexcat_bright = '{}_cat_bright.fits'.format(base)
+
+
     # string with depths
-    dstep = 30
-    depth_str = (str(list(range(dstep,nbright//2+1,dstep)))
+    dstep = 50
+    depth_str = (str(list(range(dstep,nbright//3+1,dstep)))
                  .replace('[','').replace(']','').replace(' ',''))
 
 
@@ -14383,7 +14410,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
            #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'X_POS',
            '--y-column', 'Y_POS',
-           '--sort-column', column_sort,
+           #'--sort-column', column_sort,  # added further below
            '--no-remove-lines',
            '--uniformize', '0',
            # only work on brightest sources
@@ -14433,52 +14460,106 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         cmd += ['--parity', parity_str]
 
 
-    # log cmd executed
-    cmd_str = ' '.join(cmd)
-    log.info('Astrometry.net command executed:\n{}'.format(cmd_str))
 
-    result = subprocess.run(cmd, capture_output=True)
-    status = result.returncode
-    log.info('stdout: {}'.format(result.stdout.decode('UTF-8')))
-    log.info('stderr: {}'.format(result.stderr.decode('UTF-8')))
-    log.info('status: {}'.format(status))
+    if get_par(set_zogy.timing,tel):
+        t2 = time.time()
 
 
-    if isfile('{}.solved'.format(base)) and status==0:
 
-        # read .match file, which describes the quad match that solved the
-        # image, before it is deleted
-        table_match = Table.read('{}.match'.format(base), memmap=True)
+    # perform 2 iterations of solve-field: first one does not use
+    # stars that are flagged because of e.g. saturation; this makes it
+    # more difficult for Astrometry.net to find matches with the index
+    # files, which have a fixed bright magnitude limit. If that fails,
+    # another attempt is made using all stars irrespective of their
+    # flags. This will lead to a larger error on the solution, up to a
+    # factor of about 2 for fields with many saturated stars, but that
+    # is still acceptable.
+    for niter in range(2):
 
-        # calculate median x- and y-position of the calibration stars
-        # recorded by Astrometry.net, to see if they are well spread
-        # across the entire image
-        filename_xyls = '{}-indx.xyls'.format(base)
-        if isfile(filename_xyls):
-
-            table_xyls = Table.read(filename_xyls, memmap=True)
-            log.info ('median normalized x-coord. of Anet index stars in FOV: '
-                      '{:.2f} +- {:.2f}'
-                      .format(np.median(table_xyls['X'])/width,
-                              np.std(table_xyls['X'])/width))
-            log.info ('median normalized y-coord. of Anet index stars in FOV: '
-                      '{:.2f} +- {:.2f}'
-                      .format(np.median(table_xyls['Y'])/height,
-                              np.std(table_xyls['Y'])/height))
-
-    else:
-        msg = ('solve-field (Astrometry.net) failed with exit code {}'
-               .format(status))
-        log.exception(msg)
-        raise Exception(msg)
+        if niter == 0:
+            mask_use, column_sort, index_sort, index_bright = create_brightcat (
+                table_sex, nbright, base)
+        else:
+            mask_use, column_sort, index_sort, index_bright = create_brightcat (
+                table_sex, nbright, base, use_allstars=True)
 
 
-    if get_par(set_zogy.timing,tel): t2 = time.time()
+        # add sorting column; even though catalog with bright entries
+        # is already sorted in flux, with brightest objects at the
+        # top, this is sorting column is important to include
+        cmd_process = cmd + ['--sort-column', column_sort]
+
+        # log cmd executed
+        cmd_str = ' '.join(cmd_process)
+        log.info('Astrometry.net command executed:\n{}'.format(cmd_str))
+
+        result = subprocess.run(cmd_process, capture_output=True)
+        status = result.returncode
+        log.info('stdout: {}'.format(result.stdout.decode('UTF-8')))
+        log.info('stderr: {}'.format(result.stderr.decode('UTF-8')))
+        log.info('status: {}'.format(status))
+
+
+        if isfile('{}.solved'.format(base)) and status==0:
+
+            # in case of success after 2nd attempt: re-determine
+            # mask_use and index_sort for non-flagged stars, so
+            # saturated stars are not included in solution statistics
+            # calculated below
+            if niter == 1:
+                mask_use, column_sort, index_sort, index_bright = create_brightcat (
+                    table_sex, nbright, base)
+
+
+            # break out of loop
+            break
+
+
+        else:
+
+            # try again using all stars, i.e. included the saturated ones
+            if niter == 0:
+                log.info ('solve-field (Astrometry.net) first attempt failed '
+                          'with exit code {}; trying again using all bright '
+                          'stars, irrespective of their flags'.format(status))
+            else:
+                msg = ('solve-field (Astrometry.net) failed with exit code {} '
+                       'on second attempt'.format(status))
+                log.exception(msg)
+                raise Exception(msg)
+
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t2, label='to execute solve-field')
+
+
+
+    # read .match file, which describes the quad match that solved the
+    # image, before it is deleted
+    table_match = Table.read('{}.match'.format(base), memmap=True)
+
+    # calculate median x- and y-position of the calibration stars
+    # recorded by Astrometry.net, to see if they are well spread
+    # across the entire image
+    filename_xyls = '{}-indx.xyls'.format(base)
+    if isfile(filename_xyls):
+
+        table_xyls = Table.read(filename_xyls, memmap=True)
+        log.info ('median normalized x-coord. of Anet index stars in FOV: '
+                  '{:.2f} +- {:.2f}'
+                  .format(np.median(table_xyls['X'])/width,
+                          np.std(table_xyls['X'])/width))
+        log.info ('median normalized y-coord. of Anet index stars in FOV: '
+                  '{:.2f} +- {:.2f}'
+                  .format(np.median(table_xyls['Y'])/height,
+                          np.std(table_xyls['Y'])/height))
 
 
     # read header saved in .wcs
     wcsfile = '{}.wcs'.format(base)
     header_wcs = read_hdulist (wcsfile, get_data=False, get_header=True)
+
 
     # remove HISTORY, COMMENT and DATE fields from Astrometry.net header
     # they are still present in the base+'.wcs' file
@@ -16878,7 +16959,7 @@ def disk_use (path=None, label=''):
 
     else:
 
-        log.warn ('invalid path {} in zogy.disk_use')
+        log.warning ('invalid path {} in zogy.disk_use')
 
 
     return
