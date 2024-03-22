@@ -25,16 +25,16 @@ Suggested steps to get started:
 
 (3) for BlackGEM and MeerLICHT we use various calibration files; you can find these at https://surfdrive.surf.nl/files/index.php/s/ShRamgz5SxbA77n. However, most of these are specific to MeerLICHT and BlackGEM, including the photometric calibration catalogue and the transient real/bogus classification. Another cautionary note: the fits table GaiaDR3_all_HP4_highPM.fits, used to be able to perform forced photometry at Gaia DR3 positions, is very large: ~72GB!
 
-If you use (some of) them, you need to update the settings file parameter *cal_dir* to point to the folder where you put them.
+If you use (some of) them, you need to update the settings file parameter **cal_dir** to point to the folder where you put them.
 
-Very likely you will need to use your own Astrometry.net index files. If you already have these available, you can update the settings file parameter *astronet_config* to point to the existing configuration file.
+Very likely you will need to use your own Astrometry.net index files. If you already have these available, you can update the settings file parameter **astronet_config** to point to the existing configuration file.
 
 
 (4) open a shell in the container:
 
     singularity shell [path to container]/MLBG_[version].sif
 
-(5) inside the container, the zogy software is in /Software/ZOGY and the settings file is in /Software/ZOGY/Settings/set_zogy.py. You cannot edit these files inside the container. For the settings file, you can copy it to some folder, edit it and provide it with the command-line input parameter *set_file*. Alternatively, you can also add that folder to the front of your PYTHONPATH environment variable. E.g.:
+(5) inside the container, the zogy software is in /Software/ZOGY and the settings file is in /Software/ZOGY/Settings/set_zogy.py. You cannot edit these files inside the container. For the settings file, you can copy it to some folder, edit it and provide it with the command-line input parameter **set_file**. Alternatively, you can also add that folder to the front of your PYTHONPATH environment variable. E.g.:
 
     export PYTHONPATH=[path to your zogy folder]:$PYTHONPATH
 
@@ -58,14 +58,19 @@ Then those modules will be be used instead of the default ones in /Software. N.B
 - instead of MeerLICHT, use the dictionary keys corresponding to
   "my_tel" defined in the settings file:
 
-    python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --telescope my_tel
+  ```
+  python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --telescope my_tel
+  ```
+
 
 - instead of the default settings file (set_zogy.py), use a copy of it
   that was adapted to your images (depending on whether copy contains
   dictionaries for some parameters or not, the telescope input
   parameter should be provided or not):
 
-    python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
+  ```
+  python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
+  ```
 
 
 - if you have mask images available (settings parameters
@@ -73,16 +78,21 @@ Then those modules will be be used instead of the default ones in /Software. N.B
   masks contain different values for the mask pixel type; the keys
   cannot be changed):
 
-    python /Software/ZOGY/zogy.py --new_fits new.fits --new_fits_mask new_mask.fits --ref_fits ref.fits --ref_fits_mask ref_mask.fits --set_file mycopy [--telescope my_tel]
-
+  ```
+  python /Software/ZOGY/zogy.py --new_fits new.fits --new_fits_mask new_mask.fits --ref_fits ref.fits --ref_fits_mask ref_mask.fits --set_file mycopy [--telescope my_tel]
+  ```
 
 (9) instead of opening a shell in the container, you can also run commands from outside as follows:
 
+    ```
     singularity exec [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
+    ```
 
 To update the PYTHONPATH while using exec:
 
-    singularity exec --env PYTHONPATH="[path to your zogy folder]:\$PYTHONPATH" [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
+   ```
+   singularity exec --env PYTHONPATH="[path to your zogy folder]:\$PYTHONPATH" [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
+   ```
 
 
 This project is licensed under the terms of the MIT license.
