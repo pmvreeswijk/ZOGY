@@ -1,7 +1,7 @@
 # ZOGY
 a Python implementation of proper image subtraction (Zackay, Ofek &amp; Gal-Yam 2016, ApJ, 830, 27), with vital input from Barak Zackay and Eran Ofek; adapted by Kerry Paterson for integration into pipeline for MeerLICHT.
 
-This module accepts a new and a reference fits image, runs SExtractor on them, finds their WCS solution using Astrometry.net, uses PSFex to infer the position-dependent PSFs of the images and SWarp to map the reference image to the new image and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), the corrected significance image (Scorr), and PSF photometry image (Fpsf - alpha in the paper) and associated error image (Fpsferr). The inferred PSFs are also used to extract optimal photometry (following Horne 1986, PASP, 98, 609) of all sources detected by SExtractor. The configuration files of SExtractor, PSFex and SWarp are located in the Config directory.
+This module accepts a new and a reference fits image, runs SExtractor on them, finds their WCS solution using Astrometry.net, uses PSFex to infer the position-dependent PSFs of the images and SWarp to map the reference image to the new image and performs optimal image subtraction following Zackay et al. (2016) to produce the subtracted image (D), the significance image (S), the corrected significance image (Scorr), and PSF photometry image (Fpsf - alpha in the paper) and associated error image (Fpsferr). The inferred PSFs are also used to extract optimal photometry (following Horne 1986, PASP, 98, 609) of all sources detected by SExtractor. It is also possible to perform forced photometry on all Gaia DR3 sources in the field-of-view. The configuration files of SExtractor, PSFex and SWarp are located in the Config directory.
 
 It makes grateful use of the following programs:
 
@@ -9,7 +9,6 @@ It makes grateful use of the following programs:
 - SExtractor: http://www.astromatic.net/software/sextractor
 - SWarp: http://www.astromatic.net/software/swarp
 - PSFex: http://www.astromatic.net/software/psfex
-- ds9
 - sip_to_pv package from David Shupe: https://github.com/stargaser/sip_tpv
 - pyfftw to speed up the many FFTs performed
 - the other modules imported at the top (e.g. astropy, matplotlib, etc.)
