@@ -48,28 +48,28 @@ Then those modules will be be used instead of the default ones in /Software. N.B
 
 (8) some examples how to run it:
 
-    - run it on a "new.fits" and "ref.fits" using the default MeerLICHT settings:
+- run it on a "new.fits" and "ref.fits" using the default MeerLICHT settings:
 
     python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
 
 
-    - instead of MeerLICHT, use the dictionary keys corresponding to
-      "my_tel" defined in the settings file:
+- instead of MeerLICHT, use the dictionary keys corresponding to
+  "my_tel" defined in the settings file:
 
     python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --telescope my_tel
 
-    - instead of the default settings file (set_zogy.py), use a copy
-      of it that was adapted to your images (depending on whether copy
-      contains dictionaries for some parameters or not, the telescope
-      input parameter should be provided or not):
+- instead of the default settings file (set_zogy.py), use a copy of it
+  that was adapted to your images (depending on whether copy contains
+  dictionaries for some parameters or not, the telescope input
+  parameter should be provided or not):
 
     python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits --set_file mycopy [--telescope my_tel]
 
 
-    - if you have mask images available (settings parameters
-      [transient_mask_max] and [mask_value] should be updated if your
-      masks contain different values for the mask pixel type; the keys
-      cannot be changed):
+- if you have mask images available (settings parameters
+  [transient_mask_max] and [mask_value] should be updated if your
+  masks contain different values for the mask pixel type; the keys
+  cannot be changed):
 
     python /Software/ZOGY/zogy.py --new_fits new.fits --new_fits_mask new_mask.fits --ref_fits ref.fits --ref_fits_mask ref_mask.fits --set_file mycopy [--telescope my_tel]
 
@@ -78,7 +78,7 @@ Then those modules will be be used instead of the default ones in /Software. N.B
 
     singularity exec [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
 
-    To update the PYTHONPATH while using exec:
+To update the PYTHONPATH while using exec:
 
     singularity exec --env PYTHONPATH="[path to your zogy folder]:\$PYTHONPATH" [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
 
