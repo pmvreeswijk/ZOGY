@@ -50,7 +50,9 @@ Then those modules will be be used instead of the default ones in /Software. N.B
 
 - run it on a "new.fits" and "ref.fits" using the default MeerLICHT settings:
 
-    python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
+  ```
+  python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
+  ```
 
 
 - instead of MeerLICHT, use the dictionary keys corresponding to
