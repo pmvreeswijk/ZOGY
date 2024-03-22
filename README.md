@@ -69,7 +69,7 @@ Then those modules will be be used instead of the default ones in /Software. N.B
     python /Software/ZOGY/zogy.py --new_fits new.fits --new_fits_mask new_mask.fits --ref_fits ref.fits --ref_fits_mask ref_mask.fits --set_file mycopy [--telescope my_tel]
 
 
-(9) instead of opening a shell in the container, you can also run commands as follows:
+(9) instead of opening a shell in the container, you can also run commands from outside as follows:
 
     singularity exec [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
 
