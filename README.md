@@ -25,6 +25,11 @@ Suggested steps to get started:
 
 (3) for BlackGEM and MeerLICHT we use various calibration files; you can find these at https://surfdrive.surf.nl/files/index.php/s/ShRamgz5SxbA77n. However, most of these are specific to MeerLICHT and BlackGEM, including the photometric calibration catalogue and the transient real/bogus classification. Another cautionary note: the fits table GaiaDR3_all_HP4_highPM.fits, used to be able to perform forced photometry at Gaia DR3 positions, is very large: ~72GB!
 
+If you use (some of) them, you need to update the settings file parameter cal_dir to point to the folder where you put them.
+
+Very likely you will need to use your own Astrometry.net index files. If you already have these available, you can update the settings file parameter astronet_config to point to the existing configuration file.
+
+
 (4) open a shell in the container:
 
     singularity shell [path to container]/MLBG_[version].sif
