@@ -88,9 +88,7 @@ Then those modules will be be used instead of the default ones in /Software. N.B
 
 To update the PYTHONPATH while using exec:
 
-    ```
     singularity exec --env PYTHONPATH="[path to your zogy folder]:\$PYTHONPATH" [path to container]/MLBG_[version].sif python /Software/ZOGY/zogy.py --new_fits new.fits --ref_fits ref.fits
-    ```
 
 
 This project is licensed under the terms of the MIT license.
