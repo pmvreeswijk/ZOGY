@@ -1162,8 +1162,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
         # for ML/BG delete unnecesary images
-        if (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-            not get_par(set_zogy.keep_tmp,tel)):
+        if tel[0:2] in ['ML','BG'] and not get_par(set_zogy.keep_tmp,tel):
 
             fits_new_bkg = '{}_bkg.fits'.format(base_newref)
             ref_fits_bkg_std = '{}_bkg_std.fits'.format(base_remap)
@@ -1224,8 +1223,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # the transient catalog just created, using the function
         # get_ML_prob_real
         ML_prob_real = None
-        if (get_par(set_zogy.ML_calc_prob,tel) and
-            tel in ['ML1', 'BG2', 'BG3', 'BG4']):
+        if get_par(set_zogy.ML_calc_prob,tel) and tel[0:2] in ['ML','BG']:
 
             try:
                 ML_processed = False
@@ -1350,8 +1348,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                     nthreads=nthreads)
 
             # for ML/BG delete unnecesary images
-            if (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-                not get_par(set_zogy.keep_tmp,tel)):
+            if tel[0:2] in ['ML','BG'] and not get_par(set_zogy.keep_tmp,tel):
 
                 # remove
                 list2remove = [ref_fits, ref_fits_mask]
@@ -2358,7 +2355,7 @@ def orient_data (data, header, header_out=None, MLBG_rot90_flip=False,
         # do the remapping
         data2return = data
 
-    elif MLBG_rot90_flip and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+    elif MLBG_rot90_flip and tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']:
 
         #log.info ('for ML/BG: rotating data by exactly 90 degrees and for '
         #          'ML also flip left/right')
@@ -2720,6 +2717,8 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
 
     """
 
+    t0 = time.time()
+
     if isfile(fits_file):
         fits_file_read = fits_file
 
@@ -2801,6 +2800,10 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
 
             if get_header:
                 header = hdulist[ext].header
+
+
+    log.info ('wall-time spent in read_hdulist to read {}: {:.3f} s'
+              .format(fits_file_read, time.time()-t0))
 
 
     # return data and header depending on whether [get_data]
@@ -3235,7 +3238,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                               ]
 
 
-        if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        if ML_calc_prob and tel[0:2] in ['ML','BG']:
 
             keys_to_record.append('CLASS_REAL')
 
@@ -3628,7 +3631,7 @@ def format_cat_old (cat_in, cat_out, cat_type=None, header2add=None,
                           'FWHM_GAUSS_D', 'ELONG_GAUSS_D', 'CHI2_GAUSS_D']
 
 
-        if ML_calc_prob and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        if ML_calc_prob and tel[0:2] in ['ML','BG']:
 
             keys_to_record.append('CLASS_REAL')
 
@@ -4436,8 +4439,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # case either thumbnail data is being saved or MeerCRAB
     # probabilities need to be calculated for ML/BG
     if (get_par(set_zogy.save_thumbnails,tel) or
-        (get_par(set_zogy.ML_calc_prob,tel) and
-         tel in ['ML1', 'BG2', 'BG3', 'BG4'])):
+        (get_par(set_zogy.ML_calc_prob,tel) and tel[0:2] in ['ML','BG'])):
 
         n_thumbnails = len(keys_thumbnails)
 
@@ -5088,8 +5090,7 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
     # case either thumbnail data is being saved or MeerCRAB
     # probabilities need to be calculated for ML/BG
     if (get_par(set_zogy.save_thumbnails,tel) or
-        (get_par(set_zogy.ML_calc_prob,tel) and
-         tel in ['ML1', 'BG2', 'BG3', 'BG4'])):
+        (get_par(set_zogy.ML_calc_prob,tel) and tel[0:2] in ['ML','BG'])):
 
         data_full_list = [data_new, data_ref, data_D, data_Scorr]
         keys_thumbnails = ['THUMBNAIL_RED', 'THUMBNAIL_REF',
@@ -7863,7 +7864,7 @@ def get_Xchan_bool (tel, chancorr, imtype, std=False):
     if std:
         # for bkg_std, do not interpolate for ML/BG images, except for the
         # reference image
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4'] and imtype!='ref':
+        if tel[0:2] in ['ML','BG'] and imtype!='ref':
             interp_Xchan = False
         else:
             interp_Xchan = True
@@ -8413,7 +8414,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # create limiting magnitude image; no need to do so for ML/BG
         # reference images except when zogy is run on reference image
         # only, i.e. remap=False
-        if not (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and imtype=='ref' and remap):
+        if not (tel[0:2] in ['ML','BG'] and imtype=='ref' and remap):
 
             fits_limmag = '{}_limmag.fits'.format(base)
             create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
@@ -8494,7 +8495,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
             # number of brightest channel stars used
-            if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+            if tel[0:2] in ['ML','BG']:
 
                 apply_chanzp = get_par(set_zogy.MLBG_phot_apply_chanzp,tel)
                 header['PC-ZPCHN'] = (apply_chanzp, 'apply channel zeropoints '
@@ -9266,7 +9267,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     ncal_used = 0
     if ncalstars>0:
 
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']:
             if '20181115' in fits_cal:
                 # old calibration catalog lacks _ML subscripts
                 filt_subscript = ''
@@ -9352,7 +9353,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
         # for MeerLICHT and BlackGEM only
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+        if tel[0:2] in ['ML','BG']:
 
             # calculate zeropoint for each channel - not
             # restricted anymore to brightest maximum number
@@ -10681,7 +10682,7 @@ def coords2chan (xcoords, ycoords):
 
     # set image size, number of channels and channel size for
     # MeerLICHT/BlackGEM CCD
-    ysize, xsize = get_par(set_zogy.shape_new,tel)
+    ysize, xsize = 10560, 10560
     nx, ny = 8, 2
     dx = xsize // nx
     dy = ysize // ny
@@ -11276,7 +11277,7 @@ def get_back_orig (data, header, objmask, imtype, clip=True, fits_mask=None):
     # for ML/BG images, determine relative correction factors between
     # different channels, possibly due to non-linearity, from the mini
     # background images
-    if False and tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+    if False and tel[0:2] in ['ML','BG']:
 
         # channel correction factors determined from low order 2D
         # polynomial fit and minimizing the residuals
@@ -14451,7 +14452,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
     # reflection or just rotation; for ML this is "neg" and for BG
     # this is "pos"; include this for ML and BG here, which makes it a
     # bit easier to find the solution, but not really needed
-    if tel in ['ML1', 'BG2', 'BG3', 'BG4']:
+    if tel[0:2] in ['ML','BG']:
         if tel=='ML1':
             parity_str = 'neg'
         else:
@@ -15301,8 +15302,7 @@ def run_remap(image_new, image_ref, image_out, image_out_shape, gain=1,
 
         # for ML/BG: remove resampled image and its weight to save
         # some disk space
-        if (tel in ['ML1', 'BG2', 'BG3', 'BG4'] and
-            not get_par(set_zogy.keep_tmp,tel)):
+        if tel[0:2] in ['ML','BG'] and not get_par(set_zogy.keep_tmp,tel):
 
             image_resample_weight = image_resample.replace('.fits',
                                                            '.weight.fits')
