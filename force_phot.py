@@ -38,7 +38,7 @@ import fitsio
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '0.9.8'
+__version__ = '0.9.9'
 
 
 ################################################################################
@@ -169,7 +169,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     # extracting the reference magnitudes is applicable only to
     # MeerLICHT/BlackGEM images because of the specific directory
     # structure, so switch [ref] off if telescope is not ML/BG
-    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']:
         log.info ('setting input parameter ref to False as telescope is not '
                   'one of MeerLICHT or BlackGEM telescopes')
         ref = False
@@ -220,7 +220,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     # a full-source catalog source
     if 'FLAGS_MASK' not in names:
         names += ['FLAGS_MASK']
-        dtypes += ['uint8']
+        dtypes += ['int16']
 
 
     # initialize columns to be determined below
@@ -234,9 +234,9 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
         # add corresponding fluxes
-        if include_fluxes:
-            names += ['FNU_OPT', 'FNUERR_OPT']
-            dtypes += ['float32', 'float32']
+        #if include_fluxes:
+        names += ['FNU_OPT', 'FNUERR_OPT']
+        dtypes += ['float32', 'float32']
 
 
         # add aperture photometry columns if needed
@@ -250,10 +250,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
                 # add corresponding fluxes
-                if include_fluxes:
-                    names += ['FNU_APER_R{}xFWHM'.format(radius),
-                              'FNUERR_APER_R{}xFWHM'.format(radius)]
-                    dtypes += ['float32', 'float32']
+                #if include_fluxes:
+                names += ['FNU_APER_R{}xFWHM'.format(radius),
+                          'FNUERR_APER_R{}xFWHM'.format(radius)]
+                dtypes += ['float32', 'float32']
 
 
 
@@ -272,9 +272,9 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
         # add corresponding fluxes
-        if include_fluxes:
-            names += ['FNU_ZOGY', 'FNUERR_ZOGY']
-            dtypes += ['float32', 'float32']
+        #if include_fluxes:
+        names += ['FNU_ZOGY', 'FNUERR_ZOGY']
+        dtypes += ['float32', 'float32']
 
 
         # add thumbnails if relevant
@@ -294,7 +294,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         # add FLAGS_MASK for the reference image
         if 'FLAGS_MASK_REF' not in names:
             names += ['FLAGS_MASK_REF']
-            dtypes += ['uint8']
+            dtypes += ['int16']
 
 
         # magnitude, snr and limiting magnitude columns
@@ -305,9 +305,9 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
         # add corresponding fluxes
-        if include_fluxes:
-            names += ['FNU_OPT_REF', 'FNUERR_OPT_REF']
-            dtypes += ['float32', 'float32']
+        #if include_fluxes:
+        names += ['FNU_OPT_REF', 'FNUERR_OPT_REF']
+        dtypes += ['float32', 'float32']
 
 
         # add aperture photometry columns if needed
@@ -321,10 +321,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
                 # add corresponding fluxes
-                if include_fluxes:
-                    names += ['FNU_APER_R{}xFWHM_REF'.format(radius),
-                              'FNUERR_APER_R{}xFWHM_REF'.format(radius)]
-                    dtypes += ['float32', 'float32']
+                #if include_fluxes:
+                names += ['FNU_APER_R{}xFWHM_REF'.format(radius),
+                          'FNUERR_APER_R{}xFWHM_REF'.format(radius)]
+                dtypes += ['float32', 'float32']
 
 
 
@@ -398,64 +398,31 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 table_list.append(get_rows(image_indices, *pars))
 
 
+
     # remove None entries, e.g. due to coordinates off the field
     log.info ('removing None entries in [table_list]')
-    while True:
-        try:
-            table_list.pop(table_list.index(None))
-        except:
-            break
+    table_list = [item for item in table_list if item is not None]
 
 
     # finished multi-processing filenames
     log.info ('stacking individual tables into output table')
     ntables = len(table_list)
     if ntables > 0:
-        # old simple method
-        if True:
-            table = vstack(table_list)
-        else:
-            # new method: keep adding tables in pairs until there is a
-            # single table left
-            while ntables > 1:
-                # number of tables left
-                ntables = len(table_list)
-                log.info ('ntables: {}'.format(ntables))
-                # initialize new table_list
-                table_list_new = []
-                # loop list in steps of 2
-                for i in range(0,ntables,2):
-                    # make sure i is within range of list index
-                    if i+1 <= ntables-1:
-                        # if so, stack the two tables
-                        table_tmp = vstack([table_list[i],
-                                            table_list[i+1]])
-                    else:
-                        # otherwise, table_tmp is the last table
-                        table_tmp = table_list[i]
-
-                    # add table_tmp to new table_list
-                    table_list_new.append(table_tmp)
-
-                # after loop is finished, replace the old table_list
-                # with the new one
-                table_list = table_list_new
-
-            # the single table left is the final table
-            table = table_list[0]
-
+        table = vstack(table_list)
     else:
         return None
 
 
     # sort in time
     log.info ('sorting by FILENAME')
-    index_sort = np.argsort(table['FILENAME'])
+    table.sort(['FILENAME'])
+
 
     zogy.mem_use ('at end of [force_phot]')
 
+
     # return table
-    return table[index_sort]
+    return table
 
 
 ################################################################################
@@ -593,53 +560,29 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     # try to read transient catalog header, as it is more complete
     # than the full-source catalog header
     if zogy.isfile(fits_trans):
-        fits2read = fits_trans
+        hdrfile2read = '{}_hdr.fits'.format(fits_trans.split('.fits')[0])
     elif zogy.isfile(fits_cat):
-        fits2read = fits_cat
+        hdrfile2read = '{}_hdr.fits'.format(fits_cat.split('.fits')[0])
     elif zogy.isfile(fits_red):
-        fits2read = fits_red
+        hdrfile2read = '{}_hdr.fits'.format(fits_red.split('.fits')[0])
     else:
         log.warning ('reduced image, full-source and transient catalog all '
                      'do not exist for {}; skipping its extraction'
                      .format(basename))
-        return [None]
+        return None
 
 
     # read header
     try:
-        log.info ('reading header of {}'.format(fits2read))
+        log.info ('reading header of {}'.format(hdrfile2read))
         # fitsio
-        #header = fitsio.FITS(fits2read)[-1].read_header()
+        #header = fitsio.FITS(hdrfile2read)[-1].read_header()
         # astropy
-        header = zogy.read_hdulist (fits2read, get_data=False, get_header=True,
-                                    memmap=True)
+        header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
     except:
         log.exception ('trouble reading header of {}; skipping its extraction'
-                       .format(fits2read))
-        return [None]
-
-
-    if False:
-
-        # this proper motion correction was moved to the function
-        # [infer_mags] to be able to do it correctly for the reference
-        # image also in case trans is True or fullsource is True; if
-        # done here, then proper motion is corrected for to the epoch
-        # of the reduced/transient image and that RA,DEC is then used
-        # to infer the x,y position on the reference image
-
-        # if proper motion need to be corrected for (if [pm_epoch] is
-        # not None and [table_in] columns PMRA_IN and PMDEC_IN exist),
-        # extract the image date of observation and apply the proper
-        # motion correction
-        if (pm_epoch is not None and 'PMRA_IN' in colnames and
-            'PMDEC_IN' in colnames and 'DATE-OBS' in header):
-
-            obsdate = header['DATE-OBS']
-            table = zogy.apply_gaia_pm (
-                table, obsdate, epoch=pm_epoch, return_table=True, ra_col='RA_IN',
-                dec_col='DEC_IN', pmra_col='PMRA_IN', pmdec_col='PMDEC_IN',
-                remove_pmcolumns=False)
+                       .format(hdrfile2read))
+        return None
 
 
 
@@ -671,16 +614,15 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
             except:
                 table[key] = None
                 log.warning ('keyword {} not in header of {}'
-                             .format(key, basename))
+                             .format(key, hdrfile2read))
 
             if key=='QC-FLAG' and 'TQC-FLAG' not in keys2add and trans:
-
                 try:
                     table['TQC-FLAG'] = header['TQC-FLAG']
                 except:
                     table['TQC-FLAG'] = None
                     log.warning ('keyword TQC-FLAG not in header of {}'
-                                 .format(basename))
+                                 .format(hdrfile2read))
 
 
 
@@ -712,23 +654,33 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     # -------------------------------------
     if ref:
 
+        if tel == 'ML1':
+            # infer path to ref folder from basename
+            ref_dir = '{}/ref'.format(basename.split('/red/')[0])
+        else:
+            # for BlackGEM, refer to GCP bucket
+            ref_dir = 'gs://blackgem-ref'
 
-        # infer path to ref folder from basename
-        ref_dir = '{}/ref'.format(basename.split('/red/')[0])
 
-        # read field ID from header
-        obj, filt = header['OBJECT'], header['FILTER']
+        # read field ID and reference image name from header
+        if 'Z-REF' in header:
+            obj, ref_name = header['OBJECT'], header['Z-REF']
+        else:
+            log.warning ('header keyword Z-REF with reference image name not '
+                         'found; skipping extraction of {}'.format(basename))
+            return None
 
-        # reference image and catalog names including full path
-        basename = '{}/{}/{}_{}_red'.format(ref_dir, obj, tel, filt)
+
+        # reference image basename including full path
+        basename_ref = '{}/{}/{}'.format(ref_dir, obj, ref_name)
 
         # reference mask image; input parameter fits_mask refers to
         # the reduced image mask
-        fits_mask = '{}/{}/{}_{}_mask.fits.fz'.format(ref_dir, obj, tel, filt)
+        fits_mask = '{}_mask.fits.fz'.format(basename_ref.split('_red')[0])
 
 
         # infer reference magnitudes and S/N
-        table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
+        table = infer_mags (table, basename_ref, fits_mask, nsigma, apphot_radii,
                             bkg_radii, pm_epoch, include_fluxes, keys2add,
                             add_keys, bkg_global, thumbnails, size_tn,
                             imtype='ref', tel=tel, ncpus=ncpus)
@@ -739,65 +691,33 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         # column MAG_ZOGY_PLUSREF
         if trans:
 
-            # start off with MAG_ZOGY
-            mag_zogy = np.array(table['MAG_ZOGY'])
+            fnu_zogy = np.array(table['FNU_ZOGY'])
+            fnu_ref = np.array(table['FNU_OPT_REF'])
+            fnu_tot = fnu_zogy + fnu_ref
 
-            # transient flux in arbitrary flux units; mag_zogy is
-            # always positive, even in case of a negative transient,
-            # i.e. when the flux in the reference image was higher, so
-            # include sign of [snr_zogy]
-            snr_zogy = np.array(table['SNR_ZOGY'])
-
-            # initially: set insignificant transients to zero, but
-            # decided to not do so anymore - just add transient and
-            # reference flux irrespective of whether they are
-            # significant or not
-            # mask_snr_trans = (np.abs(snr_zogy) >= nsigma)
-            # mag_zogy[~mask_snr_trans] = 100
-            flux_zogy = np.sign(snr_zogy) * 10**(-0.4*mag_zogy)
-
-
-            # reference flux in arbitrary units (but same as flux_zogy
-            # above)
-            mag_opt_ref = np.array(table['MAG_OPT_REF'])
-            # corresponding S/N
-            snr_opt_ref = np.array(table['SNR_OPT_REF'])
-            # require reference source to be positive
-            mask_snr_ref = (snr_opt_ref > 0)
-            # set magnitudes of non-positive sources to negligibly faint
-            mag_opt_ref[~mask_snr_ref] = 99
-            flux_ref = 10**(-0.4*mag_opt_ref)
-
-
-            # corrected flux and magnitude
-            flux_corr = (flux_zogy + flux_ref)
-            mag_corr = np.zeros_like(flux_corr, dtype='float32') + 99
-            mask_pos = (flux_corr > 0)
-            mag_corr[mask_pos] = -2.5 * np.log10(flux_corr[mask_pos])
-            mask_99 = (~mask_pos | (mag_corr >= 99))
-            mag_corr[mask_99] = 99
-            table['MAG_ZOGY_PLUSREF'] = mag_corr.astype('float32')
+            mag_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
+            mask_pos = (fnu_tot > 0)
+            mag_tot[mask_pos] = -2.5 * np.log10(fnu_tot[mask_pos]) + 23.8
+            table['MAG_ZOGY_PLUSREF'] = mag_tot.astype('float32')
 
 
             # the corresponding error
+            fnuerr_zogy = np.array(table['FNUERR_ZOGY'])
+            fnuerr_ref = np.array(table['FNUERR_OPT_REF'])
+            fnuerr_tot = np.sqrt(fnuerr_zogy**2 + fnuerr_ref**2)
+
+            magerr_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
             pogson = 2.5 / np.log(10)
-            magerr_zogy = np.array(table['MAGERR_ZOGY'])
-            fluxerr_zogy = np.abs(flux_zogy) * magerr_zogy / pogson
-            magerr_opt_ref = np.array(table['MAGERR_OPT_REF'])
-            fluxerr_opt_ref = np.abs(flux_ref) * magerr_opt_ref / pogson
-            fluxerr_corr = np.sqrt(fluxerr_zogy**2 + fluxerr_opt_ref**2)
-            magerr_corr = np.zeros_like(flux_corr, dtype='float32') + 99
-            magerr_corr[mask_pos] = pogson * (fluxerr_corr[mask_pos]
-                                              / flux_corr[mask_pos])
-            magerr_corr[mask_99] = 99
-            table['MAGERR_ZOGY_PLUSREF'] = magerr_corr.astype('float32')
+            magerr_tot[mask_pos] = pogson * fnuerr_tot[mask_pos] / fnu_tot[mask_pos]
+            table['MAGERR_ZOGY_PLUSREF'] = magerr_tot.astype('float32')
+
 
             # S/N
-            mask_nonzero = (fluxerr_corr != 0)
-            snr_corr = np.zeros_like(flux_corr, dtype='float32')
-            snr_corr[mask_nonzero] = (flux_corr[mask_nonzero] /
-                                      fluxerr_corr[mask_nonzero])
-            table['SNR_ZOGY_PLUSREF'] = snr_corr
+            mask_nonzero = (fnuerr_tot != 0)
+            snr_tot = np.zeros_like(fnu_tot, dtype='float32')
+            snr_tot[mask_nonzero] = (fnu_tot[mask_nonzero] /
+                                     fnuerr_tot[mask_nonzero])
+            table['SNR_ZOGY_PLUSREF'] = snr_tot
 
 
 
@@ -823,14 +743,20 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     label_dict = {'new': 'full-source', 'ref': 'reference', 'trans': 'transient'}
     label = label_dict[imtype]
 
-    # similar dictionary for string to add to output table colnames
+
+    # similar dictionary for additional string to add to output table colnames
     s2add_dict = {'new': '', 'ref': '_REF', 'trans': '_TRANS'}
     s2add = s2add_dict[imtype]
+
 
     # shorthand
     new = (imtype == 'new')
     trans = (imtype == 'trans')
     ref = (imtype == 'ref')
+
+
+    # define fits_red in any case
+    fits_red = add_drop_fz ('{}.fits.fz'.format(basename))
 
 
     if trans:
@@ -847,8 +773,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     else:
 
         # filenames relevant for magtype 'full-source' and 'reference'
-        fits_red = add_drop_fz ('{}.fits.fz'.format(basename))
-        #fits_cat = '{}_cat.fits'.format(basename)
         fits_limmag = add_drop_fz ('{}_limmag.fits.fz'.format(basename))
         psfex_bintable = '{}_psf.fits'.format(basename)
         fits_objmask = add_drop_fz ('{}_objmask.fits.fz'.format(basename))
@@ -867,23 +791,21 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
             return table
 
 
-    # read header
+    # read header; need to read fits_red instead of _hdr.fits file, to
+    # be able to infer the image shape for both new and ref
     try:
+        hdrfile2read = fits_red
+        header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
+
+        # also read transient header
         if trans:
-            fits2read = fits_trans
-        else:
-            fits2read = fits_red
-
-        # fitsio
-        #header = fitsio.FITS(fits2read)[-1].read_header()
-        # astropy
-        header = zogy.read_hdulist (fits2read, get_data=False, get_header=True)
-
-
+            hdrfile2read = '{}_hdr.fits'.format(fits_trans.split('.fits')[0])
+            header_trans = zogy.read_hdulist (hdrfile2read, get_data=False,
+                                              get_header=True)
     except:
         log.exception ('trouble reading header of {}; skipping extraction of {} '
                        'magnitudes for {}'
-                       .format(fits2read, label, basename))
+                       .format(hdrfile2read, label, basename))
         return table
 
 
@@ -906,12 +828,12 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         data_shape = (header['NAXIS2'], header['NAXIS1'])
     else:
         log.error ('not able to infer data shape from header of {}'
-                   .format(fits2read))
+                   .format(fits_red))
 
 
     ysize, xsize = data_shape
-    log.info ('data shape inferred from header of {}: {}'
-              .format(basename, data_shape))
+    log.info ('data shape inferred from header of {}: {}'.format(fits_red,
+                                                                 data_shape))
 
 
     # if proper motion need to be corrected for (if [pm_epoch] is not
@@ -933,7 +855,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     else:
         ra = table['RA_IN'].value
         dec = table['DEC_IN'].value
-
 
 
     # convert input RA/DEC from table to pixel coordinates; needs to
@@ -962,8 +883,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     mask_ok = mask_finite & mask_on
     if np.sum(mask_ok)==0:
         log.warning ('all of the inferred pixel coordinates are infinite/nan '
-                     'and/or off the image for {}; skipping extraction of {} '
-                     'magnitudes for {}'.format(fits_red, label, basename))
+                     'and/or off the image; skipping extraction of {} '
+                     'magnitudes for {}'.format(label, basename))
         return table
 
 
@@ -987,6 +908,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
     else:
         table['X_POS'] = xcoords
         table['Y_POS'] = ycoords
+
 
 
     # indices of pixel coordinates; need to be defined after
@@ -1056,7 +978,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         else:
             log.warning ('fits_mask {} does not exist; assuming that none of '
                          'the pixels are flagged'.format(fits_mask))
-            data_mask = np.zeros (data_shape, dtype='uint8')
+            data_mask = np.zeros (data_shape, dtype='int16')
 
 
         # add combined FLAGS_MASK column to output table using
@@ -1169,11 +1091,11 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
                 # add fluxes to table if needed
-                if include_fluxes:
-                    col_tmp = 'FNU_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = fnu_ap.astype('float32')
-                    col_tmp = 'FNUERR_APER_R{}xFWHM{}'.format(radius, s2add)
-                    table[col_tmp] = fnuerr_ap.astype('float32')
+                #if include_fluxes:
+                col_tmp = 'FNU_APER_R{}xFWHM{}'.format(radius, s2add)
+                table[col_tmp] = fnu_ap.astype('float32')
+                col_tmp = 'FNUERR_APER_R{}xFWHM{}'.format(radius, s2add)
+                table[col_tmp] = fnuerr_ap.astype('float32')
 
 
             else:
@@ -1181,7 +1103,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                     log.warning ('keyword PC-ZP not in header; unable to '
                                  'infer {} magnitudes for {}'
                                  .format(label, basename))
-
 
 
         # optimal magnitudes
@@ -1244,8 +1165,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
         # infer limiting magnitudes
+        nsigma_orig = 5
         limmags = get_limmags (fits_limmag, google_cloud, y_indices, x_indices,
-                               header, nsigma, nsigma_orig=5, label=label)
+                               header, nsigma, nsigma_orig, imtype, label=label)
 
 
         # calculate signal-to-noise ratio; applies to either the SNR
@@ -1264,11 +1186,11 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
         # add fluxes if needed
-        if include_fluxes:
-            col_tmp = 'FNU_OPT{}'.format(s2add)
-            table[col_tmp] = fnu_opt.astype('float32')
-            col_tmp = 'FNUERR_OPT{}'.format(s2add)
-            table[col_tmp] = fnuerr_opt.astype('float32')
+        #if include_fluxes:
+        col_tmp = 'FNU_OPT{}'.format(s2add)
+        table[col_tmp] = fnu_opt.astype('float32')
+        col_tmp = 'FNUERR_OPT{}'.format(s2add)
+        table[col_tmp] = fnuerr_opt.astype('float32')
 
 
         # add thumbnail image
@@ -1297,7 +1219,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         # read limiting magnitude at pixel coordinates
         nsigma_trans_orig = 6
         tlimmags = get_limmags (fits_tlimmag, google_cloud, y_indices, x_indices,
-                                header, nsigma, nsigma_orig=nsigma_trans_orig,
+                                header_trans, nsigma, nsigma_trans_orig, imtype,
                                 label=label)
 
 
@@ -1341,9 +1263,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
 
         # add fluxes if needed
-        if include_fluxes:
-            table['FNU_ZOGY'] = fnu_zogy.astype('float32')
-            table['FNUERR_ZOGY'] = fnuerr_zogy.astype('float32')
+        #if include_fluxes:
+        table['FNU_ZOGY'] = fnu_zogy.astype('float32')
+        table['FNUERR_ZOGY'] = fnuerr_zogy.astype('float32')
 
 
         # add transient thumbnail images
@@ -1424,7 +1346,7 @@ def get_thumbnail (data, data_shape, xcoords, ycoords, size_tn, key_tn, header,
 ################################################################################
 
 def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
-                 nsigma, nsigma_orig=5, label='full-source'):
+                 nsigma, nsigma_orig, imtype, label='full-source'):
 
 
     # read limiting magnitude at pixel coordinates
@@ -1436,13 +1358,25 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
 
         # convert limmag from number of sigma listed
         # in the image header to input [nsigma]
-        if ('NSIGMA' in header and
-            isinstance(header['NSIGMA'], (float, int)) and
-            header['NSIGMA'] != 0):
-            nsigma_orig = header['NSIGMA']
+        if imtype == 'trans':
 
+            if ('T-NSIGMA' in header and
+                isinstance(header['T-NSIGMA'], (float, int)) and
+                header['T-NSIGMA'] != 0):
+                nsigma_orig = header['T-NSIGMA']
+
+        else:
+
+            if ('NSIGMA' in header and
+                isinstance(header['NSIGMA'], (float, int)) and
+                header['NSIGMA'] != 0):
+                nsigma_orig = header['NSIGMA']
+
+
+        # if nsigma and nsigma_orig not the same, adjust the limmags
         if nsigma_orig != nsigma:
             limmags += -2.5*np.log10(nsigma/nsigma_orig)
+
 
     else:
         log.warning ('{} not found; no {} limiting magnitude(s) '
@@ -1458,15 +1392,32 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
 
 def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
 
+    t1 = time.time()
+
     if google_cloud:
 
         # use astropy.io.fits for google_cloud bucket files
-        data = zogy.read_hdulist(filename)
+        if False:
+            data = zogy.read_hdulist(filename)
+            if y_indices is None or x_indices is None:
+                values = data
+            else:
+                values = data[y_indices, x_indices]
 
-        if y_indices is None or x_indices is None:
-            values = data
         else:
-            values = data[y_indices, x_indices]
+            with fits.open(filename) as hdulist:
+
+                # section indices must be slices, so need to extract
+                # indices one by one instead of data[y_indices, x_indices]
+                nvalues = len(y_indices)
+                # determine dtype of data
+                value0 = hdulist[-1].section[y_indices[0]:y_indices[0]+1,
+                                             x_indices[0]:x_indices[0]+1]
+                values = np.zeros(nvalues, dtype=value0.dtype)
+                for i in range(nvalues):
+                    values[i] = hdulist[-1].section[
+                        y_indices[i]:y_indices[i]+1,
+                        x_indices[i]:x_indices[i]+1][0][0]
 
     else:
 
@@ -1487,6 +1438,10 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
             for i in range(nvalues):
                 values[i] = data[y_indices[i]:y_indices[i]+1,
                                  x_indices[i]:x_indices[i]+1][0][0]
+
+
+    log.info ('wall-time spent in get_pixel_values: {:.1f}s'
+              .format(time.time()-t1))
 
 
     return values
@@ -1595,7 +1550,7 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
 
     # initialize flags_mask_comb
     ncoords = len(xcoords)
-    flags_mask_comb = np.zeros(ncoords, dtype='uint')
+    flags_mask_comb = np.zeros(ncoords, dtype='int16')
 
     # loop coordinates
     for m in range(ncoords):
@@ -1609,7 +1564,7 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
         if np.sum(data_mask[index_full]) != 0:
 
             # create zero-valued temporary thumbnail data_mask
-            data_mask_tn = np.zeros((size_4fwhm, size_4fwhm), dtype='uint')
+            data_mask_tn = np.zeros((size_4fwhm, size_4fwhm), dtype='int16')
 
             # fill temporary thumbnail with values from full data_mask
             data_mask_tn[index_tn] = data_mask[index_full]
@@ -1848,6 +1803,80 @@ def verify_lengths(p1, p2):
 
 ################################################################################
 
+def create_col_descr(keys2add, header):
+
+    col_descr = {
+        'NUMBER_IN':      'line number of coordinates in input list',
+        'FILENAME':       'base filename of matching image',
+        'X_POS':          '[pix] x pixel coordinate corresponding to input RA/DEC in red image',
+        'Y_POS':          '[pix] y pixel coordinate corresponding to input RA/DEC in red image',
+        'FLAGS_MASK':     'OR-combined flagged pixels within 2xFWHM of coords in red image',
+        'BACKGROUND':     '[e-] sky background estimated from sky annulus in red image',
+        'MAG_OPT':        '[mag] optimal AB magnitude in red image',
+        'MAGERR_OPT':     '[mag] optimal AB magnitude error in red image',
+        'SNR_OPT':        'signal-to-noise ratio in red image',
+        'LIMMAG_OPT':     '[mag] limiting AB magnitude at nsigma significance in red image',
+        'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.8)',
+        'FNUERR_OPT':     '[microJy] flux error in red image',
+        'MAG_APER':       '[mag] aperture AB mag within radius x FWHM in red image',
+        'MAGERR_APER':    '[mag] aperture AB mag error within radius x FWHM in red image',
+        'SNR_APER':       'aperture signal-to-noise ratio within radius x FWHM in red image',
+        'FNU_APER':       '[microJy] flux within radius x FWHM in red image',
+        'FNUERR_APER':    '[microJy] flux error within radius x FWHM in red image',
+        #
+        'MAG_ZOGY':       '[mag] transient AB magnitude',
+        'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
+        'SNR_ZOGY':       'transient signal-to-noise ratio',
+        'LIMMAG_ZOGY':    '[mag] transient limiting AB magnitude at input nsigma significance',
+        'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.8)',
+        'FNUERR_ZOGY':    '[microJy] transient flux error',
+        #
+        'X_POS_REF':      '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
+        'Y_POS_REF':      '[pix] y pixel coordinate corresponding to input RA/DEC in ref image',
+        'FLAGS_MASK_REF': 'OR-combined flagged pixels within 2xFWHM of coords in ref image',
+        'BACKGROUND_REF': '[e-] sky background estimated from sky annulus in ref image',
+        'MAG_OPT_REF':    '[mag] optimal AB magnitude in ref image',
+        'MAGERR_OPT_REF': '[mag] optimal AB magnitude error in ref image',
+        'SNR_OPT_REF':    'signal-to-noise ratio in ref image',
+        'LIMMAG_OPT_REF': '[mag] limiting AB magnitude at nsigma significance in ref image',
+        'FNU_OPT_REF':    '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.8)',
+        'FNUERR_OPT_REF': '[microJy] flux error in ref image',
+        'MAG_APER_REF':   '[mag] aperture AB mag within radius x FWHM in ref image',
+        'MAGERR_APER_REF':'[mag] aperture AB mag error within radius x FWHM in ref image',
+        'SNR_APER_REF':   'aperture signal-to-noise ratio within radius x FWHM in ref image',
+        'FNU_APER_REF':   '[microJy] flux within radius x FWHM in ref image',
+        'FNUERR_APER_REF':'[microJy] flux error within radius x FWHM in ref image',
+        #
+        'THUMBNAIL_RED':  'square thumbnail of the red image centered at input coords',
+        'THUMBNAIL_REF':  'square thumbnail of the ref image centered at input coords',
+        'THUMBNAIL_D':    'square thumbnail of the difference image centered at input coords',
+        'THUMBNAIL_SCORR':'square thumbnail of the significance image centered at input coords',
+        #
+        'MAG_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude',
+        'MAGERR_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude error',
+        'SNR_ZOGY_PLUSREF':    'sum of ZOGY and ref image magnitude signal-to-noise ratio',
+        #
+        'TQC-FLAG':       'transient QC flag (green|yellow|orange|red)',
+    }
+
+
+    # loop keywords of table header, where the column names are in the
+    # TTYPE[i+1] keywords and the descriptions are in TCOMM[i+1]
+    for i in range(header['TFIELDS']):
+        key = header['TTYPE{}'.format(i+1)]
+        # check if key is in the input keys2add
+        if key in keys2add:
+            # if so, add its description to col_descr
+            descr = header['TCOMM{}'.format(i+1)]
+            col_descr[key] = descr
+
+
+
+    return col_descr
+
+
+################################################################################
+
 # from
 # https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
 def str2bool (v):
@@ -1935,23 +1964,13 @@ if __name__ == "__main__":
                         'if it is present in [radecs] - are copied by default; '
                         'default=None')
 
-    parser.add_argument('--filenames', type=str,
-                        default='/idia/projects/meerlicht/Headers/ML1_headers_cat.fits',
-                        help='comma-separated list with the filenames of the '
-                        'reduced images to be used or the name of a file with '
-                        'format [filenames_file_format] containing the filenames '
-                        'with the column name [filenames_col]; '
-                        'default=/idia/projects/meerlicht/Headers/ML1_headers_cat.fits')
-
-    parser.add_argument('--filenames_col', type=str, default='FILENAME',
-                        help='name of input filename column in [filenames]; '
-                        'default=FILENAME')
-
-    parser.add_argument('--filenames_file_format', type=str, default=None,
-                        help='astropy file format of [filenames] in case it '
-                        'points to a file; (e)csv and fits files, a.o., are '
-                        'recognized through their extension by astropy.Table; '
-                        'default=None')
+    parser.add_argument('--fits_hdrtable_list', type=str, default=None,
+                        help='list of one or more (comma-separated) binary fits '
+                        'tables, containing header keywords FILENAME, MJD-OBS, '
+                        'OBJECT, FILTER, QC-FLAG, RA-CNTR, DEC-CNTR, PSF-SEE, '
+                        'LIMMAG and S-BKGSTD of the possible images to be '
+                        'included; if left to default of None, the catalog '
+                        'header tables available for ML and BG will be used')
 
     parser.add_argument('--filters', type=str, default='ugqriz',
                         help='consider images in these filters only; '
@@ -1999,10 +2018,10 @@ if __name__ == "__main__":
                         'defined but [bkg_global]=True, no background is '
                         'subtracted either')
 
-    parser.add_argument('--include_fluxes', type=str2bool, default=False,
+    parser.add_argument('--include_fluxes', type=str2bool, default=True,
                         help='besides the optimal/aperture magnitudes, also '
                         'include the corresponding fluxes and their errors, '
-                        'in units of microJy, in the output table; default=False')
+                        'in units of microJy, in the output table; default=True')
 
     parser.add_argument('--thumbnails', type=str2bool, default=False,
                         help='extract thumbnail images around input coordinates? '
@@ -2039,8 +2058,11 @@ if __name__ == "__main__":
                         help='corresponding header keyword dtypes; default={}'
                         .format(par_default))
 
-    parser.add_argument('--telescope', type=str, default='ML1',
-                        help='telescope; default=ML1')
+    parser.add_argument('--telescope', type=str, default='BG',
+                        choices=['ML1', 'BG2', 'BG3', 'BG4', 'BG'],
+                        help='telescope name (ML1, BG2, BG3, BG4 or BG); if set '
+                        'to BG, files from any BG present in the tables of '
+                        '[fits_hdrtable_list] will be used; default=\'BG\'')
 
     parser.add_argument('--fov_deg', type=float, default=1.655,
                         help='[deg] instrument field-of-view (FOV); '
@@ -2057,6 +2079,7 @@ if __name__ == "__main__":
                         'default=None')
 
     args = parser.parse_args()
+    tel = args.telescope
 
 
     # for timing
@@ -2136,7 +2159,8 @@ if __name__ == "__main__":
         # add column identifying (line) number of input coordinate;
         # this needs to be done here before any potential masking is
         # done with e.g. mask_dtime below
-        table_in['NUMBER_IN'] = np.arange(1,len(table_in)+1)
+        table_in['NUMBER_IN'] = np.arange(1,len(table_in)+1, dtype='int32')
+
 
 
         # convert column [date_col] to list mjds_in
@@ -2172,11 +2196,6 @@ if __name__ == "__main__":
         else:
             # if not provided, set mjds_in to None
             mjds_in = None
-            #log.warning ('no info on {} is found in the input, so the '
-            #             'coordinates in [radecs] will be searched for in all '
-            #             '[filenames] rather than a subset within a time window '
-            #             'centered on {} with a total width of [dtime] hours'
-            #             .format(args.date_col, args.date_col))
 
 
 
@@ -2249,7 +2268,7 @@ if __name__ == "__main__":
 
         # add column identifying (line) number of input coordinate, for
         # easy mapping between input and output tables
-        table_in['NUMBER_IN'] = np.arange(1,len(table_in)+1)
+        table_in['NUMBER_IN'] = np.arange(1,len(table_in)+1, dtype='int32')
 
 
 
@@ -2293,89 +2312,117 @@ if __name__ == "__main__":
     filts_all = np.all([filt in args.filters for filt in 'ugqriz'])
 
 
-    # infer list of filenames to consider from [args.filenames]
-    # ---------------------------------------------------------
+
+    # read list of tables with filenames and relevant header keywords
+    # ---------------------------------------------------------------
+    # previously also included possiblity to prepare this table, but
+    # not needed anymore as header tables are ready to be used
+
+    # make sure fits_hdrtable_list is a list
+    if args.fits_hdrtable_list is not None:
+        fits_hdrtable_list = args.fits_hdrtable_list.split(',')
+    else:
+        fits_hdrtable_list = args.fits_hdrtable_list
+
+
+    if fits_hdrtable_list is None:
+
+        # refer to the existing header tables for both ML and BG
+        if tel == 'ML1':
+
+            fits_hdrtable_list = ['/idia/projects/meerlicht/Headers/'
+                                  'ML1_headers_cat.fits']
+
+        else:
+
+            # for BG, loop telescopes and add header table if needed
+            fits_hdrtable_list = []
+            for tel_tmp in ['BG2', 'BG3', 'BG4']:
+                if tel in tel_tmp:
+                    fits_hdrtable_list.append(
+                        'gs://blackgem-hdrtables/{}/{}_headers_cat.fits'
+                        .format(tel_tmp, tel_tmp))
+
+
+    # read header of trans table for description of keywords
+    header_transtable = zogy.read_hdulist(
+        fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
+        get_data=False, get_header=True)
+
+
+    # read header fits files into table
+    for it, fits_table in enumerate(fits_hdrtable_list):
+
+        if zogy.isfile(fits_table):
+
+            log.info ('reading header table: {}'.format(fits_table))
+            table_tmp = Table.read(fits_table)
+            if it==0:
+                table_hdr = table_tmp
+            else:
+                # stack tables
+                table_hdr = vstack([table_hdr, table_tmp])
+
+        else:
+            log.warning ('{} not found'.format(fits_table))
+
+
+
+    # check if table contains any entries
+    if len(table_hdr)==0:
+        log.error ('no entries in tables in [fits_hdrtable_list]; exiting')
+        logging.shutdown()
+        raise SystemExit
+    else:
+        log.info ('{} files in input header table(s)'.format(len(table_hdr)))
+
+
+
+    # infer list of filenames to consider
+    # -----------------------------------
     radecs_cntr = None
 
-    if zogy.isfile (args.filenames):
+    # get central coordinates of filenames
+    colnames = table_hdr.colnames
+    if 'RA-CNTR' in colnames and 'DEC-CNTR' in colnames:
 
-        # if the input is a single file, it could be a single image or
-        # a fits table/file containing multiple files; to test between
-        # the two, try to read the file as a table, which will cause
-        # an exception if it is an image
-        try:
-            # read it into a table using the format
-            # [args.filenames_file_format]
-            if args.filenames_file_format is not None:
-                table_filenames = Table.read(args.filenames,
-                                             format=args.filenames_file_format)
-            else:
-                table_filenames = Table.read(args.filenames)
+        # mask with files with a WCS solution
+        mask_WCS = (np.isfinite(table_hdr['RA-CNTR']) &
+                    np.isfinite(table_hdr['DEC-CNTR']) &
+                    (table_hdr['RA-CNTR'] > 0) &
+                    (table_hdr['RA-CNTR'] < 360) &
+                    (np.abs(table_hdr['DEC-CNTR']) < 90))
 
-            log.info ('{} line(s) in input file {}'
-                      .format(len(table_filenames), args.filenames))
+        log.info ('{} filename(s) with valid CNTR coordinates'
+                  .format(np.sum(mask_WCS)))
+        table_hdr = table_hdr[mask_WCS]
 
 
-            # get central coordinates of filenames
-            colnames = table_filenames.colnames
-            if 'RA-CNTR' in colnames and 'DEC-CNTR' in colnames:
-
-                # mask with files with a WCS solution
-                mask_WCS = (np.isfinite(table_filenames['RA-CNTR']) &
-                            np.isfinite(table_filenames['DEC-CNTR']) &
-                            (table_filenames['RA-CNTR'] > 0) &
-                            (table_filenames['RA-CNTR'] < 360) &
-                            (np.abs(table_filenames['DEC-CNTR']) < 90))
-
-                log.info ('{} filename(s) with valid CNTR coordinates'
-                          .format(np.sum(mask_WCS)))
-                table_filenames = table_filenames[mask_WCS]
-
-
-                # define list of (ra_cntr,dec_cntr) tuples to be used in
-                # function [index_images]
-                radecs_cntr = np.array(list(zip(table_filenames['RA-CNTR'],
-                                                table_filenames['DEC-CNTR'])))
-
-
-            # define list of filenames
-            filenames = list(table_filenames[args.filenames_col])
-
-
-            # define objects and mjds_obs arrays
-            if 'OBJECT' in colnames and 'MJD-OBS' in colnames:
-                objects = np.array(table_filenames['OBJECT']).astype(int)
-                mjds_obs = np.array(table_filenames['MJD-OBS'])
-
-
-            # and filter array if needed
-            if not filts_all:
-                if 'FILTER' in colnames:
-                    filts = np.array(table_filenames['FILTER']).astype(str)
-
-
-        except:
-            # apparently the input is not a fits table, so assume it
-            # is a single image and put it into a list
-            filenames = args.filenames.split(',')
-            remove_empty (filenames)
+        # define list of (ra_cntr,dec_cntr) tuples to be used in
+        # function [index_images]
+        radecs_cntr = np.array(list(zip(table_hdr['RA-CNTR'],
+                                        table_hdr['DEC-CNTR'])))
 
     else:
-
-        # filenames were provided as a comma-separated list; put them
-        # into a list
-        filenames = args.filenames.split(',')
-        remove_empty (filenames)
+        log.error ('RA-CNTR and/or DEC-CNTR column not in header table; exiting')
+        logging.shutdown()
+        raise SystemExit
 
 
+    # define list of filenames
+    filenames = list(table_hdr['FILENAME'])
 
-    # in case the dates of observation [mjds_obs] or field IDs
-    # [objects] have not yet been defined, need to infer them from the
-    # headers; also include RA-CNTR and DEC-CNTR
-    if ('mjds_obs' not in locals() or 'objects' not in locals() or
-        (not filts_all and 'filts' not in locals())):
-        objects, mjds_obs, filts, ras_cntr, decs_cntr = get_headkeys (filenames)
-        radecs_cntr = np.array(list(zip(ras_cntr, decs_cntr)))
+
+    # define objects and mjds_obs arrays
+    if 'OBJECT' in colnames and 'MJD-OBS' in colnames:
+        objects = np.array(table_hdr['OBJECT']).astype(int)
+        mjds_obs = np.array(table_hdr['MJD-OBS'])
+
+
+    # and filter array if needed
+    if not filts_all:
+        if 'FILTER' in colnames:
+            filts = np.array(table_hdr['FILTER']).astype(str)
 
 
 
@@ -2568,6 +2615,9 @@ if __name__ == "__main__":
                  for fn in image_indices_dict]
 
 
+    log.info ('table_in.colnames: {}'.format(table_in.colnames))
+    log.info ('keys2add: {}'.format(keys2add))
+
     # call [force_phot]
     table_out = force_phot (
         table_in, image_indices_dict, mask_list=mask_list, trans=args.trans,
@@ -2576,7 +2626,7 @@ if __name__ == "__main__":
         include_fluxes=args.include_fluxes, keys2add=keys2add,
         keys2add_dtypes=keys2add_dtypes, bkg_global=args.bkg_global,
         thumbnails=args.thumbnails, size_thumbnails=args.size_thumbnails,
-        tel=args.telescope, ncpus=ncpus)
+        tel=tel, ncpus=ncpus)
 
 
 
@@ -2587,6 +2637,15 @@ if __name__ == "__main__":
     # [force_phot] that already includes these columns, so do not
     # have to be added here anymore
     if table_out is not None:
+
+        # delete flux columns if not wanted
+        if not args.include_fluxes:
+            log.warning ('input parameter include_fluxes is set to False')
+            for col in table_out.colnames:
+                if 'FNU' in col:
+                    log.warning ('deleting {}'.format(col))
+                    del table_out[col]
+
 
         # rename columns RA and DEC to the input column names; if
         # the input columns were in sexagesimal notation, these
@@ -2621,18 +2680,17 @@ if __name__ == "__main__":
 
 
         # order the output table by original row number
-        indices_sorted = np.argsort(table_out, order=(('NUMBER_IN','FILENAME')))
-        table_out = table_out[indices_sorted]
+        try:
+            log.info ('sorting by NUMBER_IN and FILENAME')
+            table_out.sort(['NUMBER_IN','FILENAME'])
+        except Exception as e:
+            log.warning ('unable to sort table_out due to exception: {}'
+                         .format(e))
 
 
 
-    log.info ('time spent in [force_phot]: {:.1f}s'.format(time.time()-t1))
-    log.info ('time spent in total:        {:.1f}s'.format(time.time()-t0))
-
-
-    # write output table to fits
-    log.info ('writing output file {}'.format(args.file_out))
-    if table_out is not None:
+        # write output table to fits
+        log.info ('writing output file {}'.format(args.file_out))
         try:
             # let format be auto-identified through the extension of
             # file_out
@@ -2641,6 +2699,36 @@ if __name__ == "__main__":
             # otherwise, force output file to be fits
             table_out.write('{}.fits'.format(args.file_out),
                             format='fits', overwrite=True)
+
+
+
+        col_descr_dict = create_col_descr (keys2add, header_transtable)
+        with fits.open(args.file_out, mode='update') as hdulist:
+            for i, col0 in enumerate(table_out.colnames):
+                ncol = i + 1
+                # edit aperture names
+                if 'APER' in col0:
+                    col = '_'.join(col0.split('_')[:2])
+                    if 'REF' in col0:
+                        col += '_REF'
+                else:
+                    col = col0
+
+                # check if col is present in col_descr_dict
+                if col in col_descr_dict:
+                    descr = col_descr_dict[col]
+                else:
+                    log.warning ('{} not in column description dictionary'
+                                 .format(col))
+                    descr = ''
+
+                # update relevant header keyword COMM
+                hdulist[-1].header['TCOMM{}'.format(ncol)] = descr
+
+
+
+    log.info ('time spent in [force_phot]: {:.1f}s'.format(time.time()-t1))
+    log.info ('time spent in total:        {:.1f}s'.format(time.time()-t0))
 
 
     # list memory used
