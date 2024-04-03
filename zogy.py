@@ -3158,7 +3158,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         # for the reference catalog, stick to the source-extractor
         # detections for ML and BG
         if (get_par(set_zogy.force_phot_gaia,tel) and
-            tel not in ['ML1', 'BG2', 'BG3', 'BG4']):
+            tel not in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']):
 
             # in case of force photometry on Gaia input catalog
             keys_to_record = keys_to_record_gaia
@@ -7873,7 +7873,7 @@ def get_Xchan_bool (tel, chancorr, imtype, std=False):
         # for bkg, allow interpolation for non-ML/BG images or if
         # ML/BG channel correction factors were applied or if this
         # concerns the reference image
-        if (tel not in ['ML1', 'BG2', 'BG3', 'BG4'] or chancorr or
+        if (tel not in ['ML1', 'BG2', 'BG3', 'BG4', 'BG'] or chancorr or
             imtype=='ref'):
             interp_Xchan = True
         else:
@@ -8075,7 +8075,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # fix pixels using function [fixpix] also in remapped
         # reference image; already done for ML/BG reference images
         if (get_par(set_zogy.interp_sat,tel) and
-            tel not in ['ML1', 'BG2', 'BG3', 'BG4']):
+            tel not in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']):
 
             data_ref_remap = fixpix (
                 data_ref_remap, satlevel=satlevel,
@@ -11298,7 +11298,7 @@ def get_back_orig (data, header, objmask, imtype, clip=True, fits_mask=None):
     # using function [fill_mask]
     size_filter = get_par(set_zogy.bkg_filtersize,tel)
 
-    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']:
 
         mini_median_filt = fill_zeros_filter (mini_median, size_filter,
                                               use_median=False)
@@ -11512,7 +11512,7 @@ def get_back (data, header, fits_objmask, fits_mask=None,
     size_filter = get_par(set_zogy.bkg_filtersize,tel)
 
 
-    if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+    if tel not in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']:
 
         # not a ML/BG image
         mini_bkg_filt = fill_mask (mini_bkg, size_filter,
