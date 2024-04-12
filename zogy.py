@@ -116,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.1'
+__version__ = '1.3.2'
 
 
 ################################################################################
@@ -11977,7 +11977,11 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                   .format(factor))
 
     else:
+
         bkg_corr = False
+        log.info ('image channels *NOT* modified with correction factors: {}'
+                  .format(factor))
+
 
 
     # add boolean to header
@@ -12850,9 +12854,9 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
         # save psf_ima_shift_sub to a .npy file using function
         # [save_npy_fits] and record the filenames in
         # [dict_psf_ima_shift] with the subimage integers as the keys
-        dict_psf_ima_shift[nsub] = save_npy_fits (psf_ima_shift_sub,
-                                                  '{}_psf_ima_shift_sub{}.npy'
-                                                  .format(base, nsub))
+        dict_psf_ima_shift[nsub] = save_npy_fits (
+            psf_ima_shift_sub.astype('float32'), '{}_psf_ima_shift_sub{}.npy'
+            .format(base, nsub))
 
 
         if (get_par(set_zogy.display,tel) and show_sub(nsub) and
