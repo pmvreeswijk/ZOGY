@@ -1866,10 +1866,12 @@ def create_col_descr(keys2add, header):
         key = header['TTYPE{}'.format(i+1)]
         # check if key is in the input keys2add
         if key in keys2add:
-            # if so, add its description to col_descr
-            descr = header['TCOMM{}'.format(i+1)]
-            col_descr[key] = descr
-
+            # check if relevant TCOMM is in header
+            key_descr = 'TCOMM{}'.format(i+1)
+            if key_descr in header:
+                # if so, add its description to col_descr
+                descr = header[key_descr]
+                col_descr[key] = descr
 
 
     return col_descr
