@@ -1336,14 +1336,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new and ref:
         cat_trans = '{}.transcat'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
-
+        sexcat_new = '{}_sexcat.fits'.format(base_new)
 
         if get_par(set_zogy.use_new_transcat,tel):
 
             # add some additional columns to transient catalog, by crossmatching
             # with Gaia and reference catalogs, and performing forced photometry
             # at transients positions in new and ref image
-            trans_crossmatch_fphot (cat_trans, new_fits, new_fits_mask,
+            trans_crossmatch_fphot (cat_trans,
+                                    new_fits, new_fits_mask, sexcat_new,
                                     ref_fits, ref_fits_mask, cat_ref,
                                     nthreads=nthreads)
 
@@ -1434,9 +1435,8 @@ def strip_hdrkeys (header, keys2strip=None):
 
 ################################################################################
 
-def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask,
-                            fits_ref, fits_ref_mask, fits_cat_ref,
-                            nthreads=1):
+def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask, sexcat_new,
+                            fits_ref, fits_ref_mask, fits_cat_ref, nthreads=1):
 
     """Cross match entries in transient catalog with the Gaia DR3
     catalog and the reference catalog to extract the nearest
@@ -1445,22 +1445,52 @@ def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask,
     corresponding optimal magnitudes in those images. Altogether this
     will add the following columns to the input catalog:
 
-    SOURCE_ID_NEAR_GAIA:  Source id of Gaia DR3 source nearest to the transient
-    SEP_NEAR_GAIA:        [arcsec] separation to nearest source in Gaia DR3
-    SEP_NEAR_REF:         [arcsec] separation to nearest significant source in
-                                   ref catalogue
-    MAG_AUTO_NEAR_REF:    [mag] AUTO magnitude of nearest source in ref catalog
+
+    SOURCE_ID_NEAR_GAIA:  source ID of Gaia DR3 source nearest to the transient
+    SEP_NEAR_GAIA:        [arcsec] separation to nearest Gaia DR3 source
+    MAG_G_NEAR_GAIA       [mas] Gaia DR3 G-band magnitude (Vega) of nearest
+                          source
+    MAGERR_G_NEAR_GAIA    [mag] corresponding error
+    SEP_BRIGHT_GAIA       [arcsec] separation to nearest bright (G<14) Gaia DR3
+                          source
+    MAG_G_BRIGHT_GAIA     [mag] Gaia DR3 G-band magnitude of nearest bright
+                          (G<14) source
+
+
+    NUMBER_NEAR_REF       number of reference catalogue source nearest to the
+                          transient
+    SEP_NEAR_REF:         [arcsec] separation to nearest source in ref catalogue
+    FWHM_NEAR_REF         [pix] FWHM of nearest source in reference catalogue
+    ELONG_NEAR_REF        elongation of nearest source in reference catalogue
+    CLASS_STAR_NEAR_REF   SExtractor star/galaxy classification of nearest
+                          ref-image source
+    MAG_AUTO_NEAR_REF:    [mag] Kron/AUTO magnitude (AB) of nearest source in ref
+                          catalog
     MAGERR_AUTO_NEAR_REF: [mag] corresponding error
-    CLASS_STAR_NEAR_REF:  Source Extractor star/galaxy classification of nearest
-                          ref source
-    MAG_OPT_REF:          [mag] forced photometry in ref image at transient position
-    MAGERR_OPT_REF:       [mag] corresponding error
-    BACKGROUND_REF:       [e-] estimated source background in global background-subtracted
-                               ref image
-    MAG_OPT_RED:          [mag] forced photometry in reduced image at transient position
-    MAGERR_OPT_RED:       [mag] corresponding error
-    BACKGROUND_RED:       [e-] estimated source background in global background-subtracted
-                               reduced image
+    FNU_OPT_REF           [microJy] forced-photometry flux in reference image at
+                          transient position
+    FNUERR_OPT_REF        [microJy] corresponding error
+    FLAGS_MASK_REF        OR comb. of bad pixels inner PSF profile in reference
+                          image
+
+    (BACKGROUND_REF:       [e-] estimated source background in global
+                           background-subtracted ref image)
+
+
+    SEP_NEAR_RED:         [arcsec] separation to nearest source in reduced image
+    FWHM_NEAR_RED         [pix] FWHM of nearest source in reduced image
+    ELONG_NEAR_RED        elongation of nearest source in reduced image
+    CLASS_STAR_NEAR_RED   SExtractor star/galaxy classification of nearest
+                          red-image source
+    FNU_OPT_RED           [microJy] forced-photometry flux in reduced image at
+                          transient position
+    FNUERR_OPT_RED        [microJy] corresponding error
+    FLAGS_MASK_RED        OR comb. of bad pixels inner PSF profile in reduced
+                          image
+
+    (BACKGROUND_RED:       [e-] estimated source background in global
+                           background-subtracted red image)
+
 
     The above columns will be added to the input catalog, which will
     be overwritten.
@@ -1579,10 +1609,13 @@ def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask,
 
 
     # add relevant columns
+    table_trans['NUMBER_NEAR_REF'] = table_ref['NUMBER'][index_ref]
     table_trans['SEP_NEAR_REF'] = sep_ref.astype('float32')
+    table_trans['FWHM_NEAR_REF'] = table_ref['FWHM'][index_ref]
+    table_trans['ELONG_NEAR_REF'] = table_ref['ELONGATION'][index_ref]
+    table_trans['CLASS_STAR_NEAR_REF'] = table_ref['CLASS_STAR'][index_ref]
     table_trans['MAG_AUTO_NEAR_REF'] = table_ref['MAG_AUTO'][index_ref]
     table_trans['MAGERR_AUTO_NEAR_REF'] = table_ref['MAGERR_AUTO'][index_ref]
-    table_trans['CLASS_STAR_NEAR_REF'] = table_ref['CLASS_STAR'][index_ref]
 
 
     # forced photometry in ref image
@@ -1635,6 +1668,29 @@ def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask,
     table_trans['FNU_OPT_REF'][index_out] = table_fphot_ref['FNU_OPT']
     table_trans['FNUERR_OPT_REF'][index_out] = table_fphot_ref['FNUERR_OPT']
     table_trans['FLAGS_MASK_REF'][index_out] = table_fphot_ref['FLAGS_MASK']
+
+
+    # crossmatch with new source-extractor catalog
+    # --------------------------------------------
+
+    log.info ('cross-matching transients with new source-extractor catalog')
+
+    # read new source-extractor catalog
+    table_new = Table.read(sexcat_new)
+
+    # find star in new catalog nearest to transient coordinates
+    ra_new = table_new['RA'].value
+    dec_new = table_new['DEC'].value
+    __, index_new, sep_new, sep_ra, sep_dec = get_matches (
+        ra_trans, dec_trans, ra_new, dec_new, return_offsets=True)
+
+
+    # add relevant columns
+    table_trans['SEP_NEAR_RED'] = sep_new.astype('float32')
+    table_trans['FWHM_NEAR_RED'] = table_new['FWHM'][index_new]
+    table_trans['ELONG_NEAR_RED'] = table_new['ELONGATION'][index_new]
+    table_trans['CLASS_STAR_NEAR_RED'] = table_new['CLASS_STAR'][index_new]
+
 
 
     # forced photometry in reduced image
@@ -3122,13 +3178,22 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'MAGERR_G_NEAR_GAIA':  ['E', 'mag'  ], #, 'flt32' ],
         'SEP_BRIGHT_GAIA':     ['E', 'arcsec'], #, 'flt32' ],
         'MAG_G_BRIGHT_GAIA':   ['E', 'mag'  ], #, 'flt32' ],
+        #
+        'NUMBER_NEAR_REF':     ['J', ''     ], #, 'flt32' ],
         'SEP_NEAR_REF':        ['E', 'arcsec'], #, 'flt32' ],
+        'FWHM_NEAR_REF':       ['E', 'pix'  ], #, 'flt32' ],
+        'ELONG_NEAR_REF':      ['E', ''     ], #, 'flt32' ],
+        'CLASS_STAR_NEAR_REF': ['E', ''     ], #, 'flt32' ],
         'MAG_AUTO_NEAR_REF':   ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_AUTO_NEAR_REF':['E', 'mag'  ], #, 'flt32' ],
-        'CLASS_STAR_NEAR_REF': ['E', ''     ], #, 'flt32' ],
         'FNU_OPT_REF':         ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_OPT_REF':      ['E', 'uJy'  ], #, 'flt16' ],
         'FLAGS_MASK_REF':      ['I', ''     ], #, 'uint8' ],
+        #
+        'SEP_NEAR_RED':        ['E', 'arcsec'], #, 'flt32' ],
+        'FWHM_NEAR_RED':       ['E', 'pix'  ], #, 'flt32' ],
+        'ELONG_NEAR_RED':      ['E', ''     ], #, 'flt32' ],
+        'CLASS_STAR_NEAR_RED': ['E', ''     ], #, 'flt32' ],
         'FNU_OPT_RED':         ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_OPT_RED':      ['E', 'uJy'  ], #, 'flt16' ],
         'FLAGS_MASK_RED':      ['I', ''     ], #, 'uint8' ],
@@ -3221,20 +3286,32 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
         # new set of columns (Feb 2024)
         if get_par(set_zogy.use_new_transcat,tel):
-            keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK', 'RA_PEAK', 'DEC_PEAK',
-                              'SNR_ZOGY', 'E_FLUX_ZOGY', 'E_FLUXERR_ZOGY',
+            keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
+                              'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
                               'FNU_ZOGY', 'FNUERR_ZOGY',
+                              #
                               'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
+                              #
                               'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
-                              'RA_PSF_D', 'DEC_PSF_D', 'FNU_PSF_D', 'FNUERR_PSF_D',
+                              'RA_PSF_D', 'DEC_PSF_D',
+                              'FNU_PSF_D', 'FNUERR_PSF_D',
                               'CHI2_PSF_D',
+                              #
                               'SOURCE_ID_NEAR_GAIA', 'SEP_NEAR_GAIA',
                               'MAG_G_NEAR_GAIA', 'MAGERR_G_NEAR_GAIA',
                               'SEP_BRIGHT_GAIA', 'MAG_G_BRIGHT_GAIA',
-                              'SEP_NEAR_REF', 'MAG_AUTO_NEAR_REF',
-                              'MAGERR_AUTO_NEAR_REF', 'CLASS_STAR_NEAR_REF',
-                              'FNU_OPT_REF', 'FNUERR_OPT_REF', 'FLAGS_MASK_REF',
-                              'FNU_OPT_RED', 'FNUERR_OPT_RED', 'FLAGS_MASK_RED',
+                              #
+                              'NUMBER_NEAR_REF',
+                              'SEP_NEAR_REF', 'FWHM_NEAR_REF', 'ELONG_NEAR_REF',
+                              'CLASS_STAR_NEAR_REF',
+                              'MAG_AUTO_NEAR_REF', 'MAGERR_AUTO_NEAR_REF',
+                              'FNU_OPT_REF', 'FNUERR_OPT_REF',
+                              'FLAGS_MASK_REF',
+                              #
+                              'SEP_NEAR_RED', 'FWHM_NEAR_RED', 'ELONG_NEAR_RED',
+                              'CLASS_STAR_NEAR_RED',
+                              'FNU_OPT_RED', 'FNUERR_OPT_RED',
+                              'FLAGS_MASK_RED',
                               ]
 
 
@@ -8473,8 +8550,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 rot=rot)
 
 
+            # make copy of source extractor catalog, before
+            # overwriting it with the Gaia forced-photometry catalog
+            sexcat = '{}_sexcat.fits'.format(base)
+            if os.path.exists(sexcat):
+                shutil.copy2 (fits_cat, sexcat)
+
+
             # write fits table to file
-            fits_cat = '{}_cat.fits'.format(base)
             table_cat.write (fits_cat, format='fits', overwrite=True)
 
 
@@ -8512,8 +8595,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # determination of optimal fluxes
             # -------------------------------
 
-            # get estimate of optimal flux for all sources in the new
-            # or ref image
+            # get estimate of optimal flux for all sources detected by
+            # source extractor in the new or ref image
 
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
@@ -8950,6 +9033,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
     if get_par(set_zogy.timing,tel): t2 = time.time()
 
+
     # add n-sigma to header; for new images this is nsigma
     nsigma = get_par(set_zogy.source_nsigma,tel)
     if imtype=='new':
@@ -9021,17 +9105,31 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
             col_fluxerr = col.replace('E_FLUX', 'E_FLUXERR')
             col_mag = col.replace('E_FLUX', 'MAG')
             col_magerr = col.replace('E_FLUX', 'MAGERR')
+            col_fnu = col.replace('E_FLUX', 'FNU')
+            col_fnuerr = col.replace('E_FLUX', 'FNUERR')
 
-            mag_tmp, magerr_tmp = apply_zp(
+
+            mag_tmp, magerr_tmp, fnu_tmp, fnuerr_tmp = apply_zp(
                 table_cat[col_flux], zp, airmass_sex, exptime, ext_coeff,
-                fluxerr=table_cat[col_fluxerr])
+                fluxerr=table_cat[col_fluxerr], return_fnu=True)
 
+
+            # if present, delete original mag and magerr columns
             if col_mag in colnames:
                 del table_cat[col_mag, col_magerr]
 
-            # add magnitude columns to table
+            # add mag columns to table
             table_cat[col_mag] = mag_tmp
             table_cat[col_magerr] = magerr_tmp
+
+
+            # if present, delete original fnu and fnuerr columns
+            if col_fnu in colnames:
+                del table_cat[col_fnu, col_fnuerr]
+
+            # add fnu columns to table
+            table_cat[col_fnu] = fnu_tmp
+            table_cat[col_fnuerr] = fnuerr_tmp
 
 
 
@@ -9065,15 +9163,16 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         return mask_all
 
 
-    # filter out objects lower than S/N=nsigma according to
-    # SExtractor AUTO fluxes and errors, if available; if not, use
-    # the optimal fluxes and errors
-    if False and ('E_FLUX_AUTO' in table_cat.colnames and
-                  'E_FLUXERR_AUTO' in table_cat.colnames):
+    # for reference image, filter out objects lower than S/N=nsigma
+    # according to SExtractor AUTO fluxes and errors, if available
+    if imtype=='ref' and ('E_FLUX_AUTO' in table_cat.colnames and
+                          'E_FLUXERR_AUTO' in table_cat.colnames):
         log.info ('discarding sources with S/N_AUTO < {}'.format(nsigma))
         mask_nsigma = get_mask(table_cat['E_FLUX_AUTO'],
                                table_cat['E_FLUXERR_AUTO'], nsigma)
     else:
+        # for new images or auto fluxes are not available, use the
+        # optimal fluxes and errors
         log.info ('discarding sources with S/N_OPT < {}'.format(nsigma))
         mask_nsigma = get_mask(flux_opt, fluxerr_opt, nsigma)
 
@@ -10697,6 +10796,10 @@ def coords2chan (xcoords, ycoords):
     chan_numbers[mask_zero] = 0
 
 
+    return chan_numbers
+
+
+
     # old loop
     if False:
         # define channel start and end pixel coordinates
@@ -10715,9 +10818,6 @@ def coords2chan (xcoords, ycoords):
                          (xcoords <  chan_y1y2x1x2[i_chan,3]))
 
             chan_numbers[mask_chan] = i_chan + 1
-
-
-    return chan_numbers
 
 
 ################################################################################
