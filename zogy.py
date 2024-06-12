@@ -8330,6 +8330,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # read zp and zp_std from header
         zp = header['PC-ZP']
         zp_std = header['PC-ZPSTD']
+        zp_err = header['PC-ZPERR']
 
         log.warning ('zeropoint present in header; skipping photometric '
                      'calibration and creation of limiting magnitude image for '
@@ -8346,7 +8347,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         if (isfile(fits_cal) and filt in 'ugqriz'):
 
             pc_ok = True
-            zp, zp_std, ncal_used, airmass_cal = phot_calibrate (
+            zp, zp_std, zp_err, ncal_used, airmass_cal = phot_calibrate (
                 fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
                 imtype, objmask, fwhm, nthreads, rot=rot)
@@ -8365,13 +8366,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         if not pc_ok:
             zp = get_par(set_zogy.zp_default,tel)[filt]
             zp_std = 0
+            zp_err = 0
             log.warning ('photometric calibration catalog {} not found '
                          'and/or filter {} not one of ugqriz; using the '
-                         'default zeropoint: {} and zp_std=0'
+                         'default zeropoint: {} and zp_std=zp_err=0'
                          .format(get_par(set_zogy.cal_cat,tel), filt, zp))
         else:
-            log.info ('inferred image zeropoint: {:.4f} +- {:.4f}, using {} '
-                      'calibration stars'.format(zp, zp_std, ncal_used))
+            log.info ('inferred image zeropoint: {:.4f}, zp_std: {:.4f}, '
+                      'zp_err: {:.4f} using {} calibration stars'
+                      .format(zp, zp_std, zp_err, ncal_used))
 
 
         # add header keyword(s):
@@ -8380,6 +8383,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                               '[mag] default filter zeropoint in settings file')
         header['PC-ZP'] = (zp, '[mag] zeropoint=m_AB+2.5*log10(flux[e-/s])+A*k')
         header['PC-ZPSTD'] = (zp_std, '[mag] weighted sigma (STD) zeropoint')
+        header['PC-ZPERR'] = (zp_err, '[mag] weighted error zeropoint')
         header['PC-EXTCO'] = (ext_coeff, '[mag] filter extinction coefficient '
                               '(k)')
         if pc_ok:
@@ -8601,8 +8605,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
                 table_cat, header, exptime, filt, obsdate, base, data_wcs,
-                data_bkg_std, data_mask, imtype, objmask, zp, zp_std, fwhm,
-                nthreads)
+                data_bkg_std, data_mask, imtype, objmask, zp, fwhm, nthreads)
 
 
             # merge fake stars and catalog
@@ -8924,7 +8927,7 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
 def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                            data_wcs, data_bkg_std, data_mask, imtype, objmask,
-                           zp, zp_std, fwhm, nthreads):
+                           zp, fwhm, nthreads):
 
 
     if get_par(set_zogy.timing,tel): t1 = time.time()
@@ -9363,6 +9366,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     # only continue if calibration stars are present in the FOV
     zp = None
     zp_std = None
+    zp_err = None
     ncal_used = 0
     if ncalstars>0:
 
@@ -9403,9 +9407,10 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
         # determine single zeropoint for entire image
-        zp, zp_std, ncal_used = calc_zp (x_array, y_array, zp_array, zperr_array,
-                                         filt, imtype, data_wcs.shape,
-                                         zp_type='single')
+        zp, zp_std, zp_err, ncal_used = calc_zp (
+            x_array, y_array, zp_array, zperr_array, filt, imtype,
+            data_wcs.shape, zp_type='single')
+
 
         header['PC-NCAL'] = (ncal_used,
                              'number of photcal stars used (S/N>=10,flags=0)')
@@ -9458,7 +9463,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # restricted anymore to brightest maximum number
             # defined by get_par(set_zogy.phot_ncal_use,tel)
             # which is used in the single-value ZP above
-            zp_chan, zp_std_chan, ncal_chan = calc_zp (
+            zp_chan, zp_std_chan, zp_err_chan, ncal_chan = calc_zp (
                 x_array, y_array, zp_array, zperr_array, filt, imtype,
                 zp_type='channels')
 
@@ -9471,6 +9476,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             mask_zero = (zp_chan == 0)
             zp_chan[mask_zero] = zp
             zp_std_chan[mask_zero] = zp_std
+            zp_err_chan[mask_zero] = zp_err
 
 
             for i_chan in range(zp_chan.size):
@@ -9479,8 +9485,12 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                     .format(i_chan+1))
             for i_chan in range(zp_chan.size):
                 header['PC-ZPS{}'.format(i_chan+1)] = (
-                    zp_std_chan[i_chan], '[mag] chan {} weighted sigma (STD) '
+                    zp_std_chan[i_chan], '[mag] chan {} sigma (STD) weighted '
                     'zeropoint'.format(i_chan+1))
+            for i_chan in range(zp_chan.size):
+                header['PC-ZPE{}'.format(i_chan+1)] = (
+                    zp_std_chan[i_chan], '[mag] chan {} error weighted zeropoint'
+                    .format(i_chan+1))
             for i_chan in range(zp_chan.size):
                 header['PC-NCC{}'.format(i_chan+1)] = (
                     ncal_chan[i_chan], 'chan {} number of photcal stars used'
@@ -9552,10 +9562,11 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # determine median zeropoints on subimages to
             # check if they are constant across the image
             subsize = get_par(set_zogy.subimage_size,tel)
-            zp_mini, zp_std_mini, ncal_mini = calc_zp (
+            zp_mini, zp_std_mini, zp_err_mini, ncal_mini = calc_zp (
                 x_array, y_array, zp_array, zperr_array, filt, imtype,
                 data_shape=data_wcs.shape, zp_type='background',
                 boxsize=subsize)
+
 
             # if keeping intermediate/temporary files, save
             # these mini images
@@ -9565,12 +9576,14 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                              zp_mini, overwrite=True)
                 fits.writeto('{}_zp_std_subs.fits'.format(base),
                              zp_std_mini, overwrite=True)
+                fits.writeto('{}_zp_err_subs.fits'.format(base),
+                             zp_err_mini, overwrite=True)
                 fits.writeto('{}_zp_ncal_subs.fits'.format(base),
                              ncal_mini.astype('int16'), overwrite=True)
 
 
             # add statistics of these arrays to header
-            mask_use = ((zp_mini != 0) & (zp_std_mini != 0))
+            mask_use = ((zp_mini != 0) & (zp_std_mini != 0) & (zp_err_mini != 0))
             n_zps = np.sum(mask_use)
             if n_zps >= 4:
                 # discard the highest and lowest value in stats
@@ -9578,21 +9591,25 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 max_diff = np.abs(arr_sort[-2] - arr_sort[1])
                 arr_sort = np.sort(zp_std_mini[mask_use])
                 max_std = arr_sort[-2]
+                arr_sort = np.sort(zp_err_mini[mask_use])
+                max_err = arr_sort[-2]
             else:
                 log.warning ('too few subimages (<4) available to '
-                             'determine maximum ZP difference and STD')
+                             'determine maximum ZP difference, STD and ERR')
                 max_diff = 'None'
                 max_std = 'None'
+                max_err = 'None'
 
 
-            header['PC-TNSUB'] = (int(ysize/subsize)**2, 'total number '
-                                  'of subimages available')
-            header['PC-NSUB'] = (n_zps, 'number of subimages used for '
-                                 'ZP statistics')
-            header['PC-MZPD'] = (max_diff, '[mag] max. ZP '
-                                 'difference between subimages')
-            header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma '
-                                 '(STD) of subimages')
+            header['PC-TNSUB'] = (int(ysize/subsize)**2, 'total number of '
+                                  'subimages available')
+            header['PC-NSUB'] = (n_zps, 'number of subimages used for ZP '
+                                 'statistics')
+            header['PC-MZPD'] = (max_diff, '[mag] max. ZP difference between '
+                                 'subimages')
+            header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma (STD) of '
+                                 'subimages')
+            header['PC-MZPE'] = (max_err, '[mag] max. ZP error of subimages')
 
 
 
@@ -9603,7 +9620,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         log_timing_memory (t0=t, label='in phot_calibrate')
 
 
-    return zp, zp_std, ncal_used, airmass_cal
+    return zp, zp_std, zp_err, ncal_used, airmass_cal
 
 
 ################################################################################
@@ -10314,8 +10331,8 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
             # clip outliers
             ma_clipped = sigma_clip(zp_array, sigma=nsigma)
             mask_use = ~ma_clipped.mask
-            zp, zp_std, zp_wmeanerr = weighted_mean (zp_array[mask_use],
-                                                     zperr_array[mask_use])
+            zp, zp_std, zp_err = weighted_mean (zp_array[mask_use],
+                                                zperr_array[mask_use])
             nused = np.sum(mask_use)
 
 
@@ -10334,9 +10351,9 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
 
 
         else:
-            log.warning ('could not determine median and/or std for lack of '
-                         'calibration stars (<5); returning zeros')
-            zp, zp_std, nused = (0, 0, 0)
+            log.warning ('could not determine zeropoints weighted mean for lack '
+                         'of calibration stars (<5); returning zeros')
+            zp, zp_std, zp_err, nused = (0, 0, 0, 0)
 
 
     elif zp_type == 'channels':
@@ -10345,13 +10362,14 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
         # MeerLICHT/BlackGEM CCD
 
         ncal_min_chan = get_par(set_zogy.MLBG_phot_ncal_min_chan,tel)
-        zp, zp_std, __, __, nused = zps_weighted_mean (
+        zp, zp_std, zp_err, __, nused = zps_weighted_mean (
             x_array, y_array, zp_array, zperr_array, 1320, 5280,
             (2,8), ncal_min=ncal_min_chan, nsigma=nsigma)
 
         # arrays need to be flattened to get 1D array with index = nchan-1
         zp = zp.ravel()
         zp_std = zp_std.ravel()
+        zp_err = zp_err.ravel()
         nused = nused.ravel()
 
 
@@ -10365,7 +10383,7 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
                          'integer times in image')
         nysubs = int(ysize / boxsize)
         nxsubs = int(xsize / boxsize)
-        zp, zp_std, __, __, nused = zps_weighted_mean (
+        zp, zp_std, zp_err, __, nused = zps_weighted_mean (
             x_array, y_array, zp_array, zperr_array, boxsize, boxsize,
             (nysubs, nxsubs), ncal_min=5, nsigma=nsigma)
 
@@ -10374,18 +10392,19 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
             # arrays need to be transposed to get the mini-images arrays
             zp = zp.T
             zp_std = zp_std.T
+            zp_err = zp_err.T
             nused = nused.T
 
 
     if get_par(set_zogy.verbose,tel) and zp_type=='single':
-        log.info('zp: {:.3f}; zp_std: {:.3f}; nused: {}'
-                 .format(zp, zp_std, nused))
+        log.info('zp: {:.3f}; zp_std: {:.3f}; zp_err: {:.3f}; nused: {}'
+                 .format(zp, zp_std, zp_err, nused))
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='in calc_zp')
 
 
-    return zp, zp_std, nused
+    return zp, zp_std, zp_err, nused
 
 
 ################################################################################
@@ -10535,22 +10554,48 @@ def weighted_mean (mag, magerr, magerr_wlim=0.001):
        deviation and the error on the weighted mean, in units of
        magnitudes.
 
+       (June 2024): added method from dreamreduce
+       (zeropoints.find_sigma) to correct for the fact that the flux
+       errors are likely underestimated, by finding a single constant
+       error to all magnitude errors such that the reduced chi2 of the
+       distribution of values will become unity
+
     """
 
-    # convert mag and magerr to flux
+
+    # using [find_sigma], determine additional sigma or magnitude
+    # error (due to measurement errors likely being an underestimate
+    # of the true errors), which is found by adding a single constant
+    # error to all magnitude errors such that the reduced chi2 of the
+    # distribution of values will become unity
+    try:
+        res = mag - np.median(mag)
+        sigma = find_sigma (res, magerr)
+    except Exception as e:
+        # in case of an exception in find_sigma, set sigma to zero
+        log.warning ('following exception occurred in zogy.find_sigma, '
+                     'setting sigma to zero: {}'.format(e))
+        sigma = 0
+
+
+    # total magnitude error
+    magerrtot = np.sqrt(magerr**2 + sigma**2)
+
+
+    # convert mag and magerrtot to flux
     pogson = 2.5/np.log(10)
     flux = 10**(-0.4*mag)
-    fluxerr = flux * magerr / pogson
+    fluxerrtot = flux * magerrtot / pogson
 
 
-    # initialize weights to fluxerr corresponding to magerr_wlim (which
-    # is in magnitude units)
+    # initialize weights to fluxerrtot corresponding to magerr_wlim
+    # (which is in magnitude units)
     fluxerr_min = flux * magerr_wlim / pogson
     weights = 1/fluxerr_min**2
     # set usual weights for stars with flux errors above magerr_wlim
     # threshold
-    mask = (pogson*fluxerr/flux > magerr_wlim)
-    weights[mask] = 1/fluxerr[mask]**2
+    mask = (pogson*fluxerrtot/flux > magerr_wlim)
+    weights[mask] = 1/fluxerrtot[mask]**2
 
 
     # weighted mean flux and magnitude
@@ -10570,6 +10615,158 @@ def weighted_mean (mag, magerr, magerr_wlim=0.001):
 
 
     return mag_wmean, mag_wstd, mag_wmeanerr
+
+
+################################################################################
+
+def find_sigma (res, err, axis=None, maxiter=15, epsilon=1e-2):
+
+
+    # CHECK!!! - for debugging purposes
+    #log.info ('res: {}'.format(res))
+    #log.info ('np.shape(res): {}'.format(np.shape(res)))
+    #log.info ('err: {}'.format(err))
+    #log.info ('np.shape(err): {}'.format(np.shape(err)))
+
+
+    # with too few valid values in case axis is None, return zero
+    # immediately
+    if axis is None and np.ma.count(res)<2:
+        return 0
+
+
+    # Search for a solution between 0 and 2.
+    err1 = 0
+    err2 = 2
+
+
+    # flatten arrays if needed
+    if axis is None:
+        res = np.ravel(res)
+        err = np.ravel(err)
+    else:
+        # err1 and 2 (and output err3) have one dimension less than
+        # res and err
+        err1 += np.zeros(np.sum(res, axis=axis, keepdims=True).shape)
+        err2 += np.zeros_like(err1)
+
+
+
+    # determined reduced chi-square with respect to the median at
+    # beginning of interval
+    chi2red = get_chi2red (res, err, err1, axis=axis)
+    #log.info ('chi2red begin interval: {}'.format(chi2red))
+
+    # if chi2red is still below 1, even when a zero sigma was added to
+    # the individual errors, return err1 if chi2red is scalar or
+    # create mask to set the corresponding values to zero, further
+    # below
+    if np.isscalar(chi2red):
+        # boolean indicating that chi2red, err1, err2 and err3 are
+        # scalars
+        scalar = True
+        if chi2red <= 1:
+            return err1
+    else:
+        scalar = False
+        mask1 = (chi2red <= 1)
+
+
+    # determined reduced chi-square with respect to the median at end
+    # of interval
+    chi2red = get_chi2red (res, err, err2, axis=axis)
+    #log.info ('chi2red end interval: {}'.format(chi2red))
+    # if chi2red is still below 1, even when a zero sigma was added to
+    # the individual errors, return err2 if chi2red is scalar or
+    # create mask to set the corresponding values to zero, further
+    # below
+    if scalar:
+        if chi2red > 1:
+            return err2
+    else:
+        mask2 = (chi2red > 1)
+
+
+    # Find the solution.
+    for niter in range(maxiter):
+
+        err3 = (err1 + err2)/2
+        chi2red = get_chi2red (res, err, err3, axis=axis)
+
+        if scalar:
+
+            if chi2red > 1:
+                # if chi2red > 1: move lower error up to err3 to decrease
+                # chi2 in next iteration
+                err1 = err3
+            else:
+                # if chi2red < 1: move upper error down to err3 to
+                # increase chi2red in next iteration
+                err2 = err3
+
+        else:
+
+            # use mask if not scalars
+            mask = (chi2red > 1)
+            err1[mask] = err3[mask]
+            err2[~mask] = err3[~mask]
+
+
+
+        # break if chi2red - 1 is sufficiently close to 1
+        if np.max(np.abs(chi2red-1)) < epsilon:
+            break
+
+
+
+    err3 = (err2 + err1)/2
+
+    if not scalar:
+        err3[mask1] = 0
+        err3[mask2] = 2
+
+
+    if not np.isscalar(err3) and err3.size == 1:
+        err3 = err3[0]
+
+
+    return err3
+
+
+################################################################################
+
+def get_chi2red (res, err, sigma=0, axis=None):
+
+    # flatten arrays if needed
+    if axis is None:
+        res = np.ravel(res)
+        err = np.ravel(err)
+
+
+    # median along axis
+    med = np.ma.median(res, axis=axis, keepdims=True)
+
+
+    # determine chi-square
+    weights = 1/(err**2 + sigma**2)
+    chi2 = np.sum(weights * (res-med)**2, axis=axis, keepdims=True)
+
+
+    # nobs; np.ma.count also works for non-masked arrays
+    nobs = np.ma.count(res, axis=axis, keepdims=True)
+
+
+    # reduced chi2
+    chi2red = chi2 / np.maximum(nobs-1, 1)
+
+
+    # if chi2red is a 1-d array with a single item, convert it to a
+    # scalar
+    if axis is None and not np.isscalar(chi2red) and chi2red.size == 1:
+        chi2red = chi2red[0]
+
+
+    return chi2red
 
 
 ################################################################################
