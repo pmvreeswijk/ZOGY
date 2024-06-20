@@ -1343,10 +1343,25 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # add some additional columns to transient catalog, by crossmatching
             # with Gaia and reference catalogs, and performing forced photometry
             # at transients positions in new and ref image
-            trans_crossmatch_fphot (cat_trans,
-                                    new_fits, new_fits_mask, sexcat_new,
-                                    ref_fits, ref_fits_mask, cat_ref,
-                                    nthreads=nthreads)
+            table_trans = trans_crossmatch_fphot (cat_trans,
+                                                  new_fits, new_fits_mask, sexcat_new,
+                                                  ref_fits, ref_fits_mask, cat_ref,
+                                                  nthreads=nthreads)
+
+
+            # add the zeropoint error to the fnu errors in transient table
+            add_zperr (table_trans, header_new, header_ref)
+
+
+            # add magnitudes corresponding to fnu and error columns in
+            # transient catalog
+            add_magcols (table_trans)
+
+
+            # after these updates, write updated table, overwriting the input
+            table_trans.write (cat_trans, format='fits', overwrite=True)
+
+
 
             # for ML/BG delete unnecesary images
             if tel[0:2] in ['ML','BG'] and not get_par(set_zogy.keep_tmp,tel):
@@ -1411,6 +1426,136 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         return header_new
     elif ref:
         return header_ref
+
+
+################################################################################
+
+def add_zperr (table_trans, header_new, header_ref):
+
+    # pogson constant
+    pogson = 2.5/np.log(10)
+
+    # loop columns
+    for col in table_trans.colnames:
+
+        # pick FNUERR columns
+        if col.startswith('FNUERR'):
+
+            fnu = table_trans[col.replace('FNUERR', 'FNU')]
+            fnuerr = table_trans[col]
+
+            if 'REF' in col:
+
+                if 'PC-ZPERR' in header_ref:
+                    zperr = header_ref['PC-ZPERR']
+                elif 'PC-ZPSTD' in header_ref:
+                    zperr = header_ref['PC-ZPSTD']
+                else:
+                    zperr = 0
+                    log.error ('neither PC-ZPERR nor PC-ZPSTD in reference '
+                               'image header (in zogy.add_zperr); adopting '
+                               'zperr of zero')
+
+            else:
+
+                if tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
+
+                    if 'PC-ZPERR' in header_new:
+                        zperr = header_new['PC-ZPERR']
+                    elif 'PC-ZPSTD' in header_new:
+                        zperr = header_new['PC-ZPSTD']
+                    else:
+                        zperr = 0
+                        log.error ('neither PC-ZPERR nor PC-ZPSTD in reference '
+                                   'image header (in zogy.add_zperr); adopting '
+                                   'zperr of zero')
+
+                else:
+
+                    # ML/BG: for reduced image and also in transient
+                    # case, need to convert pixel coordinates to
+                    # channel #
+                    #xcoords = table_trans['X_PSF_D']
+                    #ycoords = table_trans['Y_PSF_D']
+                    xcoords = table_trans['X_PEAK']
+                    ycoords = table_trans['Y_PEAK']
+                    channels = coords2chan (xcoords, ycoords)
+
+                    # add channels to table
+                    if 'CHANNEL' not in table_trans.colnames:
+                        table_trans['CHANNEL'] = channels
+
+
+                    if 'PC-ZPERR' in header_new:
+                        zperr = np.array([header['PC-ZPE{}'.format(nchan)]
+                                          for chan in channels])
+                    elif 'PC-ZPSTD' in header_new:
+                        zperr = np.array([header['PC-ZPS{}'.format(nchan)]
+                                          for chan in channels])
+                    else:
+                        zperr = 0
+                        log.error ('neither PC-ZPERR nor PC-ZPSTD in reduced '
+                                   'image header (in zogy.add_zperr); adopting '
+                                   'zperr of zero')
+
+
+                if 'ZOGY' in col or 'PSF_D' in col:
+
+                    # for transient fluxes, need to add additional
+                    # error due to comparison with reference image;
+                    # sufficient to add error in flux ratio??
+                    #
+                    fratio = header_new['Z-FNR']
+                    fratio_std = header_new['Z-FNRSTD']
+                    zperr = np.sqrt((pogson*np.abs(fratio_std/fratio))**2 +
+                                    zperr**2)
+
+
+
+            # add zeropoint error to measurement error
+            fnuerr_zp = zperr * np.abs(fnu) / pogson
+            fnuerrtot = np.sqrt(fnuerr**2 + fnuerr_zp**2)
+
+
+            # record in new table column
+            table_trans[col.replace('FNUERR', 'FNUERRTOT')] = fnuerrtot
+
+
+
+    return
+
+
+################################################################################
+
+def add_magcols (table_trans):
+
+    # loop columns
+    for col in table_trans.colnames:
+
+        # pick FNUERR columns
+        if col.startswith('FNUERR'):
+
+            fnu = table_trans[col.replace('FNUERR', 'FNU')]
+            fnuerr = table_trans[col]
+            fnuerrtot = table_trans[col.replace('FNUERR', 'FNUERRTOT')]
+
+            # for transient flux, convert to absolute value so that
+            # magnitude will not be set to 99
+            if 'ZOGY' in col or 'PSF_D' in col:
+                fnu = np.abs(fnu)
+
+
+            # convert to mag using zogy.fnu2mag()
+            mag, magerr, magerrtot = fnu2mag (fnu, fnuerr, fnuerrtot)
+
+            # record in new table columns
+            table_trans[col.replace('FNUERR', 'MAG')] = mag
+            table_trans[col.replace('FNUERR', 'MAGERR')] = magerr
+            table_trans[col.replace('FNUERR', 'MAGERRTOT')] = magerrtot
+
+
+
+    return
 
 
 ################################################################################
@@ -1733,15 +1878,11 @@ def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask, sexcat_new,
     table_trans['FLAGS_MASK_RED'][index_out] = table_fphot_red['FLAGS_MASK']
 
 
-    # write updated table, overwriting the input
-    table_trans.write (fits_transcat, format='fits', overwrite=True)
-
-
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='in trans_crossmatch_fphot')
 
 
-    return
+    return table_trans
 
 
 ################################################################################
@@ -3113,6 +3254,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'MAGERR_OPT':          ['E', 'mag'  ], #, 'flt16' ],
         'FNU_OPT':             ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_OPT':          ['E', 'uJy'  ], #, 'flt16' ],
+        'FNUERRTOT_OPT':       ['E', 'uJy'  ], #, 'flt16' ],
         # transient:
         'X_PEAK':              ['I', 'pix'  ], #, 'flt32' ],
         'Y_PEAK':              ['I', 'pix'  ], #, 'flt32' ],
@@ -3123,8 +3265,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'E_FLUXERR_ZOGY':      ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_ZOGY':            ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_ZOGY':         ['E', 'mag'  ], #, 'flt16' ],
+        'MAGERRTOT_ZOGY':      ['E', 'mag'  ], #, 'flt16' ],
         'FNU_ZOGY':            ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_ZOGY':         ['E', 'uJy'  ], #, 'flt16' ],
+        'FNUERRTOT_ZOGY':      ['E', 'uJy'  ], #, 'flt16' ],
         'X_PSF_D':             ['E', 'pix'  ], #, 'flt32' ],
         'XERR_PSF_D':          ['E', 'pix'  ], #, 'flt32' ],
         'Y_PSF_D':             ['E', 'pix'  ], #, 'flt32' ],
@@ -3135,8 +3279,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'E_FLUXERR_PSF_D':     ['E', 'electron/s' ], #, 'flt16' ],
         'MAG_PSF_D':           ['E', 'mag'  ], #, 'flt32' ],
         'MAGERR_PSF_D':        ['E', 'mag'  ], #, 'flt16' ],
+        'MAGERRTOT_PSF_D':     ['E', 'mag'  ], #, 'flt16' ],
         'FNU_PSF_D':           ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_PSF_D':        ['E', 'uJy'  ], #, 'flt16' ],
+        'FNUERRTOT_PSF_D':     ['E', 'uJy'  ], #, 'flt16' ],
         'CHI2_PSF_D':          ['E', ''     ], #, 'flt32' ],
         'X_MOFFAT_D':          ['E', 'pix'  ], #, 'flt32' ],
         'XERR_MOFFAT_D':       ['E', 'pix'  ], #, 'flt32' ],
@@ -3188,6 +3334,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'MAGERR_AUTO_NEAR_REF':['E', 'mag'  ], #, 'flt32' ],
         'FNU_OPT_REF':         ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_OPT_REF':      ['E', 'uJy'  ], #, 'flt16' ],
+        'FNUERRTOT_OPT_REF':   ['E', 'uJy'  ], #, 'flt16' ],
+        'MAG_OPT_REF':         ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_OPT_REF':      ['E', 'mag'  ], #, 'flt16' ],
+        'MAGERRTOT_OPT_REF':   ['E', 'mag'  ], #, 'flt16' ],
         'FLAGS_MASK_REF':      ['I', ''     ], #, 'uint8' ],
         #
         'SEP_NEAR_RED':        ['E', 'arcsec'], #, 'flt32' ],
@@ -3196,16 +3346,23 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'CLASS_STAR_NEAR_RED': ['E', ''     ], #, 'flt32' ],
         'FNU_OPT_RED':         ['E', 'uJy'  ], #, 'flt32' ],
         'FNUERR_OPT_RED':      ['E', 'uJy'  ], #, 'flt16' ],
+        'FNUERRTOT_OPT_RED':   ['E', 'uJy'  ], #, 'flt16' ],
+        'MAG_OPT_RED':         ['E', 'mag'  ], #, 'flt32' ],
+        'MAGERR_OPT_RED':      ['E', 'mag'  ], #, 'flt16' ],
+        'MAGERRTOT_OPT_RED':   ['E', 'mag'  ], #, 'flt16' ],
         'FLAGS_MASK_RED':      ['I', ''     ], #, 'uint8' ],
     }
 
-    keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
-                           'BACKGROUND', 'MAG_APER', 'MAGERR_APER',
-                           #'E_FLUX_OPT', 'E_FLUXERR_OPT',
-                           'MAG_OPT', 'MAGERR_OPT', 'SNR_OPT', 'LIMMAG_OPT']
 
-    # Fnu instead of AB mag version:
-    if get_par(set_zogy.record_fnu,tel):
+    # columns to record for Gaia forced-photometry fulls-source catalog
+    # in AB magnitudes
+    if not get_par(set_zogy.record_fnu,tel):
+        keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
+                               'BACKGROUND', 'MAG_APER', 'MAGERR_APER',
+                               #'E_FLUX_OPT', 'E_FLUXERR_OPT',
+                               'MAG_OPT', 'MAGERR_OPT', 'SNR_OPT', 'LIMMAG_OPT']
+    else:
+        # in Fnu
         keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
                                'BACKGROUND', 'FNU_APER', 'FNUERR_APER',
                                'FNU_OPT', 'FNUERR_OPT']
@@ -3264,37 +3421,46 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
     elif cat_type == 'trans':
 
-        keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
-                          'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
-                          'E_FLUX_ZOGY', 'E_FLUXERR_ZOGY', 'MAG_ZOGY', 'MAGERR_ZOGY',
-                          #
-                          'X_POS_SCORR', 'Y_POS_SCORR',
-                          #'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
-                          'RA_SCORR', 'DEC_SCORR', 'ELONG_SCORR',
-                          'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
-                          #'MAG_OPT_D', 'MAGERR_OPT_D',
-                          'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
-                          'RA_PSF_D', 'DEC_PSF_D', 'MAG_PSF_D', 'MAGERR_PSF_D',
-                          'CHI2_PSF_D',
-                          #'X_MOFFAT_D', 'XERR_MOFFAT_D', 'Y_MOFFAT_D', 'YERR_MOFFAT_D',
-                          #'RA_MOFFAT_D', 'DEC_MOFFAT_D',
-                          #'FWHM_MOFFAT_D', 'ELONG_MOFFAT_D', 'CHI2_MOFFAT_D',
-                          'X_GAUSS_D', 'XERR_GAUSS_D', 'Y_GAUSS_D', 'YERR_GAUSS_D',
-                          'RA_GAUSS_D', 'DEC_GAUSS_D',
-                          'FWHM_GAUSS_D', 'ELONG_GAUSS_D', 'CHI2_GAUSS_D']
+        if not get_par(set_zogy.use_new_transcat,tel):
 
-
-        # new set of columns (Feb 2024)
-        if get_par(set_zogy.use_new_transcat,tel):
+            # original set
             keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
                               'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
-                              'FNU_ZOGY', 'FNUERR_ZOGY',
+                              'E_FLUX_ZOGY', 'E_FLUXERR_ZOGY',
+                              'MAG_ZOGY', 'MAGERR_ZOGY',
+                              #
+                              'X_POS_SCORR', 'Y_POS_SCORR',
+                              #'XVAR_POS_SCORR', 'YVAR_POS_SCORR', 'XYCOV_POS_SCORR',
+                              'RA_SCORR', 'DEC_SCORR', 'ELONG_SCORR',
+                              'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
+                              #'MAG_OPT_D', 'MAGERR_OPT_D',
+                              'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
+                              'RA_PSF_D', 'DEC_PSF_D',
+                              'MAG_PSF_D', 'MAGERR_PSF_D',
+                              'CHI2_PSF_D',
+                              #'X_MOFFAT_D', 'XERR_MOFFAT_D',
+                              #'Y_MOFFAT_D', 'YERR_MOFFAT_D',
+                              #'RA_MOFFAT_D', 'DEC_MOFFAT_D',
+                              #'FWHM_MOFFAT_D', 'ELONG_MOFFAT_D', 'CHI2_MOFFAT_D',
+                              'X_GAUSS_D', 'XERR_GAUSS_D',
+                              'Y_GAUSS_D', 'YERR_GAUSS_D',
+                              'RA_GAUSS_D', 'DEC_GAUSS_D',
+                              'FWHM_GAUSS_D', 'ELONG_GAUSS_D', 'CHI2_GAUSS_D']
+
+        else:
+
+            # new set of transient columns (June 2024)
+            keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
+                              'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
+                              'FNU_ZOGY', 'FNUERR_ZOGY', 'FNUERR_ZOGY'
+                              'MAG_ZOGY', 'MAGERR_ZOGY', 'MAGERR_ZOGY'
                               #
                               'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
                               #
                               'X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                               'RA_PSF_D', 'DEC_PSF_D',
-                              'FNU_PSF_D', 'FNUERR_PSF_D',
+                              'FNU_PSF_D', 'FNUERR_PSF_D', 'FNUERRTOT_PSF_D',
+                              'MAG_PSF_D', 'MAGERR_PSF_D', 'MAGERRTOT_PSF_D',
                               'CHI2_PSF_D',
                               #
                               'SOURCE_ID_NEAR_GAIA', 'SEP_NEAR_GAIA',
@@ -3305,12 +3471,14 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                               'SEP_NEAR_REF', 'FWHM_NEAR_REF', 'ELONG_NEAR_REF',
                               'CLASS_STAR_NEAR_REF',
                               'MAG_AUTO_NEAR_REF', 'MAGERR_AUTO_NEAR_REF',
-                              'FNU_OPT_REF', 'FNUERR_OPT_REF',
+                              'FNU_OPT_REF', 'FNUERR_OPT_REF', 'FNUERRTOT_OPT_REF',
+                              'MAG_OPT_REF', 'MAGERR_OPT_REF', 'MAGERRTOT_OPT_REF',
                               'FLAGS_MASK_REF',
                               #
                               'SEP_NEAR_RED', 'FWHM_NEAR_RED', 'ELONG_NEAR_RED',
                               'CLASS_STAR_NEAR_RED',
-                              'FNU_OPT_RED', 'FNUERR_OPT_RED',
+                              'FNU_OPT_RED', 'FNUERR_OPT_RED', 'FNUERRTOT_OPT_RED',
+                              'MAG_OPT_RED', 'MAGERR_OPT_RED', 'MAGERRTOT_OPT_RED',
                               'FLAGS_MASK_RED',
                               ]
 
@@ -8344,8 +8512,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
         # run [phot_calibrate]
-        if (isfile(fits_cal) and filt in 'ugqriz'):
-
+        if (isfile(fits_cal) and filt in get_par(set_zogy.zp_default,tel)):
             pc_ok = True
             zp, zp_std, zp_err, ncal_used, airmass_cal = phot_calibrate (
                 fits_cal, header, exptime, filt, obsdate, base, ra_center,
@@ -10907,6 +11074,41 @@ def apply_zp_fnu2flux (fnu, zp, airmass, exptime, ext_coeff, fnuerr=None):
 
 ################################################################################
 
+def fnu2mag (fnu, fnuerr=None, fnuerrtot=None):
+
+    # Pogson constant
+    pogson = 2.5/np.log(10)
+
+
+    # mask of positive fluxes
+    mask_pos = (fnu > 0)
+    mag = np.zeros_like(fnu)
+    mag[mask_pos] = -2.5 * np.log10(fnu[mask_pos]) + 23.9
+    # set mags of negative fluxes to +99
+    mag[~mask_pos] = 99
+    list2return = [mag]
+
+
+    if fnuerr is not None:
+        magerr = pogson * np.abs(fnuerr/fnu)
+        # set magerr of negative fluxes to 99?
+        #magerr[~mask_pos] = 99
+        list2return.append(magerr)
+
+
+    if fnuerrtot is not None:
+        magerrtot = pogson * np.abs(fnuerrtot/fnu)
+        # set magerrtot of negative fluxes to 99?
+        #magerrtot[~mask_pos] = 99
+        list2return.append(magerrtot)
+
+
+
+    return list2return
+
+
+################################################################################
+
 def get_zp_coords (xcoords, ycoords, zp_chan, zp, zp_std_chan=None, zp_std=None):
 
     """function to return array of zeropoints and their STD for each
@@ -10994,27 +11196,6 @@ def coords2chan (xcoords, ycoords):
 
 
     return chan_numbers
-
-
-
-    # old loop
-    if False:
-        # define channel start and end pixel coordinates
-        chan_y1y2x1x2 = np.array([(y,y+dy,x,x+dx)
-                                  for y in np.arange(0.5, ysize+0.5, dy)
-                                  for x in np.arange(0.5, xsize+0.5, dx)])
-
-        chan_numbers = np.zeros_like(xcoords, dtype='uint8')
-
-        # loop channels
-        for i_chan in range(len(chan_y1y2x1x2)):
-
-            mask_chan = ((ycoords >= chan_y1y2x1x2[i_chan,0]) &
-                         (ycoords <  chan_y1y2x1x2[i_chan,1]) &
-                         (xcoords >= chan_y1y2x1x2[i_chan,2]) &
-                         (xcoords <  chan_y1y2x1x2[i_chan,3]))
-
-            chan_numbers[mask_chan] = i_chan + 1
 
 
 ################################################################################
