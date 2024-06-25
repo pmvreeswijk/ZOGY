@@ -116,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.2'
+__version__ = '1.3.3'
 
 
 ################################################################################
@@ -1350,7 +1350,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
             # add the zeropoint error to the fnu errors in transient table
-            add_zperr (table_trans, header_new, header_ref)
+            add_zperr (table_trans, header_new, header_ref_cat)
 
 
             # add magnitudes corresponding to fnu and error columns in
@@ -1379,6 +1379,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # update header_new with header_trans
         header2add = header_new.copy(strip=True)
         header2add.update(header_trans.copy(strip=True))
+
+        # add various header keywords from the reference catalog to
+        # the transient catalog
+        add_refkeys(header2add, header_ref_cat)
+
 
         format_cat (cat_trans, cat_trans_out, cat_type='trans',
                     header2add=header2add,
@@ -1426,6 +1431,32 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         return header_new
     elif ref:
         return header_ref
+
+
+
+
+################################################################################
+
+def add_refkeys (header_trans, header_ref):
+
+    for key in ['S-SEEING', 'S-SEESTD', 'S-ELONG', 'S-ELOSTD',
+                'PC-ZP', 'PC-ZPSTD', 'PC-ZPERR', 'LIMMAG', 'QC-FLAG']:
+
+        if key in header_ref:
+
+            # replace string before the dash (S-, PC-, etc.) with R-
+            key_ref = 'R-{}'.format(key.split('-')[-1])
+
+            # add to transient header
+            header_trans[key_ref] = header_ref[key]
+
+        else:
+
+            log.warning ('keyword {} not present in reference header for {}'
+                         .format(key, base_ref))
+
+
+    return
 
 
 ################################################################################
