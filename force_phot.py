@@ -561,10 +561,19 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
     # than the full-source catalog header
     if zogy.isfile(fits_trans):
         hdrfile2read = '{}_hdr.fits'.format(fits_trans.split('.fits')[0])
+        if not zogy.isfile(hdrfile2read):
+            hdrfile2read = fits_trans
+
     elif zogy.isfile(fits_cat):
         hdrfile2read = '{}_hdr.fits'.format(fits_cat.split('.fits')[0])
+        if not zogy.isfile(hdrfile2read):
+            hdrfile2read = fits_cat
+
     elif zogy.isfile(fits_red):
         hdrfile2read = '{}_hdr.fits'.format(fits_red.split('.fits')[0])
+        if not zogy.isfile(hdrfile2read):
+            hdrfile2read = fits_red
+
     else:
         log.warning ('reduced image, full-source and transient catalog all '
                      'do not exist for {}; skipping its extraction'
