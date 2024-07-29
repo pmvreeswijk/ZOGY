@@ -47,7 +47,8 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 ref=True, fullsource=False, nsigma=3, apphot_radii=None,
                 bkg_radii=None, pm_epoch=2016.0, include_fluxes=False,
                 keys2add=None, keys2add_dtypes=None, bkg_global=True,
-                thumbnails=False, size_thumbnails=None, tel=None, ncpus=1):
+                thumbnails=False, size_thumbnails=None, remove_psf=False,
+                tel=None, ncpus=1):
 
 
     """Forced photometry on MeerLICHT/BlackGEM images at the input
@@ -155,6 +156,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     size_thumbnails: int (default=100), size in pixels of thumbnails
 
+    remove_psf: bool (default=False), option to remove inferred PSF
+                from image before measuring next object; if True, this
+                will cause single CPU to be used even if multiple are
+                available
     """
 
 
@@ -375,7 +380,8 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     # input parameters to [get_rows]
     pars = [table_in, trans, ref, fullsource, nsigma, apphot_radii,
             bkg_radii, pm_epoch, include_fluxes, keys2add,
-            add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails]
+            add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails,
+            remove_psf]
 
     if nimages == 1:
         # for single image, execute [get_rows] without pool_func, and
@@ -513,7 +519,7 @@ def add_drop_fz (filename):
 def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
               apphot_radii, bkg_radii, pm_epoch, include_fluxes, keys2add,
               add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails,
-              ncpus=None):
+              remove_psf, ncpus=None):
 
 
     # extract filenames and table indices from input list
@@ -643,7 +649,8 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                             bkg_radii, pm_epoch, include_fluxes, keys2add,
                             add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='new', tel=tel, ncpus=ncpus)
+                            imtype='new', tel=tel, ncpus=ncpus,
+                            remove_psf=remove_psf)
 
 
 
@@ -706,7 +713,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
             mag_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
             mask_pos = (fnu_tot > 0)
-            mag_tot[mask_pos] = -2.5 * np.log10(fnu_tot[mask_pos]) + 23.8
+            mag_tot[mask_pos] = -2.5 * np.log10(fnu_tot[mask_pos]) + 23.9
             table['MAG_ZOGY_PLUSREF'] = mag_tot.astype('float32')
 
 
@@ -741,7 +748,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 bkg_radii, pm_epoch, include_fluxes, keys2add, add_keys,
                 bkg_global, thumbnails, size_tn, imtype='new',
-                tel='ML1', ncpus=None):
+                remove_psf=False, tel='ML1', ncpus=None):
 
 
     # is google cloud being used?
@@ -980,7 +987,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
         # it exists
         if fits_mask is not None and zogy.isfile(fits_mask):
             log.info ('fits_mask used: {}'.format(fits_mask))
-            data_mask = zogy.read_hdulist (fits_mask)
+            data_mask = zogy.read_hdulist (fits_mask, dtype='int16')
             # mask can be read using fitsio.FITS, but only little bit
             # faster than astropy.io.fits
             #data_mask = fitsio.FITS(fits_mask)[-1][:,:]
@@ -1130,7 +1137,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
-                    local_bkg=local_bkg, set_zogy=set_zogy, tel=tel, nthreads=1)
+                    local_bkg=local_bkg, remove_psf=remove_psf,
+                    set_zogy=set_zogy, tel=tel, nthreads=1)
 
             else:
                 # submit to [get_psfoptflux_mp] with [ncpu] threads as
@@ -1140,11 +1148,17 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 # [force_phot] function only provides ncpus to
                 # [get_rows] and [infer_mags] in case of a single
                 # image.
+
+                # force single thread when stars are being actively
+                # removed from image after the measurement
+                if remove_psf:
+                    ncpus = 1
+
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
-                    local_bkg=local_bkg, set_zogy=set_zogy, tel=tel,
-                    nthreads=ncpus)
+                    local_bkg=local_bkg, remove_psf=remove_psf,
+                    set_zogy=set_zogy, tel=tel, nthreads=ncpus)
 
 
         except Exception as e:
@@ -1232,13 +1246,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                                 label=label)
 
 
-        # zp, object airmass, ext_coeff and exptime were
-        # determined above; for conversion from transient
-        # limiting magnitude to Fpsferr the airmass at image
-        # centre was used
+        # zp, object airmass, ext_coeff and exptime were determined
+        # above; for conversion from transient limiting magnitude to
+        # Fpsferr the airmass at image center was used; N.B. tlimmags
+        # were already converted from nsigma_trans_orig to nsigma
+        # requested
         airmassc = header['AIRMASSC']
         Fpsferr = (10**(-0.4*(tlimmags - zp + airmassc * ext_coeff))
-                   * exptime / zogy.get_par(set_zogy.transient_nsigma,tel))
+                   * exptime / nsigma)
 
 
         # read off transient S/N from Scorr image
@@ -1423,10 +1438,16 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
                 value0 = hdulist[-1].section[y_indices[0]:y_indices[0]+1,
                                              x_indices[0]:x_indices[0]+1]
                 values = np.zeros(nvalues, dtype=value0.dtype)
+
+                log.info ('{} value(s) extracted from {}:'.format(nvalues,
+                                                                  filename))
                 for i in range(nvalues):
                     values[i] = hdulist[-1].section[
                         y_indices[i]:y_indices[i]+1,
                         x_indices[i]:x_indices[i]+1][0][0]
+
+                    log.info ('i: {}, index: (y,x)=({},{}), value: {}'
+                              .format(i, y_indices[i], x_indices[i], values[i]))
 
     else:
 
@@ -1825,7 +1846,7 @@ def create_col_descr(keys2add, header):
         'MAGERR_OPT':     '[mag] optimal AB magnitude error in red image',
         'SNR_OPT':        'signal-to-noise ratio in red image',
         'LIMMAG_OPT':     '[mag] limiting AB magnitude at nsigma significance in red image',
-        'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.8)',
+        'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_OPT':     '[microJy] flux error in red image',
         'MAG_APER':       '[mag] aperture AB mag within radius x FWHM in red image',
         'MAGERR_APER':    '[mag] aperture AB mag error within radius x FWHM in red image',
@@ -1837,7 +1858,7 @@ def create_col_descr(keys2add, header):
         'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
         'SNR_ZOGY':       'transient signal-to-noise ratio',
         'LIMMAG_ZOGY':    '[mag] transient limiting AB magnitude at input nsigma significance',
-        'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.8)',
+        'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_ZOGY':    '[microJy] transient flux error',
         #
         'X_POS_REF':      '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
@@ -1848,7 +1869,7 @@ def create_col_descr(keys2add, header):
         'MAGERR_OPT_REF': '[mag] optimal AB magnitude error in ref image',
         'SNR_OPT_REF':    'signal-to-noise ratio in ref image',
         'LIMMAG_OPT_REF': '[mag] limiting AB magnitude at nsigma significance in ref image',
-        'FNU_OPT_REF':    '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.8)',
+        'FNU_OPT_REF':    '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_OPT_REF': '[microJy] flux error in ref image',
         'MAG_APER_REF':   '[mag] aperture AB mag within radius x FWHM in ref image',
         'MAGERR_APER_REF':'[mag] aperture AB mag error within radius x FWHM in ref image',
@@ -1881,6 +1902,9 @@ def create_col_descr(keys2add, header):
                 # if so, add its description to col_descr
                 descr = header[key_descr]
                 col_descr[key] = descr
+            else:
+                log.warning ('{} description of column/key {} not available'
+                             .format(key_descr, key))
 
 
     return col_descr
