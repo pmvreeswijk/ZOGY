@@ -1165,15 +1165,16 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if tel[0:2] in ['ML','BG'] and not get_par(set_zogy.keep_tmp,tel):
 
             fits_new_bkg = '{}_bkg.fits'.format(base_newref)
+            # ref_fits_bkg_std refers to image that was not remapped;
+            # fits_ref refer to remapped images
             ref_fits_bkg_std = '{}_bkg_std.fits'.format(base_remap)
             list2remove = [fits_new_bkg, fits_new_bkg_std,
-                           fits_ref, fits_ref_mask, fits_ref_bkg_std,
-                           ref_fits_bkg_std]
+                           fits_ref, fits_ref_mask, fits_ref_bkg_std]
 
             if not get_par(set_zogy.use_new_transcat,tel):
                 # these images below are used in the crossmatching
                 # further below
-                list2remove += [ref_fits, ref_fits_mask]
+                list2remove += [ref_fits, ref_fits_mask, ref_fits_bkg_std]
 
             # remove
             remove_files (list2remove, verbose=True)
@@ -1343,14 +1344,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             # add some additional columns to transient catalog, by crossmatching
             # with Gaia and reference catalogs, and performing forced photometry
             # at transients positions in new and ref image
-            table_trans = trans_crossmatch_fphot (cat_trans,
-                                                  new_fits, new_fits_mask, sexcat_new,
-                                                  ref_fits, ref_fits_mask, cat_ref,
-                                                  nthreads=nthreads)
+            table_trans = trans_crossmatch_fphot (
+                cat_trans,
+                new_fits, new_fits_mask, sexcat_new,
+                ref_fits, ref_fits_mask, cat_ref,
+                nthreads=nthreads)
 
 
             # add the zeropoint error to the fnu errors in transient table
-            add_zperr (table_trans, header_new, header_ref_cat)
+            add_zperr (table_trans, header_new, header_ref_cat, header_trans)
 
 
             # add magnitudes corresponding to fnu and error columns in
@@ -1367,7 +1369,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             if tel[0:2] in ['ML','BG'] and not get_par(set_zogy.keep_tmp,tel):
 
                 # remove
-                list2remove = [ref_fits, ref_fits_mask]
+                list2remove = [ref_fits, ref_fits_mask, ref_fits_bkg_std]
                 remove_files (list2remove, verbose=True)
 
 
@@ -1461,7 +1463,7 @@ def add_refkeys (header_trans, header_ref):
 
 ################################################################################
 
-def add_zperr (table_trans, header_new, header_ref):
+def add_zperr (table_trans, header_new, header_ref, header_trans):
 
     # pogson constant
     pogson = 2.5/np.log(10)
@@ -1484,8 +1486,8 @@ def add_zperr (table_trans, header_new, header_ref):
                 else:
                     zperr = 0
                     log.error ('neither PC-ZPERR nor PC-ZPSTD in reference '
-                               'image header (in zogy.add_zperr); adopting '
-                               'zperr of zero')
+                               'image header_ref (in zogy.add_zperr); '
+                               'adopting zperr=0')
 
             else:
 
@@ -1497,9 +1499,9 @@ def add_zperr (table_trans, header_new, header_ref):
                         zperr = header_new['PC-ZPSTD']
                     else:
                         zperr = 0
-                        log.error ('neither PC-ZPERR nor PC-ZPSTD in reference '
-                                   'image header (in zogy.add_zperr); adopting '
-                                   'zperr of zero')
+                        log.error ('neither PC-ZPERR nor PC-ZPSTD in reduced '
+                                   'image header_new (in zogy.add_zperr); '
+                                   'adopting zperr=0')
 
                 else:
 
@@ -1518,34 +1520,42 @@ def add_zperr (table_trans, header_new, header_ref):
 
 
                     if 'PC-ZPERR' in header_new:
-                        zperr = np.array([header['PC-ZPE{}'.format(nchan)]
+                        zperr = np.array([header_new['PC-ZPE{}'.format(chan)]
                                           for chan in channels])
                     elif 'PC-ZPSTD' in header_new:
-                        zperr = np.array([header['PC-ZPS{}'.format(nchan)]
+                        zperr = np.array([header_new['PC-ZPS{}'.format(chan)]
                                           for chan in channels])
                     else:
                         zperr = 0
                         log.error ('neither PC-ZPERR nor PC-ZPSTD in reduced '
-                                   'image header (in zogy.add_zperr); adopting '
-                                   'zperr of zero')
-
-
-                if 'ZOGY' in col or 'PSF_D' in col:
-
-                    # for transient fluxes, need to add additional
-                    # error due to comparison with reference image;
-                    # sufficient to add error in flux ratio??
-                    #
-                    fratio = header_new['Z-FNR']
-                    fratio_std = header_new['Z-FNRSTD']
-                    zperr = np.sqrt((pogson*np.abs(fratio_std/fratio))**2 +
-                                    zperr**2)
+                                   'image header_new (in zogy.add_zperr); '
+                                   'adopting zperr=0')
 
 
 
             # add zeropoint error to measurement error
             fnuerr_zp = zperr * np.abs(fnu) / pogson
             fnuerrtot = np.sqrt(fnuerr**2 + fnuerr_zp**2)
+
+
+            # for transient fluxes, need to add additional
+            # error due to comparison with reference image;
+            # sufficient to add error in flux ratio??
+            if 'ZOGY' in col or 'PSF_D' in col:
+
+                fratio = header_trans['Z-FNR']
+                fratio_std = header_trans['Z-FNRSTD']
+
+                fnu_opt_ref = table_trans['FNU_OPT_REF']
+                fnuerr_fratio = fratio_std * fnu_opt_ref
+
+                # however, fratio_std is not the correct estimate of
+                # the fratio error, so this fnuerr_fratio is probably
+                # overestimated
+                # CHECK!!! - set to zero for now??
+                fnuerr_fratio = 0
+                fnuerrtot = np.sqrt(fnuerrtot**2 + fnuerr_fratio**2)
+
 
 
             # record in new table column
@@ -1563,12 +1573,12 @@ def add_magcols (table_trans):
     # loop columns
     for col in table_trans.colnames:
 
-        # pick FNUERR columns
-        if col.startswith('FNUERR'):
+        # pick FNU columns
+        if col.startswith('FNU_'):
 
-            fnu = table_trans[col.replace('FNUERR', 'FNU')]
-            fnuerr = table_trans[col]
-            fnuerrtot = table_trans[col.replace('FNUERR', 'FNUERRTOT')]
+            fnu = table_trans[col]
+            fnuerr = table_trans[col.replace('FNU', 'FNUERR')]
+            fnuerrtot = table_trans[col.replace('FNU', 'FNUERRTOT')]
 
             # for transient flux, convert to absolute value so that
             # magnitude will not be set to 99
@@ -1580,9 +1590,9 @@ def add_magcols (table_trans):
             mag, magerr, magerrtot = fnu2mag (fnu, fnuerr, fnuerrtot)
 
             # record in new table columns
-            table_trans[col.replace('FNUERR', 'MAG')] = mag
-            table_trans[col.replace('FNUERR', 'MAGERR')] = magerr
-            table_trans[col.replace('FNUERR', 'MAGERRTOT')] = magerrtot
+            table_trans[col.replace('FNU', 'MAG')] = mag
+            table_trans[col.replace('FNU', 'MAGERR')] = magerr
+            table_trans[col.replace('FNU', 'MAGERRTOT')] = magerrtot
 
 
 
@@ -3287,8 +3297,9 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'FNUERR_OPT':          ['E', 'uJy'  ], #, 'flt16' ],
         'FNUERRTOT_OPT':       ['E', 'uJy'  ], #, 'flt16' ],
         # transient:
-        'X_PEAK':              ['I', 'pix'  ], #, 'flt32' ],
-        'Y_PEAK':              ['I', 'pix'  ], #, 'flt32' ],
+        'X_PEAK':              ['I', 'pix'  ], #, 'int16' ],
+        'Y_PEAK':              ['I', 'pix'  ], #, 'int16' ],
+        'CHANNEL':             ['I', ''  ], #, 'uint8' ],
         'RA_PEAK':             ['D', 'deg'  ], #, 'flt64' ],
         'DEC_PEAK':            ['D', 'deg'  ], #, 'flt64' ],
         'SNR_ZOGY':            ['E', ''     ], #, 'flt32' ],
@@ -3356,7 +3367,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'SEP_BRIGHT_GAIA':     ['E', 'arcsec'], #, 'flt32' ],
         'MAG_G_BRIGHT_GAIA':   ['E', 'mag'  ], #, 'flt32' ],
         #
-        'NUMBER_NEAR_REF':     ['J', ''     ], #, 'flt32' ],
+        'NUMBER_NEAR_REF':     ['J', ''     ], #, 'int32' ],
         'SEP_NEAR_REF':        ['E', 'arcsec'], #, 'flt32' ],
         'FWHM_NEAR_REF':       ['E', 'pix'  ], #, 'flt32' ],
         'ELONG_NEAR_REF':      ['E', ''     ], #, 'flt32' ],
@@ -3385,7 +3396,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
     }
 
 
-    # columns to record for Gaia forced-photometry fulls-source catalog
+    # columns to record for Gaia forced-photometry full-source catalog
     # in AB magnitudes
     if not get_par(set_zogy.record_fnu,tel):
         keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
@@ -3481,10 +3492,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         else:
 
             # new set of transient columns (June 2024)
-            keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK',
+            keys_to_record = ['NUMBER', 'X_PEAK', 'Y_PEAK', 'CHANNEL',
                               'RA_PEAK', 'DEC_PEAK', 'SNR_ZOGY',
-                              'FNU_ZOGY', 'FNUERR_ZOGY', 'FNUERR_ZOGY'
-                              'MAG_ZOGY', 'MAGERR_ZOGY', 'MAGERR_ZOGY'
+                              'FNU_ZOGY', 'FNUERR_ZOGY', 'FNUERRTOT_ZOGY',
+                              'MAG_ZOGY', 'MAGERR_ZOGY', 'MAGERRTOT_ZOGY',
                               #
                               'FLAGS_SCORR', 'FLAGS_MASK_SCORR',
                               #
@@ -3510,7 +3521,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                               'CLASS_STAR_NEAR_RED',
                               'FNU_OPT_RED', 'FNUERR_OPT_RED', 'FNUERRTOT_OPT_RED',
                               'MAG_OPT_RED', 'MAGERR_OPT_RED', 'MAGERRTOT_OPT_RED',
-                              'FLAGS_MASK_RED',
+                              'FLAGS_MASK_RED'
                               ]
 
 
@@ -3701,6 +3712,52 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
 
     return
+
+
+################################################################################
+
+def create_col_descr(keys2add, header):
+
+    col_descr = {
+        'SOURCE_ID':      'Gaia DR3 source id',
+        'X_POS':          '[pix] x pixel coordinate',
+        'Y_POS':          '[pix] y pixel coordinate',
+        'FLAGS_MASK':     'OR-combined flagged pixels within 2xFWHM of X_POS, Y_POS',
+        'BACKGROUND':     '[e-] estimated sky background at X_POS, Y_POS',
+        'FNU_APER':       '[microJy] flux within radius x FWHM in red image',
+        'FNUERR_APER':    '[microJy] flux error within radius x FWHM in red image',
+        'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
+        'FNUERR_OPT':     '[microJy] flux error in red image',
+        #
+        'NUMBER':         'running object number',
+        'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
+        'FNUERR_ZOGY':    '[microJy] transient flux error',
+        'MAG_ZOGY':       '[mag] transient AB magnitude',
+        'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
+        #
+        'THUMBNAIL_RED':  'square thumbnail of the red image centered at input coords',
+        'THUMBNAIL_REF':  'square thumbnail of the ref image centered at input coords',
+        'THUMBNAIL_D':    'square thumbnail of the difference image centered at input coords',
+        'THUMBNAIL_SCORR':'square thumbnail of the significance image centered at input coords',
+        #
+    }
+
+
+    # loop keywords of table header, where the column names are in the
+    # TTYPE[i+1] keywords and the descriptions are in TCOMM[i+1]
+    for i in range(header['TFIELDS']):
+        key = header['TTYPE{}'.format(i+1)]
+        # check if key is in the input keys2add
+        if key in keys2add:
+            # check if relevant TCOMM is in header
+            key_descr = 'TCOMM{}'.format(i+1)
+            if key_descr in header:
+                # if so, add its description to col_descr
+                descr = header[key_descr]
+                col_descr[key] = descr
+
+
+    return col_descr
 
 
 ################################################################################
@@ -6735,12 +6792,6 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         psf_size -= 1
 
 
-    # bad pixel mask values used inside loop
-    mask_value = get_par(set_zogy.mask_value,tel)
-    value_sat = mask_value['saturated']
-    value_satcon = mask_value['saturated-connected']
-
-
     log.info ('psf_size used in [get_psfoptflux_mp]: {} pix for imtype: {}'
               .format(psf_size, imtype))
 
@@ -6818,6 +6869,11 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
 
 
 
+    if remove_psf:
+        fits_tmp = 'test_image.fits'
+        fits.writeto (fits_tmp, D, overwrite=True)
+
+
     # loop indices
     i1, i2 = index_start_stop
 
@@ -6854,6 +6910,13 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
     if inject_fake and np.isscalar(nsigma_fake):
         # convert to array
         nsigma_fake *= np.ones(ncoords)
+
+
+
+    # bad pixel mask values for inside loop
+    mask_value = get_par(set_zogy.mask_value,tel)
+    value_sat = mask_value['saturated']
+    value_satcon = mask_value['saturated-connected']
 
 
     # if reference image PSF is involved, infer ref image pixel
@@ -7057,6 +7120,13 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
             flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
 
 
+        # for saturated stars, increase mask_central; on second
+        # thought, don't bother with this, because PSF fits to the
+        # saturated stars appear pretty poor, with very negative values
+        #if flag_mask_central & value_sat == value_sat:
+        #    mask_central = (P_shift != 0)
+
+
         # determine optimal or psf or limiting flux
         if get_limflux:
             # determine limiting flux at this position using
@@ -7105,12 +7175,12 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                 #if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
                 if frac_tmp < source_minpixfrac:
                     # too many bad pixel objects to warn about
-                    #log.warning ('fraction of useable pixels around source '
-                    #             'at x,y: {:.0f},{:.0f}: {} is less than limit '
-                    #             'set by set_zogy.source_minpixfrac: {}; '
-                    #             'returning zero flux and flux error'
-                    #             .format(xcoords[i], ycoords[i], frac_tmp,
-                    #                     get_par(set_zogy.source_minpixfrac,tel)))
+                    log.warning ('fraction of useable pixels around source '
+                                 'at x,y: {:.0f},{:.0f}: {} is less than limit '
+                                 'set by set_zogy.source_minpixfrac: {}; '
+                                 'returning zero flux and flux error'
+                                 .format(xcoords[i], ycoords[i], frac_tmp,
+                                         get_par(set_zogy.source_minpixfrac,tel)))
                     continue
 
 
@@ -7296,6 +7366,12 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                     log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
                               .format(t_ref, t_ref/t_loop))
 
+
+
+    # CHECK!!! - temporarily record D
+    if remove_psf:
+        fits_tmp = 'test_image_psf_removed.fits'
+        fits.writeto (fits_tmp, D, overwrite=True)
 
 
     # end of loop: for i in range(i1,i2):
@@ -7623,6 +7699,8 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
     # create a set of Parameters
     params = Parameters()
     hwhm = max(fwhm/2, 3)
+    # !!!CHECK!!! - force to be 0.5 for the moment
+    #hwhm = 0.5
     params.add('xshift', value=0, min=-hwhm, max=hwhm, vary=True)
     params.add('yshift', value=0, min=-hwhm, max=hwhm, vary=True)
     params.add('sky', value=D_bkg, min=D_bkg-D_bkg_std, max=D_bkg+D_bkg_std,
@@ -8529,7 +8607,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # read zp and zp_std from header
         zp = header['PC-ZP']
         zp_std = header['PC-ZPSTD']
-        zp_err = header['PC-ZPERR']
+        if 'PC-ZPERR' in header:
+            zp_err = header['PC-ZPERR']
+        else:
+            zp_err = 0
 
         log.warning ('zeropoint present in header; skipping photometric '
                      'calibration and creation of limiting magnitude image for '
@@ -8713,10 +8794,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     table_cat = Table.read (fits_cat, memmap=True)
 
 
-    # do not bother to execute block below if 'MAG_OPT' is already
-    # present in [fits_cat] and redo is False
+    # do not bother to execute block below if MAG_OPT or FNU_OPT is
+    # already present in [fits_cat] and redo is False
     psf_rad_phot = get_par(set_zogy.psf_rad_phot,tel)
-    if ('MAG_OPT' in table_cat.colnames and not redo
+    if (('MAG_OPT' in table_cat.colnames or 'FNU_OPT' in table_cat.colnames)
+        and not redo
         # and PSF-RADP in header is equal to psf_rad_phot in the
         # settings file
         and ('PSF-RADP' in header and header['PSF-RADP'] == psf_rad_phot)):
@@ -8755,7 +8837,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # make copy of source extractor catalog, before
             # overwriting it with the Gaia forced-photometry catalog
             sexcat = '{}_sexcat.fits'.format(base)
-            if os.path.exists(sexcat):
+            if os.path.exists(fits_cat):
                 shutil.copy2 (fits_cat, sexcat)
 
 
@@ -8960,7 +9042,11 @@ def get_satmag (table_cat):
 
     value_sat = get_par(set_zogy.mask_value,tel)['saturated']
     mask_sat = (table_cat[col_mask] & value_sat == value_sat)
+    if 'MAG_OPT' not in table_cat.colnames:
+        table_cat['MAG_OPT'] = fnu2mag(table_cat['MAG_OPT'].value)
+
     satmag = np.sort(table_cat[~mask_sat]['MAG_OPT'])[0]
+
 
     return satmag
 
@@ -9877,6 +9963,13 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     table_gaia_image['ra'].name = 'RA_IN'
     table_gaia_image['dec'].name = 'DEC_IN'
 
+
+    # sort by magnitude
+    if 'mag_G' in table_gaia_image.colnames:
+        log.info ('sorting table_gaia_image by column mag_G')
+        table_gaia_image.sort('mag_G')
+
+
     log.info ('selected {} Gaia stars within the image {}\nwith central ra,dec: '
               '{:.4f},{:.4f}, field-of-view: {:.3f} degrees and DATE-OBS: {}'
               .format(len(table_gaia_image), fits_in, ra_center, dec_center,
@@ -9898,12 +9991,16 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     bkg_global = (get_par(set_zogy.bkg_phototype,tel) == 'global')
 
 
+    # remove PSF after measuring?
+    remove_psf = get_par(set_zogy.remove_psf,tel)
+
+
     # run forced photometry
     table_force_phot = force_phot.force_phot (
         table_gaia_image, image_indices_dict, mask_list=[fits_mask], trans=False,
         ref=False, fullsource=True, nsigma=nsigma, apphot_radii=apphot_radii,
         bkg_radii=bkg_radii, include_fluxes=True, bkg_global=bkg_global,
-        tel=tel, ncpus=nthreads)
+        remove_psf=remove_psf, tel=tel, ncpus=nthreads)
 
 
     # delete columns that are not needed
@@ -11134,8 +11231,10 @@ def fnu2mag (fnu, fnuerr=None, fnuerrtot=None):
         list2return.append(magerrtot)
 
 
-
-    return list2return
+    if len(list2return)==1:
+        return list2return[0]
+    else:
+        return list2return
 
 
 ################################################################################
@@ -13122,6 +13221,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
         psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
         if header_psf['PSFAXIS1'] >= psf_size_config:
             skip_psfex = True
+            header['PSF-P'] = (True, 'successfully processed by PSFEx?')
             if get_par(set_zogy.verbose,tel):
                 log.info ('skipping run_psfex for image {} as existing PSFEx '
                           'output file: {} was built with [psf_size_config]: '
