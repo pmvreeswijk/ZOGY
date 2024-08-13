@@ -160,6 +160,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 from image before measuring next object; if True, this
                 will cause single CPU to be used even if multiple are
                 available
+
     """
 
 
@@ -1154,11 +1155,23 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 if remove_psf:
                     ncpus = 1
 
+
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
                     local_bkg=local_bkg, remove_psf=remove_psf,
                     set_zogy=set_zogy, tel=tel, nthreads=ncpus)
+
+
+                if False:
+                    # !!!CHECK!!! - try psffit instead of optimal flux
+                    __, __, __, __, flux_opt, fluxerr_opt, __ =  (
+                        zogy.get_psfoptflux_mp (
+                            psfex_bintable, data, data_bkg_std**2, data_mask,
+                            xcoords, ycoords, imtype=imtype, fwhm=fwhm,
+                            D_objmask=objmask, local_bkg=local_bkg,
+                            remove_psf=remove_psf, psffit=True,
+                            set_zogy=set_zogy, tel=tel, nthreads=ncpus))
 
 
         except Exception as e:
