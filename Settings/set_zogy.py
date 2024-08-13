@@ -42,7 +42,10 @@ chi2_snr_limit = 50      # transient signal-to-noise ratio limit above
 # maximum number of flagged pixels of particular type (corresponding
 # to [mask_value] below) in the vicinity of the transient to filter
 transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
-                      'saturated-connected': 0, 'satellite trail': 0, 'edge': 0}
+                      'saturated-connected': 0, 'satellite trail': 0, 'edge': 0,
+                      # if crosstalk correction if ok, then it should
+                      # not cause a fake transient
+                      'crosstalk': 100}
 
 save_thumbnails = True   # save thumbnails of reduced image, remapped reference
                          # image and ZOGY products D and Scorr in transient catalog
@@ -50,7 +53,7 @@ size_thumbnails = 100    # size of square thumbnail arrays in (new) image pixels
 orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
-# switch to use old or new (~Feb 2024) transient catalog definition
+# switch to use old or new (~June 2024) transient catalog definition
 use_new_transcat = {'ML1': False, 'BG': False}
 
 
@@ -252,8 +255,15 @@ force_phot_gaia = {'ML1': False, 'BG': True}
 gaia_cat = '{}/GaiaDR3_all_HP4_highPM.fits'.format(cal_dir)
 gaia_epoch = 2016.0
 
+# in case of Gaia forced photometry (force_phot_gaia is True): perform
+# the photometry on image sources in order of Gaia magnitude
+# brightness and remove the inferred PSF from the image before
+# continuing with the next source
+remove_psf = False
 
-# switch to record fluxes in microJy instead of AB mags in full-source catalog
+
+# switch to record fluxes in microJy instead of AB mags in full-source
+# catalog; only relevant if force_phot_Gaia is True
 record_fnu = {'ML1': False, 'BG': False}
 
 
@@ -349,7 +359,8 @@ swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 # if a mask image is provided, the mask values can be associated to
 # the type of masked pixel with this dictionary:
 mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
-              'saturated-connected': 8, 'satellite trail': 16, 'edge': 32}
+              'saturated-connected': 8, 'satellite trail': 16, 'edge': 32,
+              'crosstalk': 64}
 
 # subfolder to save the many temporary numpy binary files
 dir_numpy = 'NumpyFiles'
