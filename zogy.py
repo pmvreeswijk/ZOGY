@@ -6812,6 +6812,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # multiprocessing breaking down
     psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
     source_minpixfrac = get_par(set_zogy.source_minpixfrac,tel)
+    mask_value = get_par(set_zogy.mask_value,tel)
 
 
     # list of parareters to provide to [get_psfoptflux_loop]
@@ -6823,7 +6824,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             gauss, get_limflux, limflux_nsigma, fwhm_fit_init, inject_fake,
             nsigma_fake, replace_sat_psf, replace_sat_nmax, remove_psf, fwhm_use,
             diff, get_flags_mask_central, psf_clean_factor, source_minpixfrac,
-            local_bkg, tel]
+            mask_value, local_bkg, tel]
 
     # feed these lists to pool_func
     if nthreads == 1:
@@ -6865,13 +6866,13 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                          remove_psf=False, fwhm_use=None, diff=True,
                          get_flags_mask_central=False,
                          psf_clean_factor=None, source_minpixfrac=None,
-                         local_bkg=None, tel=None):
+                         mask_value=None, local_bkg=None, tel=None):
 
 
 
-    if remove_psf:
-        fits_tmp = 'test_image.fits'
-        fits.writeto (fits_tmp, D, overwrite=True)
+    #if remove_psf:
+    #    fits_tmp = 'test_image.fits'
+    #    fits.writeto (fits_tmp, D, overwrite=True)
 
 
     # loop indices
@@ -6914,7 +6915,6 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
 
 
     # bad pixel mask values for inside loop
-    mask_value = get_par(set_zogy.mask_value,tel)
     value_sat = mask_value['saturated']
     value_satcon = mask_value['saturated-connected']
 
@@ -7122,7 +7122,8 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
 
         # for saturated stars, increase mask_central; on second
         # thought, don't bother with this, because PSF fits to the
-        # saturated stars appear pretty poor, with very negative values
+        # saturated stars appear pretty poorly, with very negative
+        # values
         #if flag_mask_central & value_sat == value_sat:
         #    mask_central = (P_shift != 0)
 
@@ -7180,7 +7181,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                                  'set by set_zogy.source_minpixfrac: {}; '
                                  'returning zero flux and flux error'
                                  .format(xcoords[i], ycoords[i], frac_tmp,
-                                         get_par(set_zogy.source_minpixfrac,tel)))
+                                         source_minpixfrac))
                     continue
 
 
