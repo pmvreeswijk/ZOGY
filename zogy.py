@@ -116,7 +116,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.3'
+__version__ = '1.3.4'
 
 
 ################################################################################
@@ -1231,19 +1231,26 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 # vetting training version to be used
                 ML_version = get_par(set_zogy.ML_version,tel)
                 # and the corresponding model
-                ML_model = get_par(set_zogy.ML_models,tel)[int(ML_version[0])-1]
+                ML_model = get_par(set_zogy.ML_models,tel)[ML_version]
 
                 log.info ('applying machine-learning real/bogus version {} with '
                           'model {} for {}'
                           .format(ML_version, ML_model.split('/')[-1], base_new))
 
                 # depending on version, execute a different function
-                if int(ML_version[0]) == 1:
+                if ML_version == '1':
                     ML_prob_real = get_ML_prob_real_Zafiirah (dict_thumbnails,
                                                               ML_model)
-                else:
+                elif ML_version == '2':
                     ML_prob_real = get_ML_prob_real_Diederik (dict_thumbnails,
-                                                              ML_model)
+                                                              ML_model,
+                                                              size_use=40)
+                elif ML_version == '3':
+                    # updated version of Diederik (August 2024)
+                    ML_prob_real = get_ML_prob_real_Diederik (dict_thumbnails,
+                                                              ML_model,
+                                                              size_use=30)
+
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
@@ -2372,6 +2379,14 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
     candidate is real, using the thumbnail files recorded in
     [dict_thumbnails] in combination with the trained model [model].
 
+    In August 2024, Fiore forwarded the latest code from Diederik,
+    which is saved here in the functions [get_probability_aug2024],
+    [log_z_norm_super] and [central_crop_aug2024]; the latter function
+    is only slightly different from the original central_crop (input
+    parameter "new_size" is a shape with 4-element tuple, rather than
+    an integer), but it is skipped anyway as the central cropping is
+    done already inside this current function.
+
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -2382,11 +2397,10 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
     size_tn = get_par(set_zogy.size_thumbnails,tel)
 
     # thumbnail images are 100x100 pixels (default size_tn is 100),
-    # need to extract the central 40x40 pixels for Diederiks model;
-    # this is also done in function [central_crop] supplied by
-    # Diederik, but to save memory usage crop the images as they are
-    # read into memory
-
+    # need to extract the central 40x40 (30x30) pixels for Diederiks
+    # (august 2024) model; this is also done in function
+    # [central_crop] supplied by Diederik, but to save memory usage
+    # crop the images as they are read into memory
     if size_tn > size_use:
         border = (size_tn - size_use)//2
         i1 = border
@@ -2406,24 +2420,24 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
     # loop [dict_thumbnails] and read corresponding numpy files
     for key in dict_thumbnails.keys():
 
-        # data_thumbnail will have shape (nrows, 100, 100)
+        # data_thumbnail will have shape (nrows, size_use, size_use)
         data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')[index]
-        # following line is like the old 100x100 thumbnails that are
-        # cropped in central_crop, i.e. without [index]
-        #data_thumbnail = np.load(dict_thumbnails[key], mmap_mode='c')
 
         # add them to list to stack
         list_2stack.append(data_thumbnail)
 
 
-    # stack data_thumbnail along last axis; shape expected in
-    # [get_probability] is (nrows, size, size, 4) where size needs to
-    # be at least 40
+    # stack data_thumbnail along last axis; shape expected is (nrows,
+    # size, size, 4), where size is at least 40 for get_probability
+    # and size equals 30 for get_probability_aug2024
     data_stack = np.stack(list_2stack, axis=-1)
 
 
     # obtain probabilities
-    prob_real = get_probability(data_stack, model)
+    if 'supervised' in model:
+        prob_real = get_probability_aug2024(data_stack, model)
+    else:
+        prob_real = get_probability(data_stack, model)
 
 
     if get_par(set_zogy.timing,tel):
@@ -2432,6 +2446,123 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
 
     # return probabilities
     return prob_real
+
+
+################################################################################
+
+def log_z_norm_super(images, quantiles = [-57.209943275451664,
+                                          -31.484833221435547,
+                                          -182.8149905395508]):
+    """
+    Applies normalisation to images for use in supervised classification model
+
+    Parameters
+    ----------
+    ims : numpy array with shape (batch, dim1, dim2, channels)
+      Images to be normalized
+    used_quantiles : list of floats
+      values used for quantile cutoff of each channel. See thesis for details on
+      normalisation function.
+
+    Returns
+    ---------
+    numpy array with shape (batch, dim1, dim2, channels)
+      array of normalized images
+    """
+
+    # according to Fiore, used_ims needs to be 4, i.e. number of
+    # channels or thumbnail images
+    used_ims = np.shape(images)[-1]
+
+    images = np.reshape(images,(-1,900,used_ims)) # Flatten images
+
+    for i in range(np.minimum(used_ims, 3)): # For loop runs faster than parralel
+        # Remove lower quantile per image type and shifts
+        quant = quantiles[i]
+        images[...,i] = np.maximum(images[...,i],quant) - quant + 1
+
+    for i in range(np.minimum(used_ims, 2)):
+        # Take logarithm for New and Ref
+        images[...,i] = np.log10(images[...,i])
+
+    # Z norm the shifted images
+    images = ((images - np.mean(images, axis = 1, keepdims=True)) /
+              (np.std(images, axis = 1, keepdims =True)+1e-8))
+
+    return images.reshape((-1,30,30,used_ims))
+
+
+################################################################################
+
+def central_crop_aug2024 (ims, new_size):
+
+    """
+    Crops center of images
+
+    Parameters
+    ----------
+    ims : numpy array with shape (batch, dim1, dim2, channels)
+      Images to be normalised
+    new_size : tuple or list
+      Shape of images after cropping
+
+    Returns
+    ---------
+    numpy array wih shape (batch, new_size[1], new_size[2], channels) representing
+      the cropped array
+    """
+    # Run through image axis
+    for i in range(1,3):
+        rel_side = ims.shape[i]
+        if rel_side > new_size[i]:
+            border = (rel_side - new_size[i])//2
+            # Slice along relevant axis
+            ims = ims.take(indices = range(border,border+new_size[i]), axis = i)
+    return ims
+
+
+################################################################################
+
+def get_probability_aug2024 (events, model_file):
+
+    """
+    Predicts probability of event being real according to supplied model file
+
+    Parameters
+    ----------
+    events : numpy array with shape (batch, dim1, dim2, channels)
+      Events on which prediction should be applied. dim1 and dim2 must be at
+      least larger than required image size for the model. Channels need to match
+      channels expected by model.
+    model_file :  str
+      location of tensorflow model file
+
+    Returns
+    ---------
+    numpy array with shape (batch)
+      array of values between 0 and 1 giving probability of corresponding event
+      in input array being real
+    """
+
+    # Import model and extract input shape
+    model = tf.keras.models.load_model(model_file)
+    input_shape = model.layers[0].input_shape[0]
+
+    # Run checks on inputs
+    if len(events.shape) != len(input_shape):
+        raise Exception(f"Incorrect number of input dimensions found shape {events.shape} (number of input dimensions should be ({len(input_shape)}). For single events use batch of size 1")
+    if events.shape[3] != input_shape[3]:
+        raise Exception(f"Incorrect number of image channels given. Expected {input_shape[3]} but found {events.shape[3]}")
+    if events.shape[1] < input_shape[1] or events.shape[2] < input_shape[2]:
+        raise Exception(f"Event images smaller than model input. Model requires at least size ({input_shape[1]},{input_shape[2]}) but found event images of size ({events.shape[1]},{events.shape[2]})")
+
+    # Norm events after cropping center to relevant size
+    #normed_events = log_z_norm_super(central_crop_aug2024 (events, input_shape))
+    # skip central_crop; images in events already contain the central 30x30 pixels
+    normed_events = log_z_norm_super(events)
+
+    # Run prediction and output array
+    return model.predict(normed_events, verbose = False)[:,0]
 
 
 ################################################################################
