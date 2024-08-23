@@ -1367,6 +1367,29 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             add_magcols (table_trans)
 
 
+            # now that transient flux and flux in the reference image
+            # at the transient position is known, remove transients
+            # where most of their flux is explained by a negative flux
+            # in the reference image
+            fnu_zogy = table_trans['FNU_ZOGY'].value
+            fnuerr_zogy = table_trans['FNUERR_ZOGY'].value
+            fnu_opt_ref = table_trans['FNU_OPT_REF'].value
+            fnuerr_opt_ref = table_trans['FNUERR_OPT_REF'].value
+            fnu_tot = fnu_zogy + fnu_opt_ref
+            fnuerr_tot = np.sqrt(fnuerr_zogy**2 + fnuerr_opt_ref**2)
+            mask_discard = ((fnu_tot / fnuerr_tot < 3) &
+                            (fnu_opt_ref / fnuerr_opt_ref) < -3)
+            table_trans = table_trans[~mask_discard]
+            log.info ('{} transients discarded whose flux can be explained by '
+                      'a negative flux in reference image'
+                      .format(np.sum(mask_discard)))
+
+
+            # also discard transients with nonzero flag in reference image?
+            mask_zeroflag_ref = (table_trans['FLAGS_MASK_REF'] == 0)
+            #table_trans = table_trans[mask_zeroflag_ref]
+
+
             # after these updates, write updated table, overwriting the input
             table_trans.write (cat_trans, format='fits', overwrite=True)
 
@@ -5803,7 +5826,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     data_new_bkg_std=None, data_ref_bkg_std=None,
                     header_new=None, header_ref=None, header_trans=None,
                     imtype=None, Scorr_peak=None, inject_fake=False,
-                    nsigma_fake=10, D_objmask=None, remove_psf=False,
+                    nsigma_fake=10, remove_psf=False,
                     replace_sat_psf=False, replace_sat_nmax=100,
                     set_zogy=None, tel=None, fwhm=None, diff=True,
                     get_flags_mask_central=False, local_bkg=None,
@@ -6102,11 +6125,6 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # extract subsection from D, D_mask
         D_sub = D[index]
         D_mask_sub = D_mask[index]
-        if D_objmask is not None:
-            # object footprints are nonzero in D_objmask
-            D_objmask_sub = D_objmask[index]
-        else:
-            D_objmask_sub = None
 
 
         # if bkg_var is a scalar, convert to an image
@@ -6227,8 +6245,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    D_objmask=D_objmask_sub, fwhm=fwhm_use, sky_bkg=sky_bkg,
-                    show=show, tel=tel)
+                    fwhm=fwhm_use, sky_bkg=sky_bkg, show=show, tel=tel)
 
 
             except Exception as e:
@@ -6840,11 +6857,18 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        data_new_bkg_std=None, data_ref_bkg_std=None,
                        header_new=None, header_ref=None, header_trans=None,
                        imtype=None, Scorr_peak=None, inject_fake=False,
-                       nsigma_fake=10, D_objmask=None, remove_psf=False,
+                       nsigma_fake=10, remove_psf=False,
                        replace_sat_psf=False, replace_sat_nmax=100,
                        set_zogy=None, tel=None, fwhm=None, diff=True,
                        get_flags_mask_central=False, local_bkg=None,
-                       nthreads=1):
+                       get_psf_footprint=False, nthreads=1):
+
+
+
+    # when creating mask of objects' psf central footprints, force
+    # nthreads=1
+    if get_psf_footprint:
+        nthreads = 1
 
 
     log.info('executing get_psfoptflux_mp with {} thread(s) ...'
@@ -6951,11 +6975,11 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             polzero2, polscal2, poldeg, imtype, xsize, ysize, D, D_mask, bkg_var,
             data_psf_ref, psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
             polscal2_ref, poldeg_ref, data_new_bkg_std, data_ref_bkg_std,
-            header_new, header_ref, header_trans, D_objmask, psffit, moffat,
+            header_new, header_ref, header_trans, psffit, moffat,
             gauss, get_limflux, limflux_nsigma, fwhm_fit_init, inject_fake,
             nsigma_fake, replace_sat_psf, replace_sat_nmax, remove_psf, fwhm_use,
             diff, get_flags_mask_central, psf_clean_factor, source_minpixfrac,
-            mask_value, local_bkg, tel]
+            mask_value, local_bkg, get_psf_footprint, tel]
 
     # feed these lists to pool_func
     if nthreads == 1:
@@ -6989,7 +7013,6 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                          polzero2_ref=None, polscal2_ref=None, poldeg_ref=None,
                          data_new_bkg_std=None, data_ref_bkg_std=None,
                          header_new=None, header_ref=None, header_trans=None,
-                         D_objmask=None,
                          psffit=False, moffat=False, gauss=False,
                          get_limflux=False, limflux_nsigma=5,
                          fwhm_fit_init=None, inject_fake=False, nsigma_fake=10,
@@ -6997,7 +7020,8 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                          remove_psf=False, fwhm_use=None, diff=True,
                          get_flags_mask_central=False,
                          psf_clean_factor=None, source_minpixfrac=None,
-                         mask_value=None, local_bkg=None, tel=None):
+                         mask_value=None, local_bkg=None, get_psf_footprint=False,
+                         tel=None):
 
 
 
@@ -7043,6 +7067,9 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
         # convert to array
         nsigma_fake *= np.ones(ncoords)
 
+
+    if get_psf_footprint:
+        mask_psf_footprint = np.zeros_like(D, dtype=bool)
 
 
     # bad pixel mask values for inside loop
@@ -7207,11 +7234,6 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
         # extract subsection from D, D_mask
         D_sub = D[index]
         D_mask_sub = D_mask[index]
-        if D_objmask is not None:
-            # object footprints are nonzero in D_objmask
-            D_objmask_sub = D_objmask[index]
-        else:
-            D_objmask_sub = None
 
 
         # if bkg_var is a scalar, convert to an image
@@ -7251,6 +7273,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
             flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
 
 
+
         # for saturated stars, increase mask_central; on second
         # thought, don't bother with this, because PSF fits to the
         # saturated stars appear pretty poorly, with very negative
@@ -7259,8 +7282,12 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
         #    mask_central = (P_shift != 0)
 
 
+        if get_psf_footprint:
+            mask_psf_footprint[index] = mask_central
+
+
         # determine optimal or psf or limiting flux
-        if get_limflux:
+        elif get_limflux:
             # determine limiting flux at this position using
             # flux_optimal_s2n; if Poisson noise of objects should be
             # taken into account, then add background-subtracted image
@@ -7341,8 +7368,7 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
 
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    D_objmask=D_objmask_sub, fwhm=fwhm_use, sky_bkg=sky_bkg,
-                    show=show, tel=tel)
+                    fwhm=fwhm_use, sky_bkg=sky_bkg, show=show, tel=tel)
 
 
             except Exception as e:
@@ -7529,6 +7555,10 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
     # if specified, add combined flags_mask of central PSF area
     if get_flags_mask_central:
         list2return += [flags_mask_central]
+
+
+    if get_psf_footprint:
+        list2return = [mask_psf_footprint]
 
 
     return list2return
@@ -8002,9 +8032,9 @@ def get_s2n_ZO (P, D, V):
 ################################################################################
 
 def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=10,
-                  epsilon=0.1, mask_use=None, add_V_ast=False, D_objmask=None,
-                  fwhm=None, sky_bkg=None, dx2=0, dy2=0, dxy=0, show=False,
-                  tel=None):
+                  epsilon=0.1, mask_use=None, add_V_ast=False, fwhm=None,
+                  sky_bkg=None, dx2=0, dy2=0, dxy=0, show=False, tel=None):
+
 
     """Function that calculates optimal flux and corresponding error based
        on the PSF [P], sky-subtracted data [D] and background variance
@@ -9017,7 +9047,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
                 table_cat, header, exptime, filt, obsdate, base, data_wcs,
-                data_bkg_std, data_mask, imtype, objmask, zp, fwhm, nthreads)
+                data_bkg_std, data_mask, imtype, zp, fwhm, nthreads)
 
 
             # merge fake stars and catalog
@@ -9175,7 +9205,7 @@ def get_satmag (table_cat):
     value_sat = get_par(set_zogy.mask_value,tel)['saturated']
     mask_sat = (table_cat[col_mask] & value_sat == value_sat)
     if 'MAG_OPT' not in table_cat.colnames:
-        table_cat['MAG_OPT'] = fnu2mag(table_cat['MAG_OPT'].value)
+        table_cat['MAG_OPT'] = fnu2mag(table_cat['FNU_OPT'].value)
 
     satmag = np.sort(table_cat[~mask_sat]['MAG_OPT'])[0]
 
@@ -9342,7 +9372,7 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 ################################################################################
 
 def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
-                           data_wcs, data_bkg_std, data_mask, imtype, objmask,
+                           data_wcs, data_bkg_std, data_mask, imtype,
                            zp, fwhm, nthreads):
 
 
@@ -9378,8 +9408,8 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     psfex_bintable = '{}_psf.fits'.format(base)
     flux_opt, fluxerr_opt = get_psfoptflux_mp (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
-        psffit=False, imtype=imtype, D_objmask=objmask, local_bkg=local_bkg,
-        set_zogy=set_zogy, nthreads=nthreads, tel=tel)
+        psffit=False, imtype=imtype, local_bkg=local_bkg, set_zogy=set_zogy,
+        nthreads=nthreads, tel=tel)
 
     # add optimal flux columns to table
     table_cat['E_FLUX_OPT'] = flux_opt
@@ -9393,7 +9423,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         # add psffit quantities to table to be able to plot them later
         results = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
-            psffit=True, imtype=imtype, D_objmask=objmask, local_bkg=local_bkg,
+            psffit=True, imtype=imtype, local_bkg=local_bkg,
             set_zogy=set_zogy, nthreads=nthreads, tel=tel)
 
         colnames = ['X_PSF', 'XERR_PSF', 'Y_PSF', 'YERR_PSF',
@@ -9414,7 +9444,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         sat_nmax = get_par(set_zogy.replace_sat_nmax,tel)
         get_psfoptflux_mp (psfex_bintable, data_wcs, data_bkg_std**2,
                            data_mask, xwin_sat, ywin_sat, imtype=imtype,
-                           D_objmask=objmask, replace_sat_psf=True,
+                           replace_sat_psf=True,
                            replace_sat_nmax=sat_nmax, set_zogy=set_zogy,
                            nthreads=1, tel=tel)
 
@@ -9766,7 +9796,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     psfex_bintable = '{}_psf.fits'.format(base)
     flux_opt, fluxerr_opt, flags_mask_opt = get_psfoptflux_mp (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xpos, ypos,
-        imtype=imtype, D_objmask=objmask, local_bkg=local_bkg, set_zogy=set_zogy,
+        imtype=imtype, local_bkg=local_bkg, set_zogy=set_zogy,
         get_flags_mask_central=True, nthreads=1, tel=tel)
 
 
@@ -12095,17 +12125,20 @@ def get_back (data, header, fits_objmask, fits_mask=None,
     median and standard deviation is determined for each subimage
     which is masked using the object mask (created from SExtractor's
     '-OBJECTS' image, where objects have zero values). The subimages
-    (with size: [set_zogy.bkg_boxsize] are then median filtered. If
-    [use_2Dfit] is True, a low order polynomial 2D fit is performed to
-    the filtered mini background and if the fit value is lower than
-    the filtered image for a particular subimage, that value is
-    used. Subsequently the mini images (background median and standard
-    deviation) are resized to the size of the input image.
+    (with size: [set_zogy.bkg_boxsize] are then median filtered.
+
+    For ML/BG images and if set_zogy.use_2Dfit is True, a low order
+    polynomial 2D fit is performed to the filtered mini background and
+    if the fit value is lower than the filtered image for a particular
+    subimage, that value is used.
 
     For MeerLICHT/BlackGEM images, the 2D polynomial fit will be used
     to estimate the channel correction factors, probably due to
-    non-linearity of the different channels at low count levels. For
-    this estimate the function [bkg_corr_MLBG] is used.
+    non-linearity of the different channels at low count levels.  For
+    this estimate the function [bkg_corr_MLBG] is used. If
+    set_zogy.MLBG_chancorr is True and the factors are lower than
+    set_zogy.MLBG_chancorr_limdev for all channels, the factors are
+    applied to the input data.
 
     """
 
