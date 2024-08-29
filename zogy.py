@@ -98,9 +98,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
-# needed for Zafiirah's machine learning package MeerCRAB
-from meerCRAB_code import prediction_phase
-
 # healpy
 import healpy as hp
 
@@ -2592,6 +2589,10 @@ def get_probability_aug2024 (events, model_file):
 
 def get_ML_prob_real_Zafiirah (dict_thumbnails, model, size_use=30,
                                factor_norm=255.):
+
+    # needed for Zafiirah's machine learning package MeerCRAB
+    from meerCRAB_code import prediction_phase
+
 
     """function based on Zafiirah's Jupyter notebook (see
     https://github.com/Zafiirah13/meercrab) which uses MeerCRAB's
