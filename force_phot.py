@@ -680,61 +680,64 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
 
         # read field ID and reference image name from header
-        if 'Z-REF' in header:
-            obj, ref_name = header['OBJECT'], header['Z-REF']
-        else:
+        if 'Z-REF' not in header:
             log.warning ('header keyword Z-REF with reference image name not '
-                         'found; skipping extraction of {}'.format(basename))
-            return None
+                         'found; skipping extraction of magnitudes for {}'
+                         .format(basename))
+        else:
+
+            obj, ref_name = header['OBJECT'], header['Z-REF']
 
 
-        # reference image basename including full path
-        basename_ref = '{}/{}/{}'.format(ref_dir, obj, ref_name)
+            # reference image basename including full path
+            basename_ref = '{}/{}/{}'.format(ref_dir, obj, ref_name)
 
-        # reference mask image; input parameter fits_mask refers to
-        # the reduced image mask
-        fits_mask = '{}_mask.fits.fz'.format(basename_ref.split('_red')[0])
-
-
-        # infer reference magnitudes and S/N
-        table = infer_mags (table, basename_ref, fits_mask, nsigma, apphot_radii,
-                            bkg_radii, pm_epoch, include_fluxes, keys2add,
-                            add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='ref', tel=tel, ncpus=ncpus)
+            # reference mask image; input parameter fits_mask refers to
+            # the reduced image mask
+            fits_mask = '{}_mask.fits.fz'.format(basename_ref.split('_red')[0])
 
 
-        # for transients, add any potential source in the reference
-        # image to the transient flux and save the result in the
-        # column MAG_ZOGY_PLUSREF
-        if trans:
-
-            fnu_zogy = np.array(table['FNU_ZOGY'])
-            fnu_ref = np.array(table['FNU_OPT_REF'])
-            fnu_tot = fnu_zogy + fnu_ref
-
-            mag_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
-            mask_pos = (fnu_tot > 0)
-            mag_tot[mask_pos] = -2.5 * np.log10(fnu_tot[mask_pos]) + 23.9
-            table['MAG_ZOGY_PLUSREF'] = mag_tot.astype('float32')
+            # infer reference magnitudes and S/N
+            table = infer_mags (table, basename_ref, fits_mask, nsigma,
+                                apphot_radii, bkg_radii, pm_epoch,
+                                include_fluxes, keys2add, add_keys, bkg_global,
+                                thumbnails, size_tn, imtype='ref', tel=tel,
+                                ncpus=ncpus)
 
 
-            # the corresponding error
-            fnuerr_zogy = np.array(table['FNUERR_ZOGY'])
-            fnuerr_ref = np.array(table['FNUERR_OPT_REF'])
-            fnuerr_tot = np.sqrt(fnuerr_zogy**2 + fnuerr_ref**2)
+            # for transients, add any potential source in the reference
+            # image to the transient flux and save the result in the
+            # column MAG_ZOGY_PLUSREF
+            if trans:
 
-            magerr_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
-            pogson = 2.5 / np.log(10)
-            magerr_tot[mask_pos] = pogson * fnuerr_tot[mask_pos] / fnu_tot[mask_pos]
-            table['MAGERR_ZOGY_PLUSREF'] = magerr_tot.astype('float32')
+                fnu_zogy = np.array(table['FNU_ZOGY'])
+                fnu_ref = np.array(table['FNU_OPT_REF'])
+                fnu_tot = fnu_zogy + fnu_ref
+
+                mag_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
+                mask_pos = (fnu_tot > 0)
+                mag_tot[mask_pos] = -2.5 * np.log10(fnu_tot[mask_pos]) + 23.9
+                table['MAG_ZOGY_PLUSREF'] = mag_tot.astype('float32')
 
 
-            # S/N
-            mask_nonzero = (fnuerr_tot != 0)
-            snr_tot = np.zeros_like(fnu_tot, dtype='float32')
-            snr_tot[mask_nonzero] = (fnu_tot[mask_nonzero] /
-                                     fnuerr_tot[mask_nonzero])
-            table['SNR_ZOGY_PLUSREF'] = snr_tot
+                # the corresponding error
+                fnuerr_zogy = np.array(table['FNUERR_ZOGY'])
+                fnuerr_ref = np.array(table['FNUERR_OPT_REF'])
+                fnuerr_tot = np.sqrt(fnuerr_zogy**2 + fnuerr_ref**2)
+
+                magerr_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
+                pogson = 2.5 / np.log(10)
+                magerr_tot[mask_pos] = (pogson * fnuerr_tot[mask_pos]
+                                        / fnu_tot[mask_pos])
+                table['MAGERR_ZOGY_PLUSREF'] = magerr_tot.astype('float32')
+
+
+                # S/N
+                mask_nonzero = (fnuerr_tot != 0)
+                snr_tot = np.zeros_like(fnu_tot, dtype='float32')
+                snr_tot[mask_nonzero] = (fnu_tot[mask_nonzero] /
+                                         fnuerr_tot[mask_nonzero])
+                table['SNR_ZOGY_PLUSREF'] = snr_tot
 
 
 
@@ -1137,7 +1140,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 # i.e. each cpu is processing a different image
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                    ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
+                    ycoords, imtype=imtype, fwhm=fwhm,
                     local_bkg=local_bkg, remove_psf=remove_psf,
                     set_zogy=set_zogy, tel=tel, nthreads=1)
 
@@ -1158,7 +1161,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                    ycoords, imtype=imtype, fwhm=fwhm, D_objmask=objmask,
+                    ycoords, imtype=imtype, fwhm=fwhm,
                     local_bkg=local_bkg, remove_psf=remove_psf,
                     set_zogy=set_zogy, tel=tel, nthreads=ncpus)
 
@@ -1169,7 +1172,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                         zogy.get_psfoptflux_mp (
                             psfex_bintable, data, data_bkg_std**2, data_mask,
                             xcoords, ycoords, imtype=imtype, fwhm=fwhm,
-                            D_objmask=objmask, local_bkg=local_bkg,
+                            local_bkg=local_bkg,
                             remove_psf=remove_psf, psffit=True,
                             set_zogy=set_zogy, tel=tel, nthreads=ncpus))
 
@@ -1774,14 +1777,8 @@ def get_headkeys (filenames):
     for nfile, basename in enumerate(basenames):
 
         # read header
-        #with fits.open('{}_hdr.fits'.format(basename)) as hdulist:
-        #    header = hdulist[-1].header
-        # fitsio
-        #header = fitsio.FITS('{}_hdr.fits'.format(basename))[-1].read_header()
-        # astropy
         header = zogy.read_hdulist ('{}_hdr.fits'.format(basename),
                                     get_data=False, get_header=True)
-
 
 
         objects[nfile] = int(header['OBJECT'])
@@ -1961,7 +1958,9 @@ if __name__ == "__main__":
                         'coordinates with the column names [ra_col] and '
                         '[dec_col] and optionally also a date of observation '
                         'with the column name [date_col] and astropy Time format '
-                        '[date_format]; RA and DEC can either be both in decimal '
+                        '[date_format] and also optional proper motion columns '
+                        'with column names [pmra_col] and [pmdec_col] at epoch '
+                        '[pm_epoch]; RA and DEC can either be both in decimal '
                         'degrees or in colon-separated sexagesimal hours and '
                         'degrees for RA and DEC, respectively')
 
@@ -1983,11 +1982,10 @@ if __name__ == "__main__":
                         help='name of input DEC column in [radecs]; default=DEC')
 
     parser.add_argument('--date_col', type=str, default='DATE-OBS',
-                        help='name of input date of observation in [radecs]; '
-                        'only needed in case you want to limit the images '
-                        'defined in [filenames] to be observed within a time '
-                        'window with size [dtime_max] around this input date; '
-                        'default=DATE-OBS')
+                        help='name of optional input date of observation in '
+                        '[radecs]; only needed in case you want to limit the '
+                        'images to be observed within a time window with size '
+                        '[dtime_max] around this input date; default=DATE-OBS')
 
     parser.add_argument('--date_format', type=str, default='isot',
                         help='astropy.time.Time format of [date_col]; '
@@ -2012,13 +2010,25 @@ if __name__ == "__main__":
                         'if it is present in [radecs] - are copied by default; '
                         'default=None')
 
-    parser.add_argument('--fits_hdrtable_list', type=str, default=None,
-                        help='list of one or more (comma-separated) binary fits '
-                        'tables, containing header keywords FILENAME, MJD-OBS, '
-                        'OBJECT, FILTER, QC-FLAG, RA-CNTR, DEC-CNTR, PSF-SEE, '
-                        'LIMMAG and S-BKGSTD of the possible images to be '
-                        'included; if left to default of None, the catalog '
-                        'header tables available for ML and BG will be used')
+    parser.add_argument('--specific_files', type=str, default=None,
+                        help='comma-separated list with the filenames of the '
+                        'reduced images to be used or the name of an ASCII file '
+                        'listing the filenames in the first column without any '
+                        'header/column name info; if left at the default of '
+                        'None, the routine will use the header tables '
+                        'containing all available images for ML or BG, defined '
+                        'by parameter [telescope], to select the relevant '
+                        'images based on the input coordinates [radecs] and '
+                        'other possible constraints such as [filters], '
+                        '[date_start] and [date_end]; default=None')
+
+    parser.add_argument('--telescope', type=str, default='BG',
+                        choices=['ML1', 'BG2', 'BG3', 'BG4', 'BG'],
+                        help='telescope name (ML1, BG2, BG3, BG4 or BG); if set '
+                        'to BG, files from any BG present in the header tables '
+                        'will be used; this parameter is only relevant if '
+                        '[specific_files] is left at its default None; '
+                        'default=\'BG\'')
 
     parser.add_argument('--filters', type=str, default='ugqriz',
                         help='consider images in these filters only; '
@@ -2105,12 +2115,6 @@ if __name__ == "__main__":
     parser.add_argument('--keys2add_dtypes', type=str, default=par_default,
                         help='corresponding header keyword dtypes; default={}'
                         .format(par_default))
-
-    parser.add_argument('--telescope', type=str, default='BG',
-                        choices=['ML1', 'BG2', 'BG3', 'BG4', 'BG'],
-                        help='telescope name (ML1, BG2, BG3, BG4 or BG); if set '
-                        'to BG, files from any BG present in the tables of '
-                        '[fits_hdrtable_list] will be used; default=\'BG\'')
 
     parser.add_argument('--fov_deg', type=float, default=1.655,
                         help='[deg] instrument field-of-view (FOV); '
@@ -2366,63 +2370,122 @@ if __name__ == "__main__":
     # previously also included possiblity to prepare this table, but
     # not needed anymore as header tables are ready to be used
 
-    # make sure fits_hdrtable_list is a list
-    if args.fits_hdrtable_list is not None:
-        fits_hdrtable_list = args.fits_hdrtable_list.split(',')
+
+    if args.specific_files is not None:
+
+        # create header table from input [specific_files]
+        if zogy.isfile(args.specific_files):
+
+            # if the input is a single file, it could be a single
+            # image or an ASCII file containing multiple files; to
+            # test between the two, try to read the file as a table,
+            # which will cause an exception if it is an image
+            try:
+
+                # read ASCII file
+                table_files = Table.read(args.specific_files, format='ascii',
+                                         data_start=0, names=['FILENAME'])
+                files = list(table_files['FILENAME'])
+
+            except:
+
+                # apparently the input is not an ASCII file, so assume
+                # it is a single image and put it into a list
+                files = args.specific_files.split(',')
+
+        else:
+
+            # if not a file, it should be a string with the filenames
+            # separated by commas
+            files = args.specific_files.split(',')
+
+
+
+        # convert files to table_hdr with a handful of crucial
+        # keywords
+        len_max = np.max([len(f) for f in files])
+        objects, mjds_obs, filts, ras_cntr, decs_cntr = get_headkeys(files)
+        table_hdr = Table(
+            [files, objects, mjds_obs, filts, ras_cntr, decs_cntr],
+            names=['FILENAME','OBJECT','MJD-OBS','FILTER','RA-CNTR','DEC-CNTR'],
+            dtype=['U{}'.format(len_max), 'int16', float, 'U1', float, float])
+
+
+        # if all files are ML1 files, force tel to be 'ML1'; the
+        # default input telescope parameter is 'BG', but if it is
+        # forgotten for ML1 data, the routine will otherwise attempt
+        # to read Google Cloud files, leading to a missing Google
+        # credentials error, which is unexpected when working with ML1
+        # files
+        if np.all([f.split('/')[-1][0:3]=='ML1' for f in files]):
+            tel = 'ML1'
+
+
+
+    # refer to the existing header tables for both ML and BG; this
+    # needs to be done even when specific_files are specified, to be
+    # able to infer the table description used futher down below
+    if tel == 'ML1':
+
+        fits_hdrtable_list = ['/idia/projects/meerlicht/Headers/'
+                              'ML1_headers_cat.fits']
     else:
-        fits_hdrtable_list = args.fits_hdrtable_list
+
+        # for BG, loop telescopes and add header table if needed
+        fits_hdrtable_list = []
+        for tel_tmp in ['BG2', 'BG3', 'BG4']:
+            if tel in tel_tmp:
+                fits_hdrtable_list.append(
+                    'gs://blackgem-hdrtables/{}/{}_headers_cat.fits'
+                    .format(tel_tmp, tel_tmp))
 
 
-    if fits_hdrtable_list is None:
 
-        # refer to the existing header tables for both ML and BG
-        if tel == 'ML1':
+    # if specific_files were not specified, read header tables into
+    # single table_hdr
+    if args.specific_files is None:
 
-            fits_hdrtable_list = ['/idia/projects/meerlicht/Headers/'
-                                  'ML1_headers_cat.fits']
+        # read header fits files into table
+        for it, fits_table in enumerate(fits_hdrtable_list):
 
-        else:
+            try:
 
-            # for BG, loop telescopes and add header table if needed
-            fits_hdrtable_list = []
-            for tel_tmp in ['BG2', 'BG3', 'BG4']:
-                if tel in tel_tmp:
-                    fits_hdrtable_list.append(
-                        'gs://blackgem-hdrtables/{}/{}_headers_cat.fits'
-                        .format(tel_tmp, tel_tmp))
+                if zogy.isfile(fits_table):
 
+                    log.info ('reading header table: {}'.format(fits_table))
+                    table_tmp = Table.read(fits_table)
+                    if it==0:
+                        table_hdr = table_tmp
+                    else:
+                        # stack tables
+                        table_hdr = vstack([table_hdr, table_tmp])
 
-    # read header of trans table for description of keywords
-    header_transtable = zogy.read_hdulist(
-        fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
-        get_data=False, get_header=True)
+                else:
+                    log.warning ('{} not found'.format(fits_table))
 
+            except Exception as e:
 
-    # read header fits files into table
-    for it, fits_table in enumerate(fits_hdrtable_list):
+                if 'Credentials' in str(e):
+                    log.exception(e)
+                    log.error ('Google Cloud credentials error; if working '
+                               'with MeerLICHT data, make sure to specify '
+                               'input parameter telescope to be \'ML1\'')
+                    logging.shutdown()
+                    raise SystemExit
 
-        if zogy.isfile(fits_table):
-
-            log.info ('reading header table: {}'.format(fits_table))
-            table_tmp = Table.read(fits_table)
-            if it==0:
-                table_hdr = table_tmp
-            else:
-                # stack tables
-                table_hdr = vstack([table_hdr, table_tmp])
-
-        else:
-            log.warning ('{} not found'.format(fits_table))
+                else:
+                    log.error ('exception raised when attempting to read header '
+                               'table {}: {}'.format(fits_table, e))
 
 
 
     # check if table contains any entries
     if len(table_hdr)==0:
-        log.error ('no entries in tables in [fits_hdrtable_list]; exiting')
+        log.error ('no input files; exiting')
         logging.shutdown()
         raise SystemExit
     else:
-        log.info ('{} files in input header table(s)'.format(len(table_hdr)))
+        log.info ('{} input files'.format(len(table_hdr)))
 
 
 
@@ -2610,13 +2673,14 @@ if __name__ == "__main__":
     t1 = time.time()
 
 
-    # now that relevant images have been selected, save these to an
-    # ASCII file that contains the date
-    matching_images_list = ['{}_red.fits.fz'.format(fn.split('_red')[0])
-                            for fn in image_indices_dict]
-    table_images = Table([matching_images_list])
-    name_tmp = 'matching_images_{}.txt'.format(Time.now().isot.split('T')[0])
-    table_images.write(name_tmp, format='ascii.no_header', overwrite=True)
+    if False:
+        # now that relevant images have been selected, save these to an
+        # ASCII file that contains the date
+        matching_images_list = ['{}_red.fits.fz'.format(fn.split('_red')[0])
+                                for fn in image_indices_dict]
+        table_images = Table([matching_images_list])
+        name_tmp = 'matching_images_{}.txt'.format(Time.now().isot.split('T')[0])
+        table_images.write(name_tmp, format='ascii.no_header', overwrite=True)
 
 
     # could cut up dictionary in pieces if it turns out to be
@@ -2750,6 +2814,12 @@ if __name__ == "__main__":
 
 
 
+        # read header of trans table for description of keywords
+        header_transtable = zogy.read_hdulist(
+            fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
+            get_data=False, get_header=True)
+
+
         col_descr_dict = create_col_descr (keys2add, header_transtable)
         with fits.open(args.file_out, mode='update') as hdulist:
             for i, col0 in enumerate(table_out.colnames):
@@ -2773,6 +2843,9 @@ if __name__ == "__main__":
                 # update relevant header keyword COMM
                 hdulist[-1].header['TCOMM{}'.format(ncol)] = descr
 
+
+    else:
+        log.warning ('empty output table; no output file to create')
 
 
     log.info ('time spent in [force_phot]: {:.1f}s'.format(time.time()-t1))
