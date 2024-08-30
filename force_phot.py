@@ -38,7 +38,7 @@ import fitsio
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '0.9.9'
+__version__ = '1.0.0'
 
 
 ################################################################################
