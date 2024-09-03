@@ -1462,8 +1462,8 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
                         y_indices[i]:y_indices[i]+1,
                         x_indices[i]:x_indices[i]+1][0][0]
 
-                    log.info ('i: {}, index: (y,x)=({},{}), value: {}'
-                              .format(i, y_indices[i], x_indices[i], values[i]))
+                    #log.info ('i: {}, index: (y,x)=({},{}), value: {}'
+                    #          .format(i, y_indices[i], x_indices[i], values[i]))
 
     else:
 
