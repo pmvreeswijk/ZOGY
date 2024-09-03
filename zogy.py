@@ -36,11 +36,16 @@ logFormatter = logging.Formatter(logfmt, datefmt)
 logging.Formatter.converter = time.gmtime #convert time in logger to UTC
 log = logging.getLogger()
 
+
 # setting environment variable OMP_NUM_THREADS to number of threads,
 # use value from environment variable SLURM_CPUS_PER_TASK if it is
-# defined, otherwise set to 1; needs to be done before numpy is
-# imported
-os.environ['OMP_NUM_THREADS'] = str(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+# defined, otherwise set to 1 if OMP_NUM_THREADS was not defined
+# already; needs to be done before numpy is imported
+if os.environ.get('SLURM_CPUS_PER_TASK') is not None:
+    os.environ['OMP_NUM_THREADS'] = os.environ.get('SLURM_CPUS_PER_TASK')
+elif os.environ.get('OMP_NUM_THREADS') is None:
+    os.environ['OMP_NUM_THREADS'] = '1'
+
 
 import numpy as np
 from numpy.polynomial.polynomial import polyvander2d, polygrid2d, polyval2d
