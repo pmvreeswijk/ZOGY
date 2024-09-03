@@ -17764,11 +17764,12 @@ def mem_use (label=''):
     uss = full_info.uss / 1024**3
     rss = full_info.rss / 1024**3
     vms = full_info.vms / 1024**3
-    swap = full_info.swap / 1024**3
+    # swap currently (sep 2024) not working on mac OS, so leave it out for now
+    #swap = full_info.swap / 1024**3
 
     log.info ('memory use [GB]: uss={:.3f}, rss={:.3f}, maxrss={:.3f}, '
-              'vms={:.3f}, swap={:.3f} {}'
-              .format(uss, rss, maxrss, vms, swap, label))
+              'vms={:.3f} {}' #, swap={:.3f} {}'
+              .format(uss, rss, maxrss, vms, label))
 
     # also report disk use
     disk_use (label=label)
