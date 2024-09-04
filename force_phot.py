@@ -1620,9 +1620,13 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
                 (xx - (xcoords[m] - int(xcoords[m]) + hsize))**2 +
                 (yy - (ycoords[m] - int(ycoords[m]) + hsize))**2) < 2*fwhm)
 
-            # add sum of unique values in the thumbnail data mask
-            # to the output array flags_mask_comb
-            flags_mask_comb[m] = np.sum(np.unique(data_mask_tn[mask_central]))
+            # previously: add sum of unique values in the thumbnail
+            # data mask to the output array flags_mask_comb
+            #flags_mask_comb[m] = np.sum(np.unique(data_mask_tn[mask_central]))
+            # however, this is not correct, as pixel mask value for
+            # the reference image can be combination of e.g. 4 and 8 =
+            # 12, so need to perform a bitwise OR combination instead of SUM
+            flags_mask_comb[m] = np.bitwise_or.reduce(data_mask_tn[mask_central])
 
 
 
