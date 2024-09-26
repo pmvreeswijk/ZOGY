@@ -1862,8 +1862,10 @@ def create_col_descr(keys2add, header):
         'LIMMAG_OPT':     '[mag] limiting AB magnitude at nsigma significance in red image',
         'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_OPT':     '[microJy] flux error in red image',
+        'FNUERRTOT_OPT':  '[microJy] flux total error (incl. zeropoint error) in red image',
         'MAG_APER':       '[mag] aperture AB mag within radius x FWHM in red image',
         'MAGERR_APER':    '[mag] aperture AB mag error within radius x FWHM in red image',
+        'MAGERRTOT_APER': '[mag] aperture AB mag total error (incl. zeropoint error) within radius x FWHM in red image',
         'SNR_APER':       'aperture signal-to-noise ratio within radius x FWHM in red image',
         'FNU_APER':       '[microJy] flux within radius x FWHM in red image',
         'FNUERR_APER':    '[microJy] flux error within radius x FWHM in red image',
@@ -2286,7 +2288,7 @@ if __name__ == "__main__":
                   .format(args.radecs))
 
         # split input [radecs] into list of strings ['ra1', 'dec1', ...]
-        radecs_list0 = re.sub('\(|\)|\[|\]|\{|\}', '', args.radecs)
+        radecs_list0 = re.sub(r'\(|\)|\[|\]|\{|\}', '', args.radecs)
         radecs_list = re.sub(';', ',', radecs_list0).split(',')
 
         # remove potential empty entries and check for an even number

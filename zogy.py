@@ -10505,7 +10505,7 @@ def prep_plots (table, header, base):
         if 'LIMMAG' in header:
             limmag = float(header['LIMMAG'])
             plt.plot([limmag, limmag], [y1,y2], color='black', linestyle='--')
-            title = ('{}, lim. mag (5$\sigma$; dashed line): {:.2f}'
+            title = (r'{}, lim. mag (5$\sigma$; dashed line): {:.2f}'
                      .format(title, limmag))
 
         plt.title(title)
@@ -15606,8 +15606,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
             dr = max(dr, 0.05)
             limits = 5. * np.array([-dr,dr,-dr,dr])
             mask_nonzero = ((dra_array!=0) & (ddec_array!=0))
-            label1 = 'dRA={:.3f}$\pm${:.3f}"'.format(dra_median, dra_std)
-            label2 = 'dDEC={:.3f}$\pm${:.3f}"'.format(ddec_median, ddec_std)
+            label1 = r'dRA={:.3f}$\pm${:.3f}"'.format(dra_median, dra_std)
+            label2 = r'dDEC={:.3f}$\pm${:.3f}"'.format(ddec_median, ddec_std)
             title = '{}\n{}'.format(base.split('/')[-1], header['ORIGFILE'])
 
             result = plot_scatter_hist(
@@ -15638,8 +15638,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                 ax0.set_ylabel('delta RA [arcsec]')
                 # 1st degree polynomial fit to determin slope
                 p_ra, V_ra = np.polyfit(col_array, dra_array, 1, cov=True)
-                label_ra = 'slope={:.3f}$\pm${:.3f}'.format(p_ra[0],
-                                                            np.sqrt(V_ra[0,0]))
+                label_ra = r'slope={:.3f}$\pm${:.3f}'.format(p_ra[0],
+                                                             np.sqrt(V_ra[0,0]))
                 ax0.annotate(label_ra, xy=(1,1), xycoords='axes fraction',
                              fontsize=10, ha='right', va='top')
                 # plot fit
@@ -15654,8 +15654,8 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
                 # 1st degree polynomial fit to determin slope
                 p_dec, V_dec = np.polyfit(col_array, ddec_array, 1, cov=True)
-                label_dec = 'slope={:.3f}$\pm${:.3f}'.format(p_dec[0],
-                                                             np.sqrt(V_dec[0,0]))
+                label_dec = r'slope={:.3f}$\pm${:.3f}'.format(p_dec[0],
+                                                              np.sqrt(V_dec[0,0]))
                 ax1.annotate(label_dec, xy=(1,1), xycoords='axes fraction',
                              fontsize=10, ha='right', va='top')
                 # plot fit
@@ -16205,7 +16205,7 @@ def get_fwhm (fits_cat, fraction, class_sort=False, get_elong=False, nmin=5):
         plt.axis((0,min(x2,15),y2,y1))
         plt.xlabel('FWHM (pixels)')
         plt.ylabel('MAG_AUTO')
-        plt.title('median FWHM: {:.2f} $\pm$ {:.2f} pixels'
+        plt.title(r'median FWHM: {:.2f} $\pm$ {:.2f} pixels'
                   .format(fwhm_median, fwhm_std))
         plt.savefig('{}_fwhm.pdf'.format(fits_cat.replace('.fits','')))
         plt.title(fits_cat)
@@ -16227,7 +16227,7 @@ def get_fwhm (fits_cat, fraction, class_sort=False, get_elong=False, nmin=5):
             plt.axis((0,min(x2,5),y2,y1))
             plt.xlabel('ELONGATION (A/B)')
             plt.ylabel('MAG_AUTO')
-            plt.title('median ELONGATION: {:.2f} $\pm$ {:.2f}'
+            plt.title(r'median ELONGATION: {:.2f} $\pm$ {:.2f}'
                       .format(elong_median, elong_std))
             plt.savefig('{}_elongation.pdf'.format(fits_cat.replace('.fits','')))
             if get_par(set_zogy.show_plots,tel): plt.show()
