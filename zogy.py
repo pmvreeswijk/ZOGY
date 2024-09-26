@@ -106,12 +106,6 @@ matplotlib.use('Agg')
 # healpy
 import healpy as hp
 
-# tensorflow
-import tensorflow as tf
-# to avoid tensorflow info and warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-
 # in case google cloud is being used
 from google.cloud import storage
 
@@ -2413,6 +2407,13 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
     done already inside this current function.
 
     """
+
+    # tensorflow
+    import tensorflow as tf
+    # to avoid tensorflow info and warnings
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info ('executing get_ML_prob_real_Diederik ...')
