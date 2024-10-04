@@ -1945,7 +1945,7 @@ def trans_crossmatch_fphot (fits_transcat, fits_red, fits_red_mask, sexcat_new,
         trans=False, ref=False, fullsource=True, nsigma=nsigma,
         apphot_radii=apphot_radii, bkg_global=bkg_global, bkg_radii=bkg_radii,
         bkg_objmask=bkg_objmask, bkg_limfrac=bkg_limfrac, pm_epoch=pm_epoch,
-        include_fluxes=True, bkg_global=bkg_global, tel=tel, ncpus=nthreads)
+        include_fluxes=True, tel=tel, ncpus=nthreads)
 
 
     # add relevant columns; need to order by column 'INDEX_IN' and
