@@ -43,7 +43,7 @@ chi2_snr_limit = 50      # transient signal-to-noise ratio limit above
 # to [mask_value] below) in the vicinity of the transient to filter
 transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
                       'saturated-connected': 0, 'satellite trail': 0, 'edge': 0,
-                      # if crosstalk correction if ok, then it should
+                      # if crosstalk correction is ok, then it should
                       # not cause a fake transient
                       'crosstalk': 100}
 
@@ -283,10 +283,21 @@ bkg_photothick = 24
 # function [get_apflux] with the following parameters: background
 # annulus radii in units of FWHM
 bkg_radii = [5,7]
-# if the fraction of background annulus pixels affected by nearby
-# objects or masked pixels is higher than [bkg_limfrac], the global
-# background is adopted
+# discard pixels in the local background annulus affected by objects
+# (stars or galaxies, as detected by source extractor) to improve the
+# local background determination; if set to False, all pixels that
+# have not been identified as bad/saturated/etc. in the input mask
+# will be used
+bkg_objmask = True
+# if the fraction of background annulus pixels affected by objects
+# and/or masked pixels is higher than [bkg_limfrac], the global
+# background is adopted instead of the local one
 bkg_limfrac = 0.5
+
+# if force_phot_gaia=True: use object mask inferred from Gaia sources
+# rather than object mask determined by source extractor
+#use_gaia_objmask = False
+
 # integer subsampling factor to be able to sum over fraction of a
 # pixel; a value of n will split a pixel into n**2 subpixels
 apphot_fzoom = 5
