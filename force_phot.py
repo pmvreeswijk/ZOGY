@@ -45,10 +45,10 @@ __version__ = '1.0.0'
 
 def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 ref=True, fullsource=False, nsigma=3, apphot_radii=None,
-                bkg_radii=None, pm_epoch=2016.0, include_fluxes=False,
-                keys2add=None, keys2add_dtypes=None, bkg_global=True,
-                thumbnails=False, size_thumbnails=None, remove_psf=False,
-                tel=None, ncpus=1):
+                bkg_global=True, bkg_radii=None, bkg_objmask=True,
+                bkg_limfrac=None, pm_epoch=2016.0, include_fluxes=False,
+                keys2add=None, keys2add_dtypes=None, thumbnails=False,
+                size_thumbnails=None, remove_psf=False, tel=None, ncpus=1):
 
 
     """Forced photometry on MeerLICHT/BlackGEM images at the input
@@ -121,9 +121,25 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     apphot_radii: list or numpy array of radii (default=None) to use
                   for aperture photometry
 
+    bkg_global: boolean (default=True) determining whether to use the
+                global or local background determination in the
+                photometry
+
     bkg_radii: 2-element list or numpy array (default=None) indicating
                the inner and outer radius of the sky annulus used for
                the local background determination
+
+    bkg_objmask: boolean (default=True) determining whether to discard
+                 pixels affected by objects (stars or galaxies, as
+                 detected by source extractor) in the background
+                 annulus to determine the local background; if set to
+                 False, all pixels that have not been masked as
+                 bad/saturated/etc. in the input mask will be used for
+                 the local background determination
+
+    bkg_limfrac: if more than this fraction of background annulus
+                 pixels is affected by objects and/or masked pixels,
+                 the global background is adopted
 
     pm_epoch: float (default=2016.0), proper motion reference epoch;
               if [table_in] includes the columns PMRA_IN and PMDEC_IN
@@ -141,9 +157,6 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                      dtypes of the header keywords provided in
                      [keys2add]
 
-    bkg_global: boolean (default=True) determining whether to use the
-                global or local background determination in the
-                photometry
 
     ncpus: int (default=1); number of processes/tasks to use
 
@@ -380,9 +393,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     # input parameters to [get_rows]
     pars = [table_in, trans, ref, fullsource, nsigma, apphot_radii,
-            bkg_radii, pm_epoch, include_fluxes, keys2add,
-            add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails,
-            remove_psf]
+            bkg_global, bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch,
+            include_fluxes, keys2add, add_keys, names, dtypes, thumbnails,
+            size_thumbnails, remove_psf]
+
 
     if nimages == 1:
         # for single image, execute [get_rows] without pool_func, and
@@ -518,9 +532,9 @@ def add_drop_fz (filename):
 ################################################################################
 
 def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
-              apphot_radii, bkg_radii, pm_epoch, include_fluxes, keys2add,
-              add_keys, names, dtypes, bkg_global, thumbnails, size_thumbnails,
-              remove_psf, ncpus=None):
+              apphot_radii, bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
+              pm_epoch, include_fluxes, keys2add, add_keys, names, dtypes,
+              thumbnails, size_thumbnails, remove_psf, ncpus=None):
 
 
     # extract filenames and table indices from input list
@@ -648,10 +662,10 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer full-source magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            bkg_radii, pm_epoch, include_fluxes, keys2add,
-                            add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='new', tel=tel, ncpus=ncpus,
-                            remove_psf=remove_psf)
+                            bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
+                            pm_epoch, include_fluxes, keys2add, add_keys,
+                            thumbnails, size_tn, imtype='new',
+                            remove_psf=remove_psf, tel=tel, ncpus=ncpus)
 
 
 
@@ -661,9 +675,10 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
         # infer transient magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                            bkg_radii, pm_epoch, include_fluxes, keys2add,
-                            add_keys, bkg_global, thumbnails, size_tn,
-                            imtype='trans', tel=tel, ncpus=ncpus)
+                            bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
+                            pm_epoch, include_fluxes, keys2add, add_keys,
+                            thumbnails, size_tn, imtype='trans',
+                            tel=tel, ncpus=ncpus)
 
 
 
@@ -699,10 +714,10 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
             # infer reference magnitudes and S/N
             table = infer_mags (table, basename_ref, fits_mask, nsigma,
-                                apphot_radii, bkg_radii, pm_epoch,
-                                include_fluxes, keys2add, add_keys, bkg_global,
-                                thumbnails, size_tn, imtype='ref', tel=tel,
-                                ncpus=ncpus)
+                                apphot_radii, bkg_global, bkg_radii, bkg_objmask,
+                                bkg_limfrac, pm_epoch, include_fluxes, keys2add,
+                                add_keys, thumbnails, size_tn, imtype='ref',
+                                tel=tel, ncpus=ncpus)
 
 
             # for transients, add any potential source in the reference
@@ -749,10 +764,10 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
 ################################################################################
 
-def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
-                bkg_radii, pm_epoch, include_fluxes, keys2add, add_keys,
-                bkg_global, thumbnails, size_tn, imtype='new',
-                remove_psf=False, tel='ML1', ncpus=None):
+def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
+                bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch, include_fluxes,
+                keys2add, add_keys, thumbnails, size_tn,
+                imtype='new', remove_psf=False, tel='ML1', ncpus=None):
 
 
     # is google cloud being used?
@@ -974,10 +989,12 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
 
         # object mask - not always available, so first check if it
         # exists
-        if fits_objmask is not None and zogy.isfile(fits_objmask):
+        if (fits_objmask is not None and zogy.isfile(fits_objmask)
+            and bkg_objmask):
             objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
         else:
-            # if it does not exist, create an all-False object mask
+            # if it does not exist, or input parameter bkg_objmask is
+            # False, create an all-False object mask
             objmask = np.zeros (data_shape, dtype=bool)
 
 
@@ -1045,8 +1062,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_aps, fluxerr_aps, local_bkg = zogy.get_apflux (
                     xcoords, ycoords, data, data_mask, fwhm, objmask=objmask,
                     apphot_radii=apphot_radii, bkg_radii=bkg_radii,
-                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, tel=tel,
-                    nthreads=1)
+                    bkg_limfrac=bkg_limfrac, bkg_std_coords=bkg_std_coords,
+                    set_zogy=set_zogy, tel=tel, nthreads=1)
 
             else:
                 # submit to [zogy.get_apflux] with [ncpu] threads
@@ -1059,8 +1076,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                 flux_aps, fluxerr_aps, local_bkg = zogy.get_apflux (
                     xcoords, ycoords, data, data_mask, fwhm, objmask=objmask,
                     apphot_radii=apphot_radii, bkg_radii=bkg_radii,
-                    bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, tel=tel,
-                    nthreads=ncpus)
+                    bkg_limfrac=bkg_limfrac, bkg_std_coords=bkg_std_coords,
+                    set_zogy=set_zogy, tel=tel, nthreads=ncpus)
 
 
         except Exception as e:
@@ -2060,11 +2077,6 @@ if __name__ == "__main__":
     parser.add_argument('--fullsource', type=str2bool, default=False,
                         help='extract full-source magnitudes?; default=False')
 
-    parser.add_argument('--bkg_global', type=str2bool, default=False,
-                        help='for full-source and ref cases: use global '
-                        'background estimate (T) or estimate local background '
-                        'from annulus around the coordinates (F); default=False')
-
     parser.add_argument('--nsigma', type=int, default=3,
                         help='significance threshold for a detection; default=3')
 
@@ -2073,14 +2085,34 @@ if __name__ == "__main__":
                         'extract aperture photometry; default=0.66,1.5,5, '
                         'if set to None, no aperture photometry is performed')
 
-    parser.add_argument('--bkg_radii', type=str2None, default='5,7',
+    parser.add_argument('--bkg_global', type=str2bool, default=False,
+                        help='for full-source and ref cases: use global '
+                        'background estimate (T) or estimate local background '
+                        'from annulus around the coordinates (F); default=False')
+
+    parser.add_argument('--bkg_local_radii', type=str2None, default='5,7',
                         help='inner and outer radii in units of the image FWHM '
                         'of the sky annulus used to determine the aperture '
-                        'photometry local background; default=6,7; if set to '
-                        'None, no local background is subtracted (this also '
-                        'depends on [bkg_global], i.e. if these sky radii are '
-                        'defined but [bkg_global]=True, no background is '
-                        'subtracted either')
+                        'photometry local background (sigma-clipped median); '
+                        'default=5,7; if set to None, no local background is '
+                        'subtracted (this also depends on [bkg_global], i.e. if '
+                        'these radii are defined but [bkg_global]=True, no '
+                        'local background is subtracted either')
+
+    parser.add_argument('--bkg_local_objmask', type=str2bool, default=True,
+                        help='discard pixels in the local background annulus '
+                        'affected by objects (stars or galaxies, as detected by '
+                        'source extractor) to improve the local background '
+                        'determination; if set to False, all pixels that have '
+                        'not been identified as bad/saturated/etc. in the input '
+                        'mask will be used; default=True')
+
+    parser.add_argument('--bkg_local_limfrac', type=float, default=0.5,
+                        help='if more than this fraction of the background '
+                        'annulus is masked, by objects and/or pixels identified '
+                        'as bad/saturated/etc. in the input mask, the global '
+                        'background value is adopted instead of the local one; '
+                        'default=0.5')
 
     parser.add_argument('--include_fluxes', type=str2bool, default=True,
                         help='besides the optimal/aperture magnitudes, also '
@@ -2717,11 +2749,17 @@ if __name__ == "__main__":
         apphot_radii = None
 
 
-    # change input [bkg_radii] from string to list of floats/ints
-    if args.bkg_radii is not None:
+    # change input [bkg_local_radii] from string to list of floats/ints
+    if args.bkg_local_radii is not None:
         bkg_radii = [float(rad) if '.' in rad else int(rad)
                      for rad in args.bkg_radii.split(',')]
-        log.info ('bkg_radii: {}'.format(bkg_radii))
+        if len(bkg_radii) != 2:
+            log.error ('2 background radii are required, while {} have been '
+                       'specified: {}; exiting'
+                       .format(len(bkg_radii), bkg_radii))
+            raise SystemExit
+        else:
+            log.info ('bkg_radii: {}'.format(bkg_radii))
     else:
         # or from 'None' to None
         bkg_radii = None
@@ -2740,11 +2778,12 @@ if __name__ == "__main__":
     table_out = force_phot (
         table_in, image_indices_dict, mask_list=mask_list, trans=args.trans,
         ref=args.ref, fullsource=args.fullsource, nsigma=args.nsigma,
-        apphot_radii=apphot_radii, bkg_radii=bkg_radii, pm_epoch=args.pm_epoch,
+        bkg_global=args.bkg_global, apphot_radii=apphot_radii,
+        bkg_radii=bkg_radii, bkg_objmask=args.bkg_local_objmask,
+        bkg_limfrac=args.bkg_local_limfrac, pm_epoch=args.pm_epoch,
         include_fluxes=args.include_fluxes, keys2add=keys2add,
-        keys2add_dtypes=keys2add_dtypes, bkg_global=args.bkg_global,
-        thumbnails=args.thumbnails, size_thumbnails=args.size_thumbnails,
-        tel=tel, ncpus=ncpus)
+        keys2add_dtypes=keys2add_dtypes, thumbnails=args.thumbnails,
+        size_thumbnails=args.size_thumbnails, tel=tel, ncpus=ncpus)
 
 
 
