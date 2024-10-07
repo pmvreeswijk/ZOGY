@@ -2381,6 +2381,14 @@ def get_probability (events, model_file, normed_size = 40):
       array of values between 0 and 1 giving probability of corresponding event
       in input array being real
   """
+
+    # tensorflow
+    import tensorflow as tf
+    # to avoid tensorflow info and warnings
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
+
     # Import model and extract input shape
     model = tf.keras.models.load_model(model_file)
     input_shape = model.layers[0].input_shape[0]
@@ -2427,13 +2435,6 @@ def get_ML_prob_real_Diederik (dict_thumbnails, model, size_use=40):
     done already inside this current function.
 
     """
-
-    # tensorflow
-    import tensorflow as tf
-    # to avoid tensorflow info and warnings
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info ('executing get_ML_prob_real_Diederik ...')
@@ -2589,6 +2590,13 @@ def get_probability_aug2024 (events, model_file):
       array of values between 0 and 1 giving probability of corresponding event
       in input array being real
     """
+
+    # tensorflow
+    import tensorflow as tf
+    # to avoid tensorflow info and warnings
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
 
     # Import model and extract input shape
     model = tf.keras.models.load_model(model_file)
@@ -7348,13 +7356,16 @@ def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
                 # saturated stars not ending up in output catalog
                 #if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
                 if frac_tmp < source_minpixfrac:
-                    # too many bad pixel objects to warn about
-                    log.warning ('fraction of useable pixels around source '
-                                 'at x,y: {:.0f},{:.0f}: {} is less than limit '
-                                 'set by set_zogy.source_minpixfrac: {}; '
-                                 'returning zero flux and flux error'
-                                 .format(xcoords[i], ycoords[i], frac_tmp,
-                                         source_minpixfrac))
+                    # do not warn about objects near the CCD edge
+                    dpix_edge = 5
+                    if (dpix_edge < xcoords[i] < xsize-dpix_edge and
+                        dpix_edge < ycoords[i] < ysize-dpix_edge):
+                        log.warning ('fraction of useable pixels around source '
+                                     'at x,y: {:.0f},{:.0f}: {} is less than limit '
+                                     'set by set_zogy.source_minpixfrac: {}; '
+                                     'returning zero flux and flux error'
+                                     .format(xcoords[i], ycoords[i], frac_tmp,
+                                             source_minpixfrac))
                     continue
 
 
