@@ -38,7 +38,7 @@ import fitsio
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 
 
 ################################################################################
@@ -2121,7 +2121,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--thumbnails', type=str2bool, default=False,
                         help='extract thumbnail images around input coordinates? '
-                        'The thumbnail images that are extracted depends on the '
+                        'The thumbnail images that are extracted depend on the '
                         'input parameters [trans], [ref] and [fullsource]:'
                         'reduced image if [fullsource] is True; '
                         'reference image if [ref] is True; '
