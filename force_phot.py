@@ -2752,7 +2752,7 @@ if __name__ == "__main__":
     # change input [bkg_local_radii] from string to list of floats/ints
     if args.bkg_local_radii is not None:
         bkg_radii = [float(rad) if '.' in rad else int(rad)
-                     for rad in args.bkg_radii.split(',')]
+                     for rad in args.bkg_local_radii.split(',')]
         if len(bkg_radii) != 2:
             log.error ('2 background radii are required, while {} have been '
                        'specified: {}; exiting'
