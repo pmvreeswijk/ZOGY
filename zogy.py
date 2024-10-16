@@ -112,7 +112,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.4'
+__version__ = '1.3.5'
 
 
 ################################################################################
@@ -711,14 +711,14 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # get x, y and fratios from matching PSFex stars across entire
         # frame the "_subs" output arrays are the values to be used for
         # the subimages below in the function [run_ZOGY]
-        ok, x_fratio, y_fratio, fratio, dx, dy, fratio_subs, dx_subs, dy_subs = (
-            get_fratio_dxdy ('{}_cat.fits'.format(base_new),
-                             '{}_cat.fits'.format(base_ref),
-                             '{}_psfex.cat'.format(base_new),
-                             '{}_psfex.cat'.format(base_ref),
-                             header_new, header_ref,
-                             nsubs, cuts_ima, header_trans,
-                             use_optflux=get_par(set_zogy.fratio_optflux,tel)))
+        use_optflux = get_par(set_zogy.fratio_optflux,tel)
+        ok, x_fratio, y_fratio, dx, dy, fratio_subs, fratio_err_subs, dx_subs, \
+            dy_subs = (get_fratio_dxdy ('{}_cat.fits'.format(base_new),
+                                        '{}_cat.fits'.format(base_ref),
+                                        '{}_psfex.cat'.format(base_new),
+                                        '{}_psfex.cat'.format(base_ref),
+                                        header_new, header_ref, nsubs, cuts_ima,
+                                        header_trans, use_optflux=use_optflux))
 
         if not ok:
             # leave because of too few matching stars in new and ref
@@ -749,10 +749,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 #fratio_subs[:] = fratio_zps
 
 
-        # fratio is in counts, convert to electrons, in case gains of new
-        # and ref images are not identical
-        fratio *= gain_new / gain_ref
+
+        # fratio is in counts if input images were in counts; convert
+        # to electrons
         fratio_subs *= gain_new / gain_ref
+        fratio_err_subs *= gain_new / gain_ref
 
 
         if get_par(set_zogy.make_plots,tel):
@@ -853,7 +854,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            psf_ref_sub, psf_new_sub,
                                            data_ref_bkg_std_sub,
                                            data_new_bkg_std_sub,
-                                           fratio_subs[nsub],
+                                           fratio_subs[nsub], fratio_err_subs[nsub],
                                            dx_subs[nsub], dy_subs[nsub],
                                            use_FFTW=use_FFTW, nthreads=nthreads)
 
@@ -1581,24 +1582,13 @@ def add_zperr (table_trans, header_new, header_ref, header_trans, tel=None):
             fnuerrtot = np.sqrt(fnuerr**2 + fnuerr_zp**2)
 
 
-            # for transient fluxes, need to add additional
-            # error due to comparison with reference image;
-            # sufficient to add error in flux ratio??
-            if 'ZOGY' in col or 'PSF_D' in col:
-
-                fratio = header_trans['Z-FNR']
-                fratio_std = header_trans['Z-FNRSTD']
-
-                fnu_opt_ref = table_trans['FNU_OPT_REF']
-                fnuerr_fratio = fratio_std * fnu_opt_ref
-
-                # however, fratio_std is not the correct estimate of
-                # the fratio error, so this fnuerr_fratio is probably
-                # overestimated
-                # CHECK!!! - set to zero for now??
-                fnuerr_fratio = 0
-                fnuerrtot = np.sqrt(fnuerrtot**2 + fnuerr_fratio**2)
-
+            # for transient fluxes (_ZOGY and _PSF_D), additional
+            # error due to comparison with reference image was
+            # initially added here, but this is now (Oct 2024) done
+            # inside [run_ZOGY] and when performing the PSF_D fit in
+            # [get_trans] by using the error in the weighted mean of
+            # fratio calculated in [get_fratio_dxdy] and recorded in
+            # header keyword Z-FNRERR
 
 
             # record in new table column
@@ -3229,8 +3219,13 @@ def read_hdulist (fits_file, get_data=True, get_header=False,
                 header = hdulist[ext].header
 
 
-    log.info ('wall-time spent in read_hdulist to read {}: {:.3f} s'
-              .format(fits_file_read, time.time()-t0))
+
+    msg_tmp = ''
+    if get_header and not get_data:
+        msg_tmp = 'header of '
+
+    log.info ('wall-time spent in read_hdulist to read {}{}: {:.3f} s'
+              .format(msg_tmp, fits_file_read, time.time()-t0))
 
 
     # return data and header depending on whether [get_data]
@@ -4631,10 +4626,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     # read fratio (Fn/Fr) from header_trans in order to scale the
     # reference image and its variance
-    sn, sr, fratio = 1, 1, 1
+    sn, sr, fratio, fratio_err = 1, 1, 1, 0
     if 'Z-FNR' in header_trans:
         fratio = header_trans['Z-FNR']
-        log.info ('fratio from header_trans: {}'.format(fratio))
+
+    if 'Z-FNRERR' in header_trans:
+        fratio_err = header_trans['Z-FNRERR']
+
+    log.info ('fratio from header_trans: {} +- {}'.format(fratio, fratio_err))
 
 
     # use sum of variances of new and ref images (where ref image
@@ -4649,8 +4648,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     data_ref = read_hdulist(fits_ref, dtype='float32')
     data_new_bkg_std = read_hdulist(fits_new_bkg_std, dtype='float32')
     data_ref_bkg_std = read_hdulist(fits_ref_bkg_std, dtype='float32')
-    data_D_var = ((np.abs(data_new) + data_new_bkg_std**2) +
-                  (np.abs(data_ref) + data_ref_bkg_std**2) * fratio**2)
+    data_D_var = ((np.maximum(data_new,0) + data_new_bkg_std**2) +
+                  (np.maximum(data_ref,0) + data_ref_bkg_std**2) * fratio**2 +
+                  (data_ref * fratio_err)**2)
 
 
     # try fitting P_D (combination of PSFs of new and ref images)
@@ -5387,13 +5387,17 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
         elong_ref = header_ref['S-ELONG']
 
 
-    # helper function to discard transient based on input table and
-    # limits set for the ratio of source fwhm with respect to the
-    # image average; previously elongation was included, but it is too
-    # dangerous to discard transient based on high elongation - e.g.
-    # transient on top of elongated galaxy will have a high elongation
+    #---------------------------------------------------------------------------
     def help_discard_trans (table, ra, dec, fwhm_mean,
                             dist_max=3./3600, ratio_limit=0.7):
+
+        """helper function to discard transient based on input table
+           and limits set for the ratio of source fwhm with respect to
+           the image average; previously elongation was included, but
+           it is too dangerous to discard transient based on high
+           elongation - e.g.  transient on top of elongated galaxy
+           will have a high elongation
+        """
 
         # check for match in input catalog
         index = find_stars (table['RA'], table['DEC'], ra, dec, dist_max,
@@ -5411,6 +5415,8 @@ def get_trans_old (data_new, data_ref, data_D, data_Scorr, data_Fpsf,
                     discard = True
 
         return discard
+
+    #---------------------------------------------------------------------------
 
 
     # loop transients and find match in new and ref catalog within
@@ -14427,10 +14433,14 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     """Function that takes in output catalogs of stars from the PSFex
     runs on the new and the ref image, and returns arrays with x,y
     pixel coordinates (!) (in the new frame) and flux ratios for the
-    matching stars. The latter is inferred from the normalisation
-    fluxes as saved in the .._psf.cat file, or by using the optimal
-    fluxes in the catalogs. In addition, it provides the difference in
-    x- and y-coordinates between the catalogs after converting the
+    matching stars. If [use_optflux] is False, the ratios are inferred
+    from the normalisation fluxes as saved in the NORM_PSF column of
+    the PSFEx output file (ending in .._psf.cat). If [use_optflux] is
+    True, the fratios are determined using the optimal fluxes in the
+    catalogs.
+
+    In addition, this function provides the difference in x- and
+    y-coordinates of the new and ref catalogs after converting the
     reference image pixels to pixels in the new image through the WCS
     solutions of both images.
 
@@ -14440,9 +14450,13 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     log.info('executing get_fratio_dxdy ...')
 
 
-    # helper function to read PSFEx output ASCII catalog and extract
-    # x, y and normalisation factor from the PSF stars
+    #---------------------------------------------------------------------------
     def readcat (psfcat):
+
+        """helper function to read PSFEx output ASCII catalog and
+           extract x, y and normalisation factor from the PSF stars
+        """
+
         table = ascii.read(psfcat, format='sextractor')
         # In PSFEx version 3.18.2 and higher all objects from the
         # input SExtractor catalog are recorded, and in that case the
@@ -14459,6 +14473,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         norm = table['NORM_PSF'][mask_psfstars]
         return x, y, norm
 
+    #---------------------------------------------------------------------------
 
     # read psfcat_new
     x_psf_new, y_psf_new, norm_psf_new = readcat(psfcat_new)
@@ -14494,16 +14509,22 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     fratio_match = norm_psf_new[idx_psf_new] / norm_psf_ref[idx_psf_ref]
     nmatch = len(fratio_match)
 
+    # fratio_err cannot be estimated from the PSFEx output files; set
+    # it to zero
+    fratio_err_match = np.zeros_like(fratio_match)
+
+
     # correct for the ratio in ref/new exposure times; this method
     # uses FLUX_AUTO (see PHOTFLUX_KEY parameter in psfex.config),
     # saved in NORM_PSF column of PSFEx output file (.._red_psfex.cat)
     # which has not been converted to e-/s
-    fratio_match *= header_ref['EXPTIME'] / header_new['EXPTIME']
+    # N.B.: actually, fratio should not be converted to /s unit!!!
+    #fratio_match *= header_ref['EXPTIME'] / header_new['EXPTIME']
 
     log.info('fraction of PSF stars that match: {}'
              .format((len(idx_psf_new)+len(idx_psf_ref))/
                      (len(x_psf_new)+len(x_psf_ref))))
-    log.info ('median(fratio_match) using E_FLUX_AUTO: {}'
+    log.info ('median(fratio_match) using FLUX_AUTO: {}'
               .format(np.median(fratio_match)))
 
 
@@ -14569,19 +14590,34 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 # EXPTIME; the intermediate catalogs are still in e-;
                 # solution: check the column unit, and if in e-/s,
                 # convert it back to e- to determine fratio
-                flux_new_tmp = table_new['E_FLUX_OPT'].value
-                flux_ref_tmp = table_ref['E_FLUX_OPT'].value
+                flux_new = table_new['E_FLUX_OPT'].value
+                flux_ref = table_ref['E_FLUX_OPT'].value
+                # errors
+                fluxerr_new = table_new['E_FLUXERR_OPT'].value
+                fluxerr_ref = table_ref['E_FLUXERR_OPT'].value
+
 
                 if '/s' in str(table_new['E_FLUX_OPT'].unit):
-                    flux_new_tmp *= header_new['EXPTIME']
+                    flux_new *= header_new['EXPTIME']
+                    fluxerr_new *= header_new['EXPTIME']
+
 
                 if '/s' in str(table_ref['E_FLUX_OPT'].unit):
-                    flux_ref_tmp *= header_ref['EXPTIME']
+                    flux_ref *= header_ref['EXPTIME']
+                    fluxerr_ref *= header_ref['EXPTIME']
 
-                fratio_match = flux_new_tmp
-                mask_nonzero = (flux_ref_tmp != 0)
-                fratio_match[mask_nonzero] = (flux_new_tmp[mask_nonzero] /
-                                              flux_ref_tmp[mask_nonzero])
+
+                # calculate ratio
+                fratio_match = np.ones_like(flux_new)
+                # nonzero mask
+                m_nz = ((flux_ref != 0) & (flux_new != 0))
+                fratio_match[m_nz] = flux_new[m_nz] / flux_ref[m_nz]
+
+                # corresponding error
+                fratio_err_match = fratio_match[m_nz] * np.sqrt(
+                    (fluxerr_new[m_nz] / flux_new[m_nz])**2 +
+                    (fluxerr_ref[m_nz] / flux_ref[m_nz])**2)
+
 
 
             elif (('MAG_OPT' in table_new.colnames or
@@ -14590,10 +14626,11 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                    'FNU_OPT' in table_ref.colnames) and
                   'PC-ZP' in header_new and 'PC-ZP' in header_ref):
 
-                # previously fluxes were saved in output catalogs; if
-                # they are not available, infer the fluxes from the
-                # optimal magnitudes using function
-                # [apply_zp_mag2flux]
+                # previously fluxes in electrons (or ADU) were saved
+                # in output catalogs; if they are not available, infer
+                # the fluxes from the optimal magnitudes (fnu in
+                # microJy) using function [apply_zp_mag2flux]
+                # ([apply_zp_fnu2flux])
                 keywords = ['exptime', 'filter', 'obsdate']
                 exptime_new, filt_new, obsdate_new = read_header (header_new,
                                                                   keywords)
@@ -14611,14 +14648,19 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
                 # check if MAG_OPT is present in table
                 if 'MAG_OPT' in table_new.colnames:
-                    flux_new_tmp = apply_zp_mag2flux (table_new['MAG_OPT'],
-                                                      zp_new, airmass_new,
-                                                      exptime_new, ext_coeff_new)
+
+                    flux_new, fluxerr_new = apply_zp_mag2flux (
+                        table_new['MAG_OPT'].value, zp_new, airmass_new,
+                        exptime_new, ext_coeff_new,
+                        magerr=table_new['MAGERR_OPT'].value)
+
                 else:
+
                     # if not, use FNU_OPT with function apply_zp_fnu2flux
-                    flux_new_tmp = apply_zp_fnu2flux (table_new['FNU_OPT'],
-                                                      zp_new, airmass_new,
-                                                      exptime_new, ext_coeff_new)
+                    flux_new, fluxerr_new = apply_zp_fnu2flux (
+                        table_new['FNU_OPT'].value, zp_new, airmass_new,
+                        exptime_new, ext_coeff_new,
+                        fnuerr=table_new['FNUERR_OPT'].value)
 
 
                 # same for reference image
@@ -14638,21 +14680,31 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
                 # check if MAG_OPT is present in table
                 if 'MAG_OPT' in table_ref.colnames:
-                    flux_ref_tmp = apply_zp_mag2flux (table_ref['MAG_OPT'],
-                                                      zp_ref, airmass_ref,
-                                                      exptime_ref, ext_coeff_ref)
+
+                    flux_ref, fluxerr_ref = apply_zp_mag2flux (
+                        table_ref['MAG_OPT'].value, zp_ref, airmass_ref,
+                        exptime_ref, ext_coeff_ref,
+                        magerr=table_ref['MAGERR_OPT'].value)
+
                 else:
+
                     # if not, use FNU_OPT with function apply_zp_fnu2flux
-                    flux_ref_tmp = apply_zp_fnu2flux (table_ref['FNU_OPT'],
-                                                      zp_ref, airmass_ref,
-                                                      exptime_ref, ext_coeff_ref)
+                    flux_ref, fluxerr_ref = apply_zp_fnu2flux (
+                        table_ref['FNU_OPT'].value, zp_ref, airmass_ref,
+                        exptime_ref, ext_coeff_ref,
+                        fnuerr=table_ref['FNUERR_OPT'].value)
 
 
                 # calculate ratio
-                fratio_match = flux_new_tmp
-                mask_nonzero = (flux_ref_tmp != 0)
-                fratio_match[mask_nonzero] = (flux_new_tmp[mask_nonzero] /
-                                              flux_ref_tmp[mask_nonzero])
+                fratio_match = np.ones_like(flux_new)
+                # nonzero mask
+                m_nz = ((flux_ref != 0) & (flux_new != 0))
+                fratio_match[m_nz] = flux_new[m_nz] / flux_ref[m_nz]
+
+                # corresponding error
+                fratio_err_match = fratio_match[m_nz] * np.sqrt(
+                    (fluxerr_new[m_nz] / flux_new[m_nz])**2 +
+                    (fluxerr_ref[m_nz] / flux_ref[m_nz])**2)
 
 
             else:
@@ -14672,9 +14724,55 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
     # now also determine fratio, dx and dy for each subimage which can
     # be used in function [run_ZOGY]:
-    fratio_subs = np.zeros(nsubs)
+    fratio_subs = np.ones(nsubs)
+    fratio_err_subs = np.zeros(nsubs)
     dx_subs = np.zeros(nsubs)
     dy_subs = np.zeros(nsubs)
+
+
+    #---------------------------------------------------------------------------
+    def get_mean_fratio (fratio, fratio_err, weighted=True):
+
+        """helper function to calculate sigma-clipped (weighted) mean,
+           median and std of fratio values; this is used below both
+           for the full-frame and - if relevant - for the subimages
+           calculations; the boolean [weighted] determines whether the
+           normal or weighted mean is returned
+        """
+
+        # calculate full-frame average, standard deviation and median
+        fratio_mean, fratio_med, fratio_std = (
+            sigma_clipped_stats(fratio, mask_value=0))
+
+
+        if weighted:
+            # replace fratio_mean with weighted mean, where fratio_err
+            # is first corrected such that distribution of fratio and
+            # fratio_err has a reduced chi-square value of unity
+            # (using function from dreamreduce: zeropoints.find_sigma)
+            res = fratio - fratio_med
+            sigma = find_sigma (res, fratio_err)
+            log.info ('sigma in get_mean_fratio: {:.3f}'.format(sigma))
+            fratio_errtot = np.sqrt(fratio_err**2 + sigma**2)
+
+            # corresponding weights
+            m_nz = (fratio_errtot != 0)
+            weights = 1/fratio_errtot[m_nz]**2
+
+            # weighted mean and its error
+            fratio_mean = np.average(fratio[m_nz], weights=weights)
+            fratio_werr = np.sqrt(1/np.sum(weights))
+
+        else:
+            # fratio_werr has not been defined yet; simply scale the
+            # fratio_std with the square root of the number of
+            # measurements
+            fratio_werr = fratio_std / np.sqrt(len(fratio))
+
+
+        return fratio_mean, fratio_med, fratio_std, fratio_werr
+
+    #---------------------------------------------------------------------------
 
 
     # calculations below require a bare minimum of matches, otherwise
@@ -14685,12 +14783,14 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
         success = True
 
-        # calculate full-frame average standard deviation and median
-        fratio_mean_full, fratio_median_full, fratio_std_full = (
-            sigma_clipped_stats(fratio_match, mask_value=0))
+        # fratio stats using function get_mean_fratio
+        fratio_mean_full, fratio_med_full, fratio_std_full, fratio_err_full = \
+            get_mean_fratio (fratio_match, fratio_err_match, weighted=True)
 
-        dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
-        dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
+
+        # dx and dy
+        dx_mean, dx_med, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
+        dy_mean, dy_med, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
         dx_full = np.sqrt(dx_mean**2 + dx_std**2)
         dy_full = np.sqrt(dy_mean**2 + dy_std**2)
 
@@ -14699,36 +14799,42 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         success = False
 
         # set the values arbitrarily high
-        fratio_mean_full, fratio_median_full, fratio_std_full = 100, 100, 100
-        dx_mean, dx_median, dx_std = 100, 100, 100
-        dy_mean, dy_median, dy_std = 100, 100, 100
+        fratio_mean_full, fratio_med_full = 100, 100
+        fratio_std_full, fratio_err_full = 100, 100
+        dx_mean, dx_med, dx_std = 100, 100, 100
+        dy_mean, dy_med, dy_std = 100, 100, 100
         dx_full, dy_full = 100, 100
 
 
-    log.info('full-frame fratio mean: {:.3f}, median: {:.3f}, std: {:.3f}'
-             .format(fratio_mean_full, fratio_median_full, fratio_std_full))
-    log.info('median dx: {:.3f} +- {:.3f} pix'.format(dx_median, dx_std))
-    log.info('median dy: {:.3f} +- {:.3f} pix'.format(dy_median, dy_std))
+
+    log.info('full-frame fratio mean: {:.3f} ({:.3f}), med: {:.3f}, std: {:.3f}'
+             .format(fratio_mean_full, fratio_err_full, fratio_med_full,
+                     fratio_std_full))
+    log.info('median dx: {:.3f} +- {:.3f} pix'.format(dx_med, dx_std))
+    log.info('median dy: {:.3f} +- {:.3f} pix'.format(dy_med, dy_std))
     log.info('full-frame dx: {:.3f}, dy: {:.3f}'.format(dx_full, dy_full))
 
 
     # add header keyword(s):
     header['Z-DXYLOC'] = (get_par(set_zogy.dxdy_local,tel),
                           'star position offsets determined per subimage?')
-    header['Z-DX'] = (dx_median, '[pix] dx median offset full image')
+    header['Z-DX'] = (dx_med, '[pix] dx median offset full image')
     header['Z-DXSTD'] = (dx_std, '[pix] dx sigma (STD) offset full image')
-    header['Z-DY'] = (dy_median, '[pix] dy median offset full image')
+    header['Z-DY'] = (dy_med, '[pix] dy median offset full image')
     header['Z-DYSTD'] = (dy_std, '[pix] dy sigma (STD) offset full image')
     header['Z-FNROPT'] = (get_par(set_zogy.fratio_optflux,tel),
                           'optimal (T) or AUTO (F) flux used for flux ratio')
     header['Z-FNRLOC'] = (get_par(set_zogy.fratio_local,tel),
                           'flux ratios (Fnew/Fref) determined per subimage?')
-    header['Z-FNR'] = (fratio_median_full,
+    header['Z-FNR'] = (fratio_med_full,
                        'median flux ratio (Fnew/Fref) full image')
     header['Z-FNRSTD'] = (fratio_std_full,
                           'sigma (STD) flux ratio (Fnew/Fref) full image')
+    header['Z-FNRERR'] = (fratio_err_full,
+                          'weighted error flux ratio (Fnew/Fref) full image')
 
 
+    #---------------------------------------------------------------------------
     def local_or_full (value_local, value_full, std_full, nsigma=3):
         # function to return full-frame value if local value is more
         # than [nsigma] (full frame) away from the full-frame value
@@ -14742,7 +14848,10 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             return value_full
 
         else:
+
             return value_local
+
+    #---------------------------------------------------------------------------
 
 
     # loop subimages
@@ -14750,17 +14859,17 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     y_psf_new_match = y_psf_new[idx_psf_new]
     for nsub in range(nsubs):
 
+        # start with full-frame values
+        fratio_mean, fratio_std, fratio_med, fratio_err = (
+            fratio_mean_full, fratio_std_full, fratio_med_full, fratio_err_full)
+        dx, dy = dx_full, dy_full
+
+
         # [subcut] defines the pixel indices [y1 y2 x1 x2] identifying
         # the corners of the subimage in the entire input/output image
         # coordinate frame; used various times below
         subcut = cuts_ima[nsub]
 
-        # start with full-frame values
-        fratio_mean, fratio_std, fratio_median = (fratio_mean_full,
-                                                  fratio_std_full,
-                                                  fratio_median_full)
-        dx = dx_full
-        dy = dy_full
 
         # determine mask of full-frame matched values belonging to
         # this subimage
@@ -14769,33 +14878,42 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         mask_sub = ((y_idx >= subcut[0]) & (y_idx < subcut[1]) &
                     (x_idx >= subcut[2]) & (x_idx < subcut[3]))
 
+
         # require a minimum number of values before adopting local
         # values for fratio, dx and dy
-        if np.sum(mask_sub) >= 15:
+        if np.sum(mask_sub) >= nmatch_min:
 
             if get_par(set_zogy.fratio_local,tel):
-                # determine local fratios
-                fratio_mean, fratio_median, fratio_std = sigma_clipped_stats(
-                    fratio_match[mask_sub], mask_value=0)
+
+                # local fratio stats using function get_mean_fratio
+                fratio_mean, fratio_med, fratio_std, fratio_err =\
+                    get_mean_fratio (fratio_match[mask_sub],
+                                     fratio_err_match, weighted=True)
                 fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
                                              fratio_std_full)
 
+
             # and the same for dx and dy
             if get_par(set_zogy.dxdy_local,tel):
+
                 # determine local values
-                dx_mean, dx_median, dx_std = sigma_clipped_stats(
+                dx_mean, dx_med, dx_std = sigma_clipped_stats(
                     dx_match[mask_sub], mask_value=0)
-                dy_mean, dy_median, dy_std = sigma_clipped_stats(
+                dy_mean, dy_med, dy_std = sigma_clipped_stats(
                     dy_match[mask_sub], mask_value=0)
                 dx = np.sqrt(dx_mean**2 + dx_std**2)
                 dy = np.sqrt(dy_mean**2 + dy_std**2)
 
+
                 # adopt full-frame values if local values are more
                 # than nsigma away from the full-frame values
-                dx = local_or_full (dx, 0, dx_full)
-                dy = local_or_full (dy, 0, dy_full)
+                dx = local_or_full (dx, dx_full, dx_std)
+                dy = local_or_full (dy, dy_full, dy_std)
+
+
 
         fratio_subs[nsub] = fratio_mean
+        fratio_err_subs[nsub] = fratio_err
         dx_subs[nsub] = dx
         dy_subs[nsub] = dy
 
@@ -14803,344 +14921,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='in get_fratio_dxdy')
 
-    return success, x_psf_new_match, y_psf_new_match, fratio_match, \
-        dx_match, dy_match, fratio_subs, dx_subs, dy_subs
-
-
-################################################################################
-
-def get_fratio_dxdy_orig (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
-                          header_ref, nsubs, cuts_ima, header, pixscale,
-                          use_optflux=False):
-
-    """Function that takes in output catalogs of stars from the PSFex runs
-    on the new and the ref image, and returns arrays with x,y pixel
-    coordinates (!) (in the new frame) and flux ratios for the
-    matching stars. The latter can the normalisation fluxes as saved
-    in the .._psf.cat file, or the optimal fluxes. In addition, it
-    provides the difference in x- and y-coordinates between the
-    catalogs after converting the reference image pixels to pixels in
-    the new image through the WCS solutions of both images.
-
-    """
-
-    t = time.time()
-    log.info('executing get_fratio_dxdy ...')
-
-
-    # helper function to read PSFEx output ASCII catalog and extract
-    # x, y and normalisation factor from the PSF stars
-    def readcat (psfcat):
-        table = ascii.read(psfcat, format='sextractor')
-        # In PSFEx version 3.18.2 all objects from the input
-        # SExtractor catalog are recorded, and in that case the
-        # entries with FLAGS_PSF=0 need to be selected.
-        if 'FLAGS_PSF' in table.colnames:
-            mask_psfstars = (table['FLAGS_PSF']==0)
-        # In PSFEx version 3.17.1 (last stable version), only stars
-        # with zero flags are recorded in the output catalog, so use
-        # the entire table
-        else:
-            mask_psfstars = np.ones(len(table), dtype=bool)
-
-        x = table['X_IMAGE'][mask_psfstars]
-        y = table['Y_IMAGE'][mask_psfstars]
-        norm = table['NORM_PSF'][mask_psfstars]
-        return x, y, norm
-
-
-    # read psfcat_new
-    x_new, y_new, norm_new = readcat(psfcat_new)
-    # read psfcat_ref
-    x_ref, y_ref, norm_ref = readcat(psfcat_ref)
-
-    if get_par(set_zogy.verbose,tel):
-        log.info('new: number of PSF stars with zero FLAGS: {}'.format(len(x_new)))
-        log.info('ref: number of PSF stars with zero FLAGS: {}'.format(len(x_ref)))
-
-    # get reference ra, dec corresponding to x, y using
-    # wcs.all_pix2world
-    wcs = WCS(header_ref)
-    ra_ref, dec_ref = wcs.all_pix2world(x_ref, y_ref, 1)
-
-    # convert the reference RA and DEC to pixels in the new frame
-    wcs = WCS(header_new)
-    x_ref2new, y_ref2new = wcs.all_world2pix(ra_ref, dec_ref, 1)
-
-    # these can be compared to x_new and y_new
-    # to find matching entries
-
-    if False:
-        # tried rewriting the matching block below without a loop, but
-        # the following is much slower than the loop method; first 3
-        # lines take a lot of time
-        dx = x_new - x_ref2new.reshape(-1,1) # latter array is a column
-        dy = y_new - y_ref2new.reshape(-1,1) # latter array is a column
-        dist2 = dx**2 + dy**2
-        dist_max = 3./pixscale #pixels
-        mask_match = (dist2 <= dist_max**2)
-        fratio = norm_new / norm_ref.reshape(-1,1)
-
-        x_new_match = np.broadcast_to(x_new, dx.shape)[mask_match]
-        y_new_match = np.broadcast_to(y_new, dy.shape)[mask_match]
-        dx_match = dx[mask_match]
-        dy_match = dy[mask_match]
-        fratio_match = fratio[mask_match]
-
-
-    x_new_match = []
-    y_new_match = []
-    x_ref_match = []
-    y_ref_match = []
-    dx_match = []
-    dy_match = []
-    fratio_match = []
-    nmatch = 0
-    dist2_max = (3./pixscale)**2 #pixels
-    for i_new in range(len(x_new)):
-        # calculate distance to ref objects
-        dx_temp = x_new[i_new] - x_ref2new
-        dy_temp = y_new[i_new] - y_ref2new
-        dist2 = dx_temp**2 + dy_temp**2
-        # minimum distance and its index
-        dist2_min, i_ref = np.amin(dist2), np.argmin(dist2)
-        if dist2_min <= dist2_max:
-            nmatch += 1
-            x_new_match.append(x_new[i_new])
-            y_new_match.append(y_new[i_new])
-            x_ref_match.append(x_ref[i_ref])
-            y_ref_match.append(y_ref[i_ref])
-            dx_match.append(dx_temp[i_ref])
-            dy_match.append(dy_temp[i_ref])
-            # append ratio of normalized counts to fratios
-            fratio_match.append(norm_new[i_new] / norm_ref[i_ref])
-
-    if get_par(set_zogy.verbose,tel):
-        log.info('fraction of PSF stars that match: {}'
-                 .format(float(nmatch)/len(x_new)))
-
-
-    x_new_match = np.asarray(x_new_match)
-    y_new_match = np.asarray(y_new_match)
-    x_ref_match = np.asarray(x_ref_match)
-    y_ref_match = np.asarray(y_ref_match)
-    dx_match = np.asarray(dx_match)
-    dy_match = np.asarray(dy_match)
-    fratio_match = np.asarray(fratio_match)
-
-    # correct for the ratio in ref/new exposure times; this method
-    # uses FLUX_AUTO (see PHOTFLUX_KEY parameter in psfex.config),
-    # saved in NORM_PSF column of PSFEx output file (.._red_psfex.cat)
-    # which has not been converted to e-/s
-    fratio_match *= header_ref['EXPTIME'] / header_new['EXPTIME']
-
-
-    log.info ('median(fratio_match) using E_FLUX_AUTO: {:.3f}'
-              .format(np.median(fratio_match)))
-
-
-    if use_optflux:
-
-        # now match these x,y coordinates to the new and ref catalogs to
-        # extract the optimal fluxes
-        #data_new = read_hdulist(cat_new, get_header=False)
-        #data_ref = read_hdulist(cat_ref, get_header=False)
-        table_new = Table.read(cat_new, memmap=True)
-        table_ref = Table.read(cat_ref, memmap=True)
-
-        index_new = []
-        index_ref = []
-        for i in range(len(x_new_match)):
-            dist2_new = ((table_new['X_POS']-x_new_match[i])**2 +
-                         (table_new['Y_POS']-y_new_match[i])**2)
-
-            dist2_ref = ((table_ref['X_POS']-x_ref_match[i])**2 +
-                         (table_ref['Y_POS']-y_ref_match[i])**2)
-
-            if len(dist2_new) > 0 and len(dist2_ref) > 0:
-                index_new.append(np.argmin(dist2_new))
-                index_ref.append(np.argmin(dist2_ref))
-
-
-        # determining flux ratio from the magnitude requires the
-        # airmasses and extinction coefficient
-        #if ('MAG_OPT' in table_new.colnames and
-        #    'MAG_OPT' in table_ref.colnames):
-        #
-        #    fratio_match_mag = 10**(-0.4*(
-        #        table_new['MAG_OPT'][np.asarray(index_new)]-
-        #        table_ref['MAG_OPT'][np.asarray(index_ref)]))
-        #
-        #    log.info('fratio_match using MAG_OPT: {}'.format(fratio_match_mag))
-
-
-        if ('E_FLUX_OPT' in table_new.colnames and
-            'E_FLUX_OPT' in table_ref.colnames):
-
-            # final catalog fluxes have been saved in e-/s, while the
-            # corresponding header EXPTIME indicates the image
-            # EXPTIME; the intermediate catalogs are still in e-;
-            # solution: check the column unit, and if in e-/s, convert
-            # it back to e- to determine fratio
-            flux_new_tmp = np.copy(table_new['E_FLUX_OPT'])
-            flux_ref_tmp = np.copy(table_ref['E_FLUX_OPT'])
-
-            if '/s' in str(table_new['E_FLUX_OPT'].unit):
-                flux_new_tmp *= header_new['EXPTIME']
-
-            if '/s' in str(table_ref['E_FLUX_OPT'].unit):
-                flux_ref_tmp *= header_ref['EXPTIME']
-
-            if len(index_new) > 0 and len(index_ref) > 0:
-                fratio_match = (flux_new_tmp[np.asarray(index_new)] /
-                                flux_ref_tmp[np.asarray(index_ref)])
-
-        else:
-            log.warning ('E_FLUX_OPT not available in catalogs to calculate '
-                         'flux ratios; using E_FLUX_AUTO instead')
-
-
-        log.info('median(fratio_match) using E_FLUX_OPT: {:.3f}'
-                 .format(np.median(fratio_match)))
-
-
-    # now also determine fratio, dx and dy for each subimage which can
-    # be used in function [run_ZOGY]:
-    fratio_subs = np.zeros(nsubs)
-    dx_subs = np.zeros(nsubs)
-    dy_subs = np.zeros(nsubs)
-
-
-    # calculations below require a bare minimum of matches, otherwise
-    # sigma_clipped_stats will return NaNs, which will cause an
-    # exception as header values cannot contain NaNs
-    nmatch_min = 15
-    if nmatch > nmatch_min:
-
-        success = True
-
-        # calculate full-frame average standard deviation and median
-        fratio_mean_full, fratio_median_full, fratio_std_full = (
-            sigma_clipped_stats(fratio_match, mask_value=0))
-
-        dx_mean, dx_median, dx_std = sigma_clipped_stats(dx_match, mask_value=0)
-        dy_mean, dy_median, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
-        dx_full = np.sqrt(dx_mean**2 + dx_std**2)
-        dy_full = np.sqrt(dy_mean**2 + dy_std**2)
-
-    else:
-
-        success = False
-
-        # set the values arbitrarily high
-        fratio_mean_full, fratio_median_full, fratio_std_full = 100, 100, 100
-        dx_mean, dx_median, dx_std = 100, 100, 100
-        dy_mean, dy_median, dy_std = 100, 100, 100
-        dx_full, dy_full = 100, 100
-
-
-    if get_par(set_zogy.verbose,tel):
-        log.info('fratio_mean_full: {:.3f}'.format(fratio_mean_full))
-        log.info('fratio_median_full: {:.3f}'.format(fratio_median_full))
-        log.info('fratio_std_full: {:.3f}'.format(fratio_std_full))
-
-    if get_par(set_zogy.verbose,tel):
-        log.info('median dx: {:.3f} +- {:.3f} pixels'.format(dx_median, dx_std))
-        log.info('median dy: {:.3f} +- {:.3f} pixels'.format(dy_median, dy_std))
-        log.info('full-frame dx: {:.3f}, dy: {:.3f}'.format(dx_full, dy_full))
-
-
-    # add header keyword(s):
-    header['Z-DXYLOC'] = (get_par(set_zogy.dxdy_local,tel),
-                          'star position offsets determined per subimage?')
-    header['Z-DX'] = (dx_median, '[pix] dx median offset full image')
-    header['Z-DXSTD'] = (dx_std, '[pix] dx sigma (STD) offset full image')
-    header['Z-DY'] = (dy_median, '[pix] dy median offset full image')
-    header['Z-DYSTD'] = (dy_std, '[pix] dy sigma (STD) offset full image')
-    header['Z-FNROPT'] = (get_par(set_zogy.fratio_optflux,tel),
-                          'optimal (T) or AUTO (F) flux used for flux ratio')
-    header['Z-FNRLOC'] = (get_par(set_zogy.fratio_local,tel),
-                          'flux ratios (Fnew/Fref) determined per subimage?')
-    header['Z-FNR'] = (fratio_median_full,
-                       'median flux ratio (Fnew/Fref) full image')
-    header['Z-FNRSTD'] = (fratio_std_full,
-                          'sigma (STD) flux ratio (Fnew/Fref) full image')
-
-
-    def local_or_full (value_local, value_full, std_full, nsigma=3):
-        # function to return full-frame value if local value is more
-        # than [nsigma] (full frame) away from the full-frame value
-        if (np.abs(value_local-value_full)/std_full > nsigma or
-            not np.isfinite(value_local)):
-
-            if get_par(set_zogy.verbose,tel):
-                log.info('np.abs(value_local-value_full)/std_full: {}'
-                         .format(np.abs(value_local-value_full)/std_full))
-                log.info('adopted value: {}'.format(value_full))
-            return value_full
-
-        else:
-            return value_local
-
-
-    # loop subimages
-    for nsub in range(nsubs):
-
-        # [subcut] defines the pixel indices [y1 y2 x1 x2] identifying
-        # the corners of the subimage in the entire input/output image
-        # coordinate frame; used various times below
-        subcut = cuts_ima[nsub]
-
-        # start with full-frame values
-        fratio_mean, fratio_std, fratio_median = (fratio_mean_full,
-                                                  fratio_std_full,
-                                                  fratio_median_full)
-        dx = dx_full
-        dy = dy_full
-
-        # determine mask of full-frame matched values belonging to
-        # this subimage
-        y_index = (y_new_match-0.5).astype('uint16')
-        x_index = (x_new_match-0.5).astype('uint16')
-        mask_sub = ((y_index >= subcut[0]) & (y_index < subcut[1]) &
-                    (x_index >= subcut[2]) & (x_index < subcut[3]))
-
-        # require a minimum number of values before adopting local
-        # values for fratio, dx and dy
-        if np.sum(mask_sub) >= 15:
-
-            if get_par(set_zogy.fratio_local,tel):
-                # determine local fratios
-                fratio_mean, fratio_median, fratio_std = sigma_clipped_stats(
-                    fratio_match[mask_sub], mask_value=0)
-                fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
-                                             fratio_std_full)
-
-            # and the same for dx and dy
-            if get_par(set_zogy.dxdy_local,tel):
-                # determine local values
-                dx_mean, dx_median, dx_std = sigma_clipped_stats(
-                    dx_match[mask_sub], mask_value=0)
-                dy_mean, dy_median, dy_std = sigma_clipped_stats(
-                    dy_match[mask_sub], mask_value=0)
-                dx = np.sqrt(dx_mean**2 + dx_std**2)
-                dy = np.sqrt(dy_mean**2 + dy_std**2)
-
-                # adopt full-frame values if local values are more
-                # than nsigma away from the full-frame values
-                dx = local_or_full (dx, 0, dx_full)
-                dy = local_or_full (dy, 0, dy_full)
-
-        fratio_subs[nsub] = fratio_mean
-        dx_subs[nsub] = dx
-        dy_subs[nsub] = dy
-
-
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='in get_fratio_dxdy')
-
-    return success, x_new_match, y_new_match, fratio_match, dx_match, dy_match, \
-        fratio_subs, dx_subs, dy_subs
+    return success, x_psf_new_match, y_psf_new_match, dx_match, dy_match, \
+        fratio_subs, fratio_err_subs, dx_subs, dy_subs
 
 
 ################################################################################
@@ -17537,7 +17319,8 @@ def dist_from_peak (data):
 ################################################################################
 
 def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
-              data_new_bkg_std, fratio, dx, dy, use_FFTW=True, nthreads=1):
+              data_new_bkg_std, fratio, fratio_err, dx, dy, use_FFTW=True,
+              nthreads=1):
 
     """function to run ZOGY on a subimage"""
 
@@ -17608,9 +17391,9 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
     # (~90s), but much worse for FFTW_PATIENT (~360s). So if this is
     # switched on, need to do a pre-processing of the 1st subimage.
     if use_FFTW:
-        R = R.astype('complex64')
-        R_hat = np.zeros_like(R)
-        fft_forward = pyfftw.FFTW(R, R_hat, axes=(0,1), direction='FFTW_FORWARD',
+        Rc = R.astype('complex64')
+        R_hat = np.zeros_like(Rc)
+        fft_forward = pyfftw.FFTW(Rc, R_hat, axes=(0,1), direction='FFTW_FORWARD',
                                   flags=('FFTW_ESTIMATE', ),
                                   threads=nthreads, planning_timelimit=None)
         fft_forward()
@@ -17722,8 +17505,14 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
 
 
 
+    # !!!CHECK!!! - need to add Vfratio = (R * fratio _err)**2 ??
+    # Vfratio is added below to V_S, so that it influences both Scorr
+    # and alpha_std (= PSF flux error)
+    V_fratio = (R * fratio_err)**2
+    #V_fratio = 0
+
     # and finally Scorr
-    V_S = VSr + VSn
+    V_S = VSr + VSn + V_fratio
     V_ast = VSr_ast + VSn_ast
     V = V_S + V_ast
     #Scorr = S / np.sqrt(V)
@@ -17773,109 +17562,6 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
 
     #return D, S, Scorr, alpha, alpha_std
     return D, Scorr, alpha, alpha_std
-
-
-################################################################################
-
-def run_ZOGY_backup(R,N,Pr,Pn,sr,sn,fr,fn,Vr,Vn,dx,dy):
-
-    if get_par(set_zogy.timing,tel):
-        t = time.time()
-
-    R_hat = fft.fft2(R)
-    N_hat = fft.fft2(N)
-    Pn_hat = fft.fft2(Pn)
-    #if get_par(set_zogy.psf_clean_factor,tel)!=0:
-    #clean Pn_hat
-    #Pn_hat = clean_psf(Pn_hat, get_par(set_zogy.psf_clean_factor,tel))
-    Pn_hat2_abs = np.abs(Pn_hat**2)
-
-    Pr_hat = fft.fft2(Pr)
-    #if get_par(set_zogy.psf_clean_factor,tel)!=0:
-    # clean Pr_hat
-    #Pr_hat = clean_psf(Pr_hat, get_par(set_zogy.psf_clean_factor,tel))
-    Pr_hat2_abs = np.abs(Pr_hat**2)
-
-    sn2 = sn**2
-    sr2 = sr**2
-    fn2 = fn**2
-    fr2 = fr**2
-    fD = fr*fn / np.sqrt(sn2*fr2+sr2*fn2)
-
-    denominator = sn2*fr2*Pr_hat2_abs + sr2*fn2*Pn_hat2_abs
-
-    D_hat = (fr*Pr_hat*N_hat - fn*Pn_hat*R_hat) / np.sqrt(denominator)
-    D = np.real(fft.ifft2(D_hat)) / fD
-
-    P_D_hat = (fr*fn/fD) * (Pr_hat*Pn_hat) / np.sqrt(denominator)
-    #P_D = np.real(fft.ifft2(P_D_hat))
-
-    S_hat = fD*D_hat*np.conj(P_D_hat)
-    S = np.real(fft.ifft2(S_hat))
-
-    # alternative way to calculate S
-    #S_hat = (fn*fr2*Pr_hat2_abs*np.conj(Pn_hat)*N_hat -
-    #         fr*fn2*Pn_hat2_abs*np.conj(Pr_hat)*R_hat) / denominator
-    #S = np.real(fft.ifft2(S_hat))
-
-    # PMV 2017/01/18: added following part based on Eqs. 25-31
-    # from Barak's paper
-    kr_hat = fr*fn2*np.conj(Pr_hat)*Pn_hat2_abs / denominator
-    kr = np.real(fft.ifft2(kr_hat))
-    kr2 = kr**2
-    kr2_hat = fft.fft2(kr2)
-
-    kn_hat = fn*fr2*np.conj(Pn_hat)*Pr_hat2_abs / denominator
-    kn = np.real(fft.ifft2(kn_hat))
-    kn2 = kn**2
-    kn2_hat = fft.fft2(kn2)
-
-    Vr_hat = fft.fft2(Vr)
-    Vn_hat = fft.fft2(Vn)
-
-    VSr = np.real(fft.ifft2(Vr_hat*kr2_hat))
-    VSn = np.real(fft.ifft2(Vn_hat*kn2_hat))
-
-    dx2 = dx**2
-    dy2 = dy**2
-    # and calculate astrometric variance
-    Sn = np.real(fft.ifft2(kn_hat*N_hat))
-    dSndy = Sn - np.roll(Sn,1,axis=0)
-    dSndx = Sn - np.roll(Sn,1,axis=1)
-    VSn_ast = dx2 * dSndx**2 + dy2 * dSndy**2
-
-    Sr = np.real(fft.ifft2(kr_hat*R_hat))
-    dSrdy = Sr - np.roll(Sr,1,axis=0)
-    dSrdx = Sr - np.roll(Sr,1,axis=1)
-    VSr_ast = dx2 * dSrdx**2 + dy2 * dSrdy**2
-
-    # and finally Scorr
-    V_S = VSr + VSn
-    V_ast = VSr_ast + VSn_ast
-    V = V_S + V_ast
-    #Scorr = S / np.sqrt(V)
-    # make sure there's no division by zero
-    Scorr = np.copy(S)
-    Scorr[V>0] /= np.sqrt(V[V>0])
-
-    # PMV 2017/03/05: added following PSF photometry part based on
-    # Eqs. 41-43 from Barak's paper
-    F_S =  np.sum((fn2*Pn_hat2_abs*fr2*Pr_hat2_abs) / denominator)
-    # divide by the number of pixels in the images (related to do
-    # the normalization of the ffts performed)
-    F_S /= R.size
-    # an alternative (slower) way to calculate the same F_S:
-    #F_S_array = fft.ifft2((fn2*Pn_hat2_abs*fr2*Pr_hat2_abs) / denominator)
-    #F_S = F_S_array[0,0]
-
-    alpha = S / F_S
-    alpha_std = np.zeros(alpha.shape)
-    alpha_std[V_S>=0] = np.sqrt(V_S[V_S>=0]) / F_S
-
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='in run_ZOGY')
-
-    return D, S, Scorr, alpha, alpha_std
 
 
 ################################################################################
