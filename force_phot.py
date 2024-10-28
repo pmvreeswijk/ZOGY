@@ -38,7 +38,7 @@ import fitsio
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 
 
 ################################################################################
@@ -46,9 +46,9 @@ __version__ = '1.1.0'
 def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 ref=True, fullsource=False, nsigma=3, apphot_radii=None,
                 bkg_global=True, bkg_radii=None, bkg_objmask=True,
-                bkg_limfrac=None, pm_epoch=2016.0, include_fluxes=False,
-                keys2add=None, keys2add_dtypes=None, thumbnails=False,
-                size_thumbnails=None, remove_psf=False, tel=None, ncpus=1):
+                bkg_limfrac=None, pm_epoch=2016.0, keys2add=None,
+                keys2add_dtypes=None, thumbnails=False, size_thumbnails=None,
+                remove_psf=False, tel=None, ncpus=1):
 
 
     """Forced photometry on MeerLICHT/BlackGEM images at the input
@@ -146,10 +146,6 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
               (units: mas/yr), the proper motion is taken into account
               using this reference epoch
 
-    include_fluxes: boolean (default=False) deciding whether the
-                    fluxes in microJy corresponding to the
-                    magnitudes are included in the output table
-
     keys2add: list of strings (default=None); header keywords that
               will be added as columns to the output table
 
@@ -246,16 +242,15 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     if fullsource:
 
         # optimal photometry columns
-        names_fullsource = ['BACKGROUND', 'MAG_OPT', 'MAGERR_OPT', 'SNR_OPT',
-                            'LIMMAG_OPT']
+        names_fullsource = ['BACKGROUND', 'MAG_OPT', 'MAGERR_OPT',
+                            'MAGERRTOT_OPT', 'SNR_OPT', 'LIMMAG_OPT']
         names += names_fullsource
-        dtypes += ['float32', 'float32', 'float32', 'float32', 'float32']
+        dtypes += ['float32'] * 6
 
 
         # add corresponding fluxes
-        #if include_fluxes:
-        names += ['FNU_OPT', 'FNUERR_OPT']
-        dtypes += ['float32', 'float32']
+        names += ['FNU_OPT', 'FNUERR_OPT', 'FNUERRTOT_OPT']
+        dtypes += ['float32'] * 3
 
 
         # add aperture photometry columns if needed
@@ -264,15 +259,16 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
             for radius in apphot_radii:
                 names += ['MAG_APER_R{}xFWHM'.format(radius),
                           'MAGERR_APER_R{}xFWHM'.format(radius),
+                          'MAGERRTOT_APER_R{}xFWHM'.format(radius),
                           'SNR_APER_R{}xFWHM'.format(radius)]
-                dtypes += ['float32', 'float32', 'float32']
+                dtypes += ['float32'] * 4
 
 
                 # add corresponding fluxes
-                #if include_fluxes:
                 names += ['FNU_APER_R{}xFWHM'.format(radius),
-                          'FNUERR_APER_R{}xFWHM'.format(radius)]
-                dtypes += ['float32', 'float32']
+                          'FNUERR_APER_R{}xFWHM'.format(radius),
+                          'FNUERRTOT_APER_R{}xFWHM'.format(radius)]
+                dtypes += ['float32'] * 3
 
 
 
@@ -285,21 +281,21 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     if trans:
 
-        names_trans = ['MAG_ZOGY', 'MAGERR_ZOGY', 'SNR_ZOGY', 'LIMMAG_ZOGY']
+        names_trans = ['MAG_ZOGY', 'MAGERR_ZOGY', 'MAGERRTOT_ZOGY'
+                       'SNR_ZOGY', 'LIMMAG_ZOGY']
         names += names_trans
-        dtypes += ['float32', 'float32', 'float32', 'float32']
+        dtypes += ['float32'] * 5
 
 
         # add corresponding fluxes
-        #if include_fluxes:
-        names += ['FNU_ZOGY', 'FNUERR_ZOGY']
-        dtypes += ['float32', 'float32']
+        names += ['FNU_ZOGY', 'FNUERR_ZOGY', 'FNUERRTOT_ZOGY']
+        dtypes += ['float32'] * 3
 
 
         # add thumbnails if relevant
         if thumbnails:
             names += ['THUMBNAIL_D', 'THUMBNAIL_SCORR']
-            dtypes += ['float32', 'float32']
+            dtypes += ['float32'] * 2
 
 
 
@@ -318,15 +314,14 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
         # magnitude, snr and limiting magnitude columns
         names_ref = ['BACKGROUND_REF', 'MAG_OPT_REF', 'MAGERR_OPT_REF',
-                     'SNR_OPT_REF', 'LIMMAG_OPT_REF']
+                     'MAGERRTOT_OPT_REF', 'SNR_OPT_REF', 'LIMMAG_OPT_REF']
         names += names_ref
-        dtypes += ['float32', 'float32', 'float32', 'float32', 'float32']
+        dtypes += ['float32'] * 6
 
 
         # add corresponding fluxes
-        #if include_fluxes:
-        names += ['FNU_OPT_REF', 'FNUERR_OPT_REF']
-        dtypes += ['float32', 'float32']
+        names += ['FNU_OPT_REF', 'FNUERR_OPT_REF', 'FNUERRTOT_OPT_REF']
+        dtypes += ['float32'] * 3
 
 
         # add aperture photometry columns if needed
@@ -335,15 +330,16 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
             for radius in apphot_radii:
                 names += ['MAG_APER_R{}xFWHM_REF'.format(radius),
                           'MAGERR_APER_R{}xFWHM_REF'.format(radius),
+                          'MAGERRTOT_APER_R{}xFWHM_REF'.format(radius),
                           'SNR_APER_R{}xFWHM_REF'.format(radius)]
-                dtypes += ['float32', 'float32', 'float32']
+                dtypes += ['float32'] * 4
 
 
                 # add corresponding fluxes
-                #if include_fluxes:
                 names += ['FNU_APER_R{}xFWHM_REF'.format(radius),
-                          'FNUERR_APER_R{}xFWHM_REF'.format(radius)]
-                dtypes += ['float32', 'float32']
+                          'FNUERR_APER_R{}xFWHM_REF'.format(radius),
+                          'FNUERRTOT_APER_R{}xFWHM_REF'.format(radius)]
+                dtypes += ['float32'] * 3
 
 
 
@@ -351,8 +347,16 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         if trans:
             names += ['MAG_ZOGY_PLUSREF',
                       'MAGERR_ZOGY_PLUSREF',
+                      'MAGERRTOT_ZOGY_PLUSREF',
                       'SNR_ZOGY_PLUSREF']
-            dtypes += ['float32', 'float32', 'float32']
+            dtypes += ['float32'] * 4
+
+            # add corresponding fluxes
+            names += ['FNU_ZOGY_PLUSREF',
+                      'FNUERR_ZOGY_PLUSREF',
+                      'FNUERRTOT_ZOGY_PLUSREF']
+            dtypes += ['float32'] * 3
+
 
 
         # add thumbnail if relevant
@@ -371,7 +375,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
     # for testing, limit the number of images
-    #ntest = 100
+    #ntest = 50
     #image_indices_list = image_indices_list[:ntest]
 
 
@@ -394,8 +398,8 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     # input parameters to [get_rows]
     pars = [table_in, trans, ref, fullsource, nsigma, apphot_radii,
             bkg_global, bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch,
-            include_fluxes, keys2add, add_keys, names, dtypes, thumbnails,
-            size_thumbnails, remove_psf]
+            keys2add, add_keys, names, dtypes, thumbnails, size_thumbnails,
+            remove_psf]
 
 
     if nimages == 1:
@@ -533,8 +537,8 @@ def add_drop_fz (filename):
 
 def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
               apphot_radii, bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
-              pm_epoch, include_fluxes, keys2add, add_keys, names, dtypes,
-              thumbnails, size_thumbnails, remove_psf, ncpus=None):
+              pm_epoch, keys2add, add_keys, names, dtypes, thumbnails,
+              size_thumbnails, remove_psf, ncpus=None):
 
 
     # extract filenames and table indices from input list
@@ -663,9 +667,9 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         # infer full-source magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                             bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
-                            pm_epoch, include_fluxes, keys2add, add_keys,
-                            thumbnails, size_tn, imtype='new',
-                            remove_psf=remove_psf, tel=tel, ncpus=ncpus)
+                            pm_epoch, keys2add, add_keys, thumbnails, size_tn,
+                            imtype='new', remove_psf=remove_psf, tel=tel,
+                            ncpus=ncpus)
 
 
 
@@ -676,9 +680,8 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         # infer transient magnitudes and S/N
         table = infer_mags (table, basename, fits_mask, nsigma, apphot_radii,
                             bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
-                            pm_epoch, include_fluxes, keys2add, add_keys,
-                            thumbnails, size_tn, imtype='trans',
-                            tel=tel, ncpus=ncpus)
+                            pm_epoch, keys2add, add_keys, thumbnails, size_tn,
+                            imtype='trans', tel=tel, ncpus=ncpus)
 
 
 
@@ -715,9 +718,9 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
             # infer reference magnitudes and S/N
             table = infer_mags (table, basename_ref, fits_mask, nsigma,
                                 apphot_radii, bkg_global, bkg_radii, bkg_objmask,
-                                bkg_limfrac, pm_epoch, include_fluxes, keys2add,
-                                add_keys, thumbnails, size_tn, imtype='ref',
-                                tel=tel, ncpus=ncpus)
+                                bkg_limfrac, pm_epoch, keys2add, add_keys,
+                                thumbnails, size_tn, imtype='ref', tel=tel,
+                                ncpus=ncpus)
 
 
             # for transients, add any potential source in the reference
@@ -728,6 +731,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
                 fnu_zogy = np.array(table['FNU_ZOGY'])
                 fnu_ref = np.array(table['FNU_OPT_REF'])
                 fnu_tot = fnu_zogy + fnu_ref
+                table['FNU_ZOGY_PLUSREF'] = fnu_tot.astype('float32')
 
                 mag_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
                 mask_pos = (fnu_tot > 0)
@@ -739,12 +743,26 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
                 fnuerr_zogy = np.array(table['FNUERR_ZOGY'])
                 fnuerr_ref = np.array(table['FNUERR_OPT_REF'])
                 fnuerr_tot = np.sqrt(fnuerr_zogy**2 + fnuerr_ref**2)
+                table['FNUERR_ZOGY_PLUSREF'] = fnuerr_tot.astype('float32')
 
                 magerr_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
                 pogson = 2.5 / np.log(10)
                 magerr_tot[mask_pos] = (pogson * fnuerr_tot[mask_pos]
                                         / fnu_tot[mask_pos])
                 table['MAGERR_ZOGY_PLUSREF'] = magerr_tot.astype('float32')
+
+
+                # also determine the total error, which includes the
+                # zeropoint error in both the new and reference image
+                fnuerrtot_zogy = np.array(table['FNUERRTOT_ZOGY'])
+                fnuerrtot_ref = np.array(table['FNUERRTOT_OPT_REF'])
+                fnuerrtot_tot = np.sqrt(fnuerrtot_zogy**2 + fnuerrtot_ref**2)
+                table['FNUERRTOT_ZOGY_PLUSREF'] = fnuerrtot_tot.astype('float32')
+
+                magerrtot_tot = np.zeros_like(fnu_tot, dtype='float32') + 99
+                magerrtot_tot[mask_pos] = (pogson * fnuerrtot_tot[mask_pos]
+                                           / fnu_tot[mask_pos])
+                table['MAGERRTOT_ZOGY_PLUSREF'] = magerrtot_tot.astype('float32')
 
 
                 # S/N
@@ -756,7 +774,6 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
 
 
-
     zogy.mem_use ('[force_phot.get_rows] at end')
 
     return table
@@ -765,9 +782,9 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 ################################################################################
 
 def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
-                bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch, include_fluxes,
-                keys2add, add_keys, thumbnails, size_tn,
-                imtype='new', remove_psf=False, tel='ML1', ncpus=None):
+                bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch, keys2add,
+                add_keys, thumbnails, size_tn, imtype='new', remove_psf=False,
+                tel='ML1', ncpus=None):
 
 
     # is google cloud being used?
@@ -954,14 +971,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
     # determine several other header keyword values; NB: use of
     # mask_ok, which narrows the table down to valid coordinates
-    exptime, filt, zp, airmass, ext_coeff = get_keys (
+    exptime, filt, zp, zperr, airmass, ext_coeff = get_keys (
         header, table['RA_IN'], table['DEC_IN'], tel)
 
 
-    # if zogy.MLBG_phot_apply_chanzp is True, replace [zp]
-    # with array of zeropoints, one for each object; same for
-    # [zp_std]
+    # if set_zogy.MLBG_phot_apply_chanzp is True, replace [zp] with
+    # array of zeropoints, one for each object; same for [zp_err]
     if new and zogy.get_par(set_zogy.MLBG_phot_apply_chanzp,tel):
+
         # even though MLBG_phot_apply_chanzp is True, channel
         # zeropoints may not be available and moreover they could be
         # zero; use image zp in those cases
@@ -970,6 +987,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                    and header['PC-ZP{}'.format(i+1)] != 0
                    else zp for i in range(16)]
         zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
+
+        # same for zperr
+        zperr_chan = [header['PC-ZPE{}'.format(i+1)]
+                      if 'PC-ZPE{}'.format(i+1) in header
+                      and header['PC-ZPE{}'.format(i+1)] != 0
+                      else zperr for i in range(16)]
+        zperr = zogy.get_zp_coords (xcoords, ycoords, zperr_chan, zperr)
+
 
 
     if False:
@@ -1113,26 +1138,35 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
             # infer calibrated magnitudes using the zeropoint
             if zp is not None:
-                mag_ap, magerr_ap, fnu_ap, fnuerr_ap = zogy.apply_zp (
-                    flux_ap, zp, airmass, exptime, ext_coeff, fluxerr=fluxerr_ap,
-                    return_fnu=True)
+
+                mag_ap, magerr_ap, magerrtot_ap, \
+                    fnu_ap, fnuerr_ap, fnuerrtot_ap = zogy.apply_zp (
+                        flux_ap, zp, airmass, exptime, ext_coeff,
+                        fluxerr=fluxerr_ap, return_fnu=True, zperr=zperr)
+
 
                 mask_pos = (flux_ap > 0)
                 mag_ap[~mask_pos] = 99
-                magerr_ap[~mask_pos] = 99
+                #magerr_ap[~mask_pos] = 99
+                #magerrtot_ap[~mask_pos] = 99
+
 
                 col_tmp = 'MAG_APER_R{}xFWHM{}'.format(radius, s2add)
                 table[col_tmp] = mag_ap.astype('float32')
                 col_tmp = 'MAGERR_APER_R{}xFWHM{}'.format(radius, s2add)
                 table[col_tmp] = magerr_ap.astype('float32')
+                col_tmp = 'MAGERRTOT_APER_R{}xFWHM{}'.format(radius, s2add)
+                table[col_tmp] = magerrtot_ap.astype('float32')
 
 
-                # add fluxes to table if needed
-                #if include_fluxes:
+                # add fluxes to table
                 col_tmp = 'FNU_APER_R{}xFWHM{}'.format(radius, s2add)
                 table[col_tmp] = fnu_ap.astype('float32')
                 col_tmp = 'FNUERR_APER_R{}xFWHM{}'.format(radius, s2add)
                 table[col_tmp] = fnuerr_ap.astype('float32')
+                col_tmp = 'FNUERRTOT_APER_R{}xFWHM{}'.format(radius, s2add)
+                table[col_tmp] = fnuerrtot_ap.astype('float32')
+
 
 
             else:
@@ -1207,13 +1241,14 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
         if zp is not None:
             # infer calibrated magnitudes using the zeropoint
-            mag_opt, magerr_opt, fnu_opt, fnuerr_opt = zogy.apply_zp (
-                flux_opt, zp, airmass, exptime, ext_coeff, fluxerr=fluxerr_opt,
-                return_fnu=True)
+            mag_opt, magerr_opt, magerrtot_opt, fnu_opt, fnuerr_opt, \
+                fnuerrtot_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
+                                               ext_coeff, fluxerr=fluxerr_opt,
+                                               return_fnu=True, zperr=zperr)
 
             mask_pos = (flux_opt > 0)
             mag_opt[~mask_pos] = 99
-            magerr_opt[~mask_pos] = 99
+            #magerr_opt[~mask_pos] = 99
 
         else:
             log.warning ('keyword PC-ZP not in header; unable to infer {} '
@@ -1237,16 +1272,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # update table
         table['MAG_OPT{}'.format(s2add)] = mag_opt.astype('float32')
         table['MAGERR_OPT{}'.format(s2add)] = magerr_opt.astype('float32')
+        table['MAGERRTOT_OPT{}'.format(s2add)] = magerrtot_opt.astype('float32')
         table['SNR_OPT{}'.format(s2add)] = snr_opt.astype('float32')
         table['LIMMAG_OPT{}'.format(s2add)] = (limmags.astype('float32'))
 
 
-        # add fluxes if needed
-        #if include_fluxes:
-        col_tmp = 'FNU_OPT{}'.format(s2add)
-        table[col_tmp] = fnu_opt.astype('float32')
-        col_tmp = 'FNUERR_OPT{}'.format(s2add)
-        table[col_tmp] = fnuerr_opt.astype('float32')
+        # add fluxes
+        table['FNU_OPT{}'.format(s2add)] = fnu_opt.astype('float32')
+        table['FNUERR_OPT{}'.format(s2add)] = fnuerr_opt.astype('float32')
+        table['FNUERRTOT_OPT{}'.format(s2add)] = fnuerrtot_opt.astype('float32')
 
 
         # add thumbnail image
@@ -1296,13 +1330,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
         if zp is not None:
             # infer calibrated magnitudes using the zeropoint
-            mag_zogy, magerr_zogy, fnu_zogy, fnuerr_zogy = zogy.apply_zp (
-                np.abs(Fpsf), zp, airmass, exptime, ext_coeff, fluxerr=Fpsferr,
-                return_fnu=True)
+            mag_zogy, magerr_zogy, magerrtot_zogy, fnu_zogy, fnuerr_zogy, \
+                fnuerrtot_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
+                                                exptime, ext_coeff,
+                                                fluxerr=Fpsferr,
+                                                return_fnu=True, zperr=zperr)
 
             mask_zero = (Fpsf==0)
             mag_zogy[mask_zero] = 99
-            magerr_zogy[mask_zero] = 99
+            #magerr_zogy[mask_zero] = 99
 
         else:
             mag_zogy = np.zeros(ncoords_ok, dtype='float32') + 99
@@ -1315,14 +1351,15 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # update table
         table['MAG_ZOGY'] = mag_zogy.astype('float32')
         table['MAGERR_ZOGY'] = magerr_zogy.astype('float32')
+        table['MAGERRTOT_ZOGY'] = magerrtot_zogy.astype('float32')
         table['SNR_ZOGY'] = snr_zogy.astype('float32')
         table['LIMMAG_ZOGY'] = tlimmags.astype('float32')
 
 
-        # add fluxes if needed
-        #if include_fluxes:
+        # add fluxes
         table['FNU_ZOGY'] = fnu_zogy.astype('float32')
         table['FNUERR_ZOGY'] = fnuerr_zogy.astype('float32')
+        table['FNUERRTOT_ZOGY'] = fnuerrtot_zogy.astype('float32')
 
 
         # add transient thumbnail images
@@ -1517,11 +1554,22 @@ def get_keys (header, ra_in, dec_in, tel):
     # infer the image zeropoint
     keys = ['EXPTIME', 'FILTER', 'DATE-OBS']
     exptime, filt, obsdate = [header[key] for key in keys]
+
     # get zeropoint from [header]
     if 'PC-ZP' in header:
         zp = header['PC-ZP']
     else:
         zp = None
+
+
+    # get zeropoint error from [header]
+    if 'PC-ZPERR' in header:
+        zperr = header['PC-ZPERR']
+    elif 'PC-ZPSTD' in header:
+        zperr = header['PC-ZPSTD']
+    else:
+        zperr = 0
+        log.warning ('keywords PC-ZPERR nor PC-ZPSTD found; adopting zperr=0')
 
 
     # determine object airmass, unless input image is a combined
@@ -1539,7 +1587,7 @@ def get_keys (header, ra_in, dec_in, tel):
     ext_coeff = zogy.get_par(set_zogy.ext_coeff,tel)[filt]
 
 
-    return exptime, filt, zp, airmass, ext_coeff
+    return exptime, filt, zp, zperr, airmass, ext_coeff
 
 
 ################################################################################
@@ -1875,6 +1923,7 @@ def create_col_descr(keys2add, header):
         'BACKGROUND':     '[e-] sky background estimated from sky annulus in red image',
         'MAG_OPT':        '[mag] optimal AB magnitude in red image',
         'MAGERR_OPT':     '[mag] optimal AB magnitude error in red image',
+        'MAGERRTOT_OPT':  '[mag] optimal AB magnitude total error in red image',
         'SNR_OPT':        'signal-to-noise ratio in red image',
         'LIMMAG_OPT':     '[mag] limiting AB magnitude at nsigma significance in red image',
         'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
@@ -1886,13 +1935,16 @@ def create_col_descr(keys2add, header):
         'SNR_APER':       'aperture signal-to-noise ratio within radius x FWHM in red image',
         'FNU_APER':       '[microJy] flux within radius x FWHM in red image',
         'FNUERR_APER':    '[microJy] flux error within radius x FWHM in red image',
+        'FNUERRTOT_APER': '[microJy] flux total error within radius x FWHM in red image',
         #
         'MAG_ZOGY':       '[mag] transient AB magnitude',
         'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
+        'MAGERRTOT_ZOGY': '[mag] transient AB magnitude total error',
         'SNR_ZOGY':       'transient signal-to-noise ratio',
         'LIMMAG_ZOGY':    '[mag] transient limiting AB magnitude at input nsigma significance',
         'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_ZOGY':    '[microJy] transient flux error',
+        'FNUERRTOT_ZOGY': '[microJy] transient flux total error',
         #
         'X_POS_REF':      '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
         'Y_POS_REF':      '[pix] y pixel coordinate corresponding to input RA/DEC in ref image',
@@ -1900,15 +1952,19 @@ def create_col_descr(keys2add, header):
         'BACKGROUND_REF': '[e-] sky background estimated from sky annulus in ref image',
         'MAG_OPT_REF':    '[mag] optimal AB magnitude in ref image',
         'MAGERR_OPT_REF': '[mag] optimal AB magnitude error in ref image',
+        'MAGERRTOT_OPT_REF': '[mag] optimal AB magnitude total error in ref image',
         'SNR_OPT_REF':    'signal-to-noise ratio in ref image',
         'LIMMAG_OPT_REF': '[mag] limiting AB magnitude at nsigma significance in ref image',
         'FNU_OPT_REF':    '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_OPT_REF': '[microJy] flux error in ref image',
+        'FNUERRTOT_OPT_REF': '[microJy] flux total error in ref image',
         'MAG_APER_REF':   '[mag] aperture AB mag within radius x FWHM in ref image',
         'MAGERR_APER_REF':'[mag] aperture AB mag error within radius x FWHM in ref image',
+        'MAGERRTOT_APER_REF':'[mag] aperture AB mag total error within radius x FWHM in ref image',
         'SNR_APER_REF':   'aperture signal-to-noise ratio within radius x FWHM in ref image',
         'FNU_APER_REF':   '[microJy] flux within radius x FWHM in ref image',
         'FNUERR_APER_REF':'[microJy] flux error within radius x FWHM in ref image',
+        'FNUERRTOT_APER_REF':'[microJy] flux total error within radius x FWHM in ref image',
         #
         'THUMBNAIL_RED':  'square thumbnail of the red image centered at input coords',
         'THUMBNAIL_REF':  'square thumbnail of the ref image centered at input coords',
@@ -1917,6 +1973,7 @@ def create_col_descr(keys2add, header):
         #
         'MAG_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude',
         'MAGERR_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude error',
+        'MAGERRTOT_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude total error',
         'SNR_ZOGY_PLUSREF':    'sum of ZOGY and ref image magnitude signal-to-noise ratio',
         #
         'TQC-FLAG':       'transient QC flag (green|yellow|orange|red)',
@@ -2144,7 +2201,7 @@ if __name__ == "__main__":
                         'table; default=1')
 
     par_default = 'MJD-OBS,OBJECT,FILTER,EXPTIME,S-SEEING,AIRMASS,PC-ZP,' \
-        'PC-ZPSTD,QC-FLAG'
+        'PC-ZPSTD,PC-ZPERR,QC-FLAG'
     parser.add_argument('--keys2add', type=str, default=par_default,
                         help='header keyword values to add to output '
                         'table; default={}'.format(par_default))
@@ -2781,9 +2838,9 @@ if __name__ == "__main__":
         bkg_global=args.bkg_global, apphot_radii=apphot_radii,
         bkg_radii=bkg_radii, bkg_objmask=args.bkg_local_objmask,
         bkg_limfrac=args.bkg_local_limfrac, pm_epoch=args.pm_epoch,
-        include_fluxes=args.include_fluxes, keys2add=keys2add,
-        keys2add_dtypes=keys2add_dtypes, thumbnails=args.thumbnails,
-        size_thumbnails=args.size_thumbnails, tel=tel, ncpus=ncpus)
+        keys2add=keys2add, keys2add_dtypes=keys2add_dtypes,
+        thumbnails=args.thumbnails, size_thumbnails=args.size_thumbnails,
+        tel=tel, ncpus=ncpus)
 
 
 
