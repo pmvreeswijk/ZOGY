@@ -54,7 +54,7 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
 # switch to use old or new (~June 2024) transient catalog definition
-use_new_transcat = {'ML1': False, 'BG': False}
+use_new_transcat = {'ML1': False, 'BG': True}
 
 
 #===============================================================================
@@ -96,7 +96,7 @@ fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
 #===============================================================================
 ML_calc_prob = True
 # version to use: '1'=Zafiirah (obsolete); '2'=Diederik; '3'=Diederik August 2024
-ML_version = '2'
+ML_version = '3'
 # dictionary of ML_models corresponding to ML_version
 ML_models = {
     #'1': '{}/meerCRAB_model/NET3_threshold_9_NRD'
@@ -260,12 +260,12 @@ gaia_epoch = 2016.0
 # the photometry on image sources in order of Gaia magnitude
 # brightness and remove the inferred PSF from the image before
 # continuing with the next source
-remove_psf = False
+remove_psf = True
 
 
 # switch to record fluxes in microJy instead of AB mags in full-source
 # catalog; only relevant if force_phot_Gaia is True
-record_fnu = {'ML1': False, 'BG': False}
+record_fnu = {'ML1': False, 'BG': True}
 
 
 # aperture photometry radii in units of FWHM
@@ -346,10 +346,10 @@ zp_default = {'ML1': {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4
 
 # for ML/BG only:
 # apply calibration per channel separately
-MLBG_phot_apply_chanzp = True
+MLBG_phot_apply_chanzp = {'ML1': False, 'BG': True}
 # minimum number of non-saturated stars required per channel; if less
 # stars are available (irrespective of their brightness), the channel
-# is calibrated using the image zeropoint
+# is calibrated using the image average zeropoint
 MLBG_phot_ncal_min_chan = 15
 
 
