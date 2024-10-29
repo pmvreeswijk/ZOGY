@@ -1522,10 +1522,14 @@ def add_refkeys (header_trans, header_ref):
         if key in header_ref:
 
             # replace string before the dash (S-, PC-, etc.) with R-
-            key_ref = 'R-{}'.format(key.split('-')[-1])
+            if key not in ['QC-FLAG']:
+                key_ref = 'R-{}'.format(key.split('-')[-1])
+            else:
+                key_ref = 'R-QCFLAG'
+
 
             # add to transient header
-            header_trans[key_ref] = header_ref[key]
+            header_trans[key_ref] = (header_ref[key], header_ref.comments[key])
 
         else:
 
@@ -3485,174 +3489,180 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
 
 
+
     # this [formats] dictionary contains the output format, the output
-    # column unit (and the desired format - commented out)
-    thumbnail_fmt = '{}E'.format(size_thumbnails**2)
+    # column unit and the column description
+    tn_fmt = '{}E'.format(size_thumbnails**2)
     formats = {
-        'NUMBER':              ['J', ''     ], #, 'int32'],
-        'X_POS':               ['E', 'pix'  ], #, 'flt32' ],
-        'Y_POS':               ['E', 'pix'  ], #, 'flt32' ],
-        'XVAR_POS':            ['E', 'pix^2'], #, 'flt16' ],
-        'YVAR_POS':            ['E', 'pix^2'], #, 'flt16' ],
-        'XYCOV_POS':           ['E', 'pix^2'], #, 'flt16' ],
-        'X_POS_SCORR':         ['E', 'pix'  ], #, 'flt32' ],
-        'Y_POS_SCORR':         ['E', 'pix'  ], #, 'flt32' ],
-        #'XVAR_POS_SCORR':      ['E', 'pix^2'], #, 'flt16' ],
-        #'YVAR_POS_SCORR':      ['E', 'pix^2'], #, 'flt16' ],
-        #'XYCOV_POS_SCORR':     ['E', 'pix^2'], #, 'flt16' ],
-        'CXX':                 ['E', 'pix^(-2)'], #, 'flt16' ],
-        'CYY':                 ['E', 'pix^(-2)'], #, 'flt16' ],
-        'CXY':                 ['E', 'pix^(-2)'], #, 'flt16' ],
-        'A':                   ['E', 'pix'  ], #, 'flt16' ],
-        'B':                   ['E', 'pix'  ], #, 'flt16' ],
-        'THETA':               ['E', 'deg'  ], #, 'flt16' ],
-        'ELONGATION':          ['E', ''     ], #, 'flt16' ],
-        'ELONG_SCORR':         ['E', ''     ], #, 'flt16' ],
-        'RA':                  ['D', 'deg'  ], #, 'flt64' ],
-        'DEC':                 ['D', 'deg'  ], #, 'flt64' ],
-        'RA_SCORR':            ['D', 'deg'  ], #, 'flt64' ],
-        'DEC_SCORR':           ['D', 'deg'  ], #, 'flt64' ],
-        'FLAGS':               ['I', ''     ], #, 'uint8' ],
-        'FLAGS_MASK':          ['I', ''     ], #, 'uint8' ],
-        'FLAGS_SCORR':         ['I', ''     ], #, 'uint8' ],
-        'FLAGS_MASK_SCORR':    ['I', ''     ], #, 'uint8' ],
-        'FWHM':                ['E', 'pix'  ], #, 'flt16' ],
-        'CLASS_STAR':          ['E', ''     ], #, 'flt16' ],
-        'E_FLUX_APER':         ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_APER':      ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_APER':            ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_APER':         ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_APER':      ['E', 'mag'  ], #, 'flt16' ],
-        'FNU_APER':            ['E', 'uJy'  ], #, 'flt32' ],
-        'FNUERR_APER':         ['E', 'uJy'  ], #, 'flt16' ],
-        'FNUERRTOT_APER':      ['E', 'uJy'  ], #, 'flt16' ],
-        'BACKGROUND':          ['E', 'electron'   ], #, 'flt16' ],
-        #'E_FLUX_MAX':          ['E', 'electron/s' ], #, 'flt16' ],
-        'E_FLUX_AUTO':         ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_AUTO':      ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_AUTO':            ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_AUTO':         ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_AUTO':      ['E', 'mag'  ], #, 'flt16' ],
-        'KRON_RADIUS':         ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_ISO':          ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_ISO':       ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_ISO':             ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_ISO':          ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_ISO':       ['E', 'mag'  ], #, 'flt16' ],
-        'ISOAREA':             ['I', 'pix^2'], #, 'flt16' ],
-        'MU_MAX':              ['E', 'mag/pix^2'], #, 'flt16' ],
-        'FLUX_RADIUS':         ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_PETRO':        ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_PETRO':     ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_PETRO':           ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_PETRO':        ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_PETRO':     ['E', 'mag'  ], #, 'flt16' ],
-        'PETRO_RADIUS':        ['E', 'pix'  ], #, 'flt16' ],
-        'E_FLUX_OPT':          ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_OPT':       ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_OPT':             ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_OPT':          ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_OPT':       ['E', 'mag'  ], #, 'flt16' ],
-        'FNU_OPT':             ['E', 'uJy'  ], #, 'flt32' ],
-        'FNUERR_OPT':          ['E', 'uJy'  ], #, 'flt16' ],
-        'FNUERRTOT_OPT':       ['E', 'uJy'  ], #, 'flt16' ],
+        'NUMBER':              ['J', ''         , 'Running object number'],
+        'X_POS':               ['E', 'pix'      , 'X-pixel coordinate'],
+        'Y_POS':               ['E', 'pix'      , 'Y-pixel coordinate'],
+        'XVAR_POS':            ['E', 'pix^2'    , 'Variance of X-pixel coordinate'],
+        'YVAR_POS':            ['E', 'pix^2'    , 'Variance of Y-pixel coordinate'],
+        'XYCOV_POS':           ['E', 'pix^2'    , 'Co-variance of XY position'],
+        'CXX':                 ['E', 'pix^(-2)' , 'CXX object ellipse parameter'],
+        'CYY':                 ['E', 'pix^(-2)' , 'CYY object ellipse parameter'],
+        'CXY':                 ['E', 'pix^(-2)' , 'CXY object ellipse parameter'],
+        'A':                   ['E', 'pix'      , 'Profile RMS along major axis'],
+        'B':                   ['E', 'pix'      , 'Profile RMS along minor axis'],
+        'THETA':               ['E', 'deg'      , 'Position angle (CCW/x)'],
+        'ELONGATION':          ['E', ''         , 'Elongation (=A/B)'],
+        'RA':                  ['D', 'deg'      , 'Right ascension (ICRS)'],
+        'DEC':                 ['D', 'deg'      , 'Declination (ICRS)'],
+        'FLAGS':               ['I', ''         , 'SExtractor extraction flags'],
+        'FLAGS_MASK':          ['I', ''         , 'OR-combined flags over ISO/inner profile in input mask'],
+        'FWHM':                ['E', 'pix'      , 'FWHM assuming a Gaussian core'],
+        'CLASS_STAR':          ['E', ''         , 'SExtractor star/galaxy classification'],
+        'E_FLUX_APER':         ['E', 'e-/s'     , 'Electron flux within radius x FWHM'],
+        'E_FLUXERR_APER':      ['E', 'e-/s'     , 'Electron flux error within radius x FWHM'],
+        'MAG_APER':            ['E', 'mag'      , 'Aperture AB mag within radius x FWHM'],
+        'MAGERR_APER':         ['E', 'mag'      , 'Aperture AB mag error within radius x FWHM'],
+        'MAGERRTOT_APER':      ['E', 'mag'      , 'Aperture AB mag total error (incl. ZP error) within radius x FWHM'],
+        'FNU_APER':            ['E', 'uJy'      , 'Aperture flux within radius x FWHM'],
+        'FNUERR_APER':         ['E', 'uJy'      , 'Aperture flux error within radius x FWHM'],
+        'FNUERRTOT_APER':      ['E', 'uJy'      , 'Aperture flux total error (incl. ZP error) within radius x FWHM'],
+        'BACKGROUND':          ['E', 'e-'       , 'Sky background estimated from sky annulus'],
+        #'E_FLUX_MAX':          ['E', 'e-/s'    ],
+        'E_FLUX_AUTO':         ['E', 'e-/s'     , 'Electron flux within a Kron-like elliptical aperture'],
+        'E_FLUXERR_AUTO':      ['E', 'e-/s'     , 'Electron flux error within a Kron-like elliptical aperture'],
+        'MAG_AUTO':            ['E', 'mag'      , 'AB mag within a Kron-like elliptical aperture'],
+        'MAGERR_AUTO':         ['E', 'mag'      , 'AB mag error within a Kron-like elliptical aperture'],
+        'MAGERRTOT_AUTO':      ['E', 'mag'      , 'AB mag total error (incl. ZP error) within a Kron-like elliptical aperture'],
+        'KRON_RADIUS':         ['E', 'pix'      , 'Kron aperture(s)'],
+        'E_FLUX_ISO':          ['E', 'e-/s'     , 'Isophotal electron flux'],
+        'E_FLUXERR_ISO':       ['E', 'e-/s'     , 'Isophotal electron flux error'],
+        'MAG_ISO':             ['E', 'mag'      , 'Isophotal AB mag'],
+        'MAGERR_ISO':          ['E', 'mag'      , 'Isophotal AB mag error'],
+        'MAGERRTOT_ISO':       ['E', 'mag'      , 'Isophotal AB mag total error (incl. ZP error)'],
+        'ISOAREA':             ['I', 'pix^2'    , 'Isophotal area above analysis threshold'],
+        'MU_MAX':              ['E', 'mag/pix^2', 'Peak surface brightness above background'],
+        'FLUX_RADIUS':         ['E', 'pix'      , '50% Fraction-of-light radius'],
+        'E_FLUX_PETRO':        ['E', 'e-/s'     , 'Electron flux within a Petrosian-like elliptical aperture'],
+        'E_FLUXERR_PETRO':     ['E', 'e-/s'     , 'Electron flux error within a Petrosian-like elliptical aperture'],
+        'MAG_PETRO':           ['E', 'mag'      , 'AB mag within a Petrosian-like elliptical aperture'],
+        'MAGERR_PETRO':        ['E', 'mag'      , 'AB mag error within a Petrosian-like elliptical aperture'],
+        'MAGERRTOT_PETRO':     ['E', 'mag'      , 'AB mag total error (incl. ZP error) within a Petrosian-like elliptical aperture'],
+        'PETRO_RADIUS':        ['E', 'pix'      , 'Petrosian aperture(s)'],
+        'E_FLUX_OPT':          ['E', 'e-/s'     , 'Optimal electron flux'],
+        'E_FLUXERR_OPT':       ['E', 'e-/s'     , 'Optimal electron flux error'],
+        'MAG_OPT':             ['E', 'mag'      , 'Optimal AB mag'],
+        'MAGERR_OPT':          ['E', 'mag'      , 'Optimal AB mag error'],
+        'MAGERRTOT_OPT':       ['E', 'mag'      , 'Optimal AB mag total error (incl. ZP error)'],
+        'FNU_OPT':             ['E', 'uJy'      , 'Optimal flux'],
+        'FNUERR_OPT':          ['E', 'uJy'      , 'Optimal flux error'],
+        'FNUERRTOT_OPT':       ['E', 'uJy'      , 'Optimal flux total error (incl. ZP error)'],
         # transient:
-        'X_PEAK':              ['I', 'pix'  ], #, 'int16' ],
-        'Y_PEAK':              ['I', 'pix'  ], #, 'int16' ],
-        'CHANNEL':             ['I', ''  ], #, 'uint8' ],
-        'RA_PEAK':             ['D', 'deg'  ], #, 'flt64' ],
-        'DEC_PEAK':            ['D', 'deg'  ], #, 'flt64' ],
-        'SNR_ZOGY':            ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_ZOGY':         ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_ZOGY':      ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_ZOGY':            ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_ZOGY':         ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_ZOGY':      ['E', 'mag'  ], #, 'flt16' ],
-        'FNU_ZOGY':            ['E', 'uJy'  ], #, 'flt32' ],
-        'FNUERR_ZOGY':         ['E', 'uJy'  ], #, 'flt16' ],
-        'FNUERRTOT_ZOGY':      ['E', 'uJy'  ], #, 'flt16' ],
-        'X_PSF_D':             ['E', 'pix'  ], #, 'flt32' ],
-        'XERR_PSF_D':          ['E', 'pix'  ], #, 'flt32' ],
-        'Y_PSF_D':             ['E', 'pix'  ], #, 'flt32' ],
-        'YERR_PSF_D':          ['E', 'pix'  ], #, 'flt32' ],
-        'RA_PSF_D':            ['D', 'deg'  ], #, 'flt64' ],
-        'DEC_PSF_D':           ['D', 'deg'  ], #, 'flt64' ],
-        'E_FLUX_PSF_D':        ['E', 'electron/s' ], #, 'flt32' ],
-        'E_FLUXERR_PSF_D':     ['E', 'electron/s' ], #, 'flt16' ],
-        'MAG_PSF_D':           ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_PSF_D':        ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_PSF_D':     ['E', 'mag'  ], #, 'flt16' ],
-        'FNU_PSF_D':           ['E', 'uJy'  ], #, 'flt32' ],
-        'FNUERR_PSF_D':        ['E', 'uJy'  ], #, 'flt16' ],
-        'FNUERRTOT_PSF_D':     ['E', 'uJy'  ], #, 'flt16' ],
-        'CHI2_PSF_D':          ['E', ''     ], #, 'flt32' ],
-        'X_MOFFAT_D':          ['E', 'pix'  ], #, 'flt32' ],
-        'XERR_MOFFAT_D':       ['E', 'pix'  ], #, 'flt32' ],
-        'Y_MOFFAT_D':          ['E', 'pix'  ], #, 'flt32' ],
-        'YERR_MOFFAT_D':       ['E', 'pix'  ], #, 'flt32' ],
-        'RA_MOFFAT_D':         ['D', 'deg'  ], #, 'flt64' ],
-        'DEC_MOFFAT_D':        ['D', 'deg'  ], #, 'flt64' ],
-        'FWHM_MOFFAT_D':       ['E', 'pix'  ], #, 'flt32' ],
-        'ELONG_MOFFAT_D':      ['E', ''     ], #, 'flt32' ],
-        'CHI2_MOFFAT_D':       ['E', ''     ], #, 'flt32' ],
-        'X_GAUSS_D':           ['E', 'pix'  ], #, 'flt32' ],
-        'XERR_GAUSS_D':        ['E', 'pix'  ], #, 'flt32' ],
-        'Y_GAUSS_D':           ['E', 'pix'  ], #, 'flt32' ],
-        'YERR_GAUSS_D':        ['E', 'pix'  ], #, 'flt32' ],
-        'RA_GAUSS_D':          ['D', 'deg'  ], #, 'flt64' ],
-        'DEC_GAUSS_D':         ['D', 'deg'  ], #, 'flt64' ],
-        'FWHM_GAUSS_D':        ['E', 'pix'  ], #, 'flt32' ],
-        'ELONG_GAUSS_D':       ['E', ''     ], #, 'flt32' ],
-        'CHI2_GAUSS_D':        ['E', ''     ], #, 'flt32' ],
-        'CLASS_REAL':          ['E', ''     ], #, 'flt32' ],
-        'X_FAKE':              ['E', 'pix'  ], #, 'flt32' ],
-        'Y_FAKE':              ['E', 'pix'  ], #, 'flt32' ],
-        'SNR_FAKE_IN':         ['E', ''     ], #, 'flt32' ],
-        'E_FLUX_FAKE_IN':      ['E', 'electron/s' ], #, 'flt32' ],
-        'MAG_FAKE_IN':         ['E', 'mag'  ], #, 'flt32' ],
-        'FNU_FAKE_IN':         ['E', 'uJy'  ], #, 'flt32' ],
-        'THUMBNAIL_RED':       [thumbnail_fmt, 'electron' ], #, 'flt16' ],
-        'THUMBNAIL_REF':       [thumbnail_fmt, 'electron' ], #, 'flt16' ],
-        'THUMBNAIL_D':         [thumbnail_fmt, 'electron' ], #, 'flt16' ],
-        'THUMBNAIL_SCORR':     [thumbnail_fmt, 'sigma'], #, 'flt16' ]
+        # ==========
+        'X_PEAK':              ['I', 'pix'      , 'Integer X-pixel coordinate of peak in significance/Scorr image'],
+        'Y_PEAK':              ['I', 'pix'      , 'Integer Y-pixel coordinate of peak in significance/Scorr image'],
+        'CHANNEL':             ['I', ''         , 'ML/BG read-out channel number (based on X_PEAK, Y_PEAK)'],
+        'RA_PEAK':             ['D', 'deg'      , 'Right ascension (ICRS; based on X_PEAK, Y_PEAK)'],
+        'DEC_PEAK':            ['D', 'deg'      , 'Declination (ICRS, based on X_PEAK, Y_PEAK)'],
+        'SNR_ZOGY':            ['E', ''         , 'Transient signal-to-noise ratio (=peak value in significance/Scorr image'],
+        'E_FLUX_ZOGY':         ['E', 'e-/s'     , 'Transient PSF electron flux'],
+        'E_FLUXERR_ZOGY':      ['E', 'e-/s'     , 'Transient PSF electron flux error'],
+        'MAG_ZOGY':            ['E', 'mag'      , 'Transient PSF AB mag'],
+        'MAGERR_ZOGY':         ['E', 'mag'      , 'Transient PSF AB mag error'],
+        'MAGERRTOT_ZOGY':      ['E', 'mag'      , 'Transient PSF AB mag total error (incl. ZP error)'],
+        'FNU_ZOGY':            ['E', 'uJy'      , 'Transient PSF flux'],
+        'FNUERR_ZOGY':         ['E', 'uJy'      , 'Transient PSF flux error'],
+        'FNUERRTOT_ZOGY':      ['E', 'uJy'      , 'Transient PSF flux total error (incl. ZP error)'],
         #
-        'SOURCE_ID':           ['K', ''     ], #, 'int64'],
-        'LIMMAG_OPT':          ['E', 'mag'  ], #, 'flt32' ],
-        'SNR_OPT':             ['E', ''     ], #, 'flt32' ],
+        'X_POS_SCORR':         ['E', 'pix'      , 'X-pixel coordinate in significance/Scorr image'],
+        'Y_POS_SCORR':         ['E', 'pix'      , 'Y-pixel coordinate in significance/Scorr image'],
+        'RA_SCORR':            ['D', 'deg'      , 'Right ascension (ICRS; based on X_POS_SCORR, Y_POS_SCORR)'],
+        'DEC_SCORR':           ['D', 'deg'      , 'Declination (ICRS; based on X_POS_SCORR, Y_POS_SCORR)'],
+        'ELONG_SCORR':         ['E', ''         , 'Elongation in significance/Scorr image'],
+        'FLAGS_SCORR':         ['I', ''         , 'SExtractor extraction flags in significance/Scorr image'],
+        'FLAGS_MASK_SCORR':    ['I', ''         , 'OR-combined flags over inner profile in input new and reference masks'],
         #
-        'SOURCE_ID_NEAR_GAIA': ['K', ''     ], #, 'int64'],
-        'SEP_NEAR_GAIA':       ['E', 'arcsec'], #, 'flt32' ],
-        'MAG_G_NEAR_GAIA':     ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_G_NEAR_GAIA':  ['E', 'mag'  ], #, 'flt32' ],
-        'SEP_BRIGHT_GAIA':     ['E', 'arcsec'], #, 'flt32' ],
-        'MAG_G_BRIGHT_GAIA':   ['E', 'mag'  ], #, 'flt32' ],
+        'X_PSF_D':             ['E', 'pix'      , 'X-pixel coordinate from PSF fit to difference image'],
+        'XERR_PSF_D':          ['E', 'pix'      , 'X-pixel coordinate error from PSF fit to difference image'],
+        'Y_PSF_D':             ['E', 'pix'      , 'Y-pixel coordinate from PSF fit to difference image'],
+        'YERR_PSF_D':          ['E', 'pix'      , 'Y-pixel coordinate error from PSF fit to difference image'],
+        'RA_PSF_D':            ['D', 'deg'      , 'Right ascension (ICRS; based on X_PSF_D, Y_PSF_D)'],
+        'DEC_PSF_D':           ['D', 'deg'      , 'Declination (ICRS; based on X_PSF_D, Y_PSF_D)'],
+        'E_FLUX_PSF_D':        ['E', 'e-/s'     , 'Transient electron flux from PSF fit to difference image'],
+        'E_FLUXERR_PSF_D':     ['E', 'e-/s'     , 'Transient electron flux error from PSF fit to difference image'],
+        'MAG_PSF_D':           ['E', 'mag'      , 'Transient AB mag from PSF fit to difference image'],
+        'MAGERR_PSF_D':        ['E', 'mag'      , 'Transient AB mag error from PSF fit to difference image'],
+        'MAGERRTOT_PSF_D':     ['E', 'mag'      , 'Transient AB mag total error (incl. ZP error) from PSF fit to difference image'],
+        'FNU_PSF_D':           ['E', 'uJy'      , 'Transient flux from PSF fit to difference image'],
+        'FNUERR_PSF_D':        ['E', 'uJy'      , 'Transient flux error from PSF fit to difference image'],
+        'FNUERRTOT_PSF_D':     ['E', 'uJy'      , 'Transient flux total error (incl. ZP error) from PSF fit to difference image'],
+        'CHI2_PSF_D':          ['E', ''         , 'Reduced chi-square of PSF fit to difference image'],
         #
-        'NUMBER_NEAR_REF':     ['J', ''     ], #, 'int32' ],
-        'SEP_NEAR_REF':        ['E', 'arcsec'], #, 'flt32' ],
-        'FWHM_NEAR_REF':       ['E', 'pix'  ], #, 'flt32' ],
-        'ELONG_NEAR_REF':      ['E', ''     ], #, 'flt32' ],
-        'CLASS_STAR_NEAR_REF': ['E', ''     ], #, 'flt32' ],
-        'MAG_AUTO_NEAR_REF':   ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_AUTO_NEAR_REF':['E', 'mag'  ], #, 'flt32' ],
-        'FNU_OPT_REF':         ['E', 'uJy'  ], #, 'flt32' ],
-        'FNUERR_OPT_REF':      ['E', 'uJy'  ], #, 'flt16' ],
-        'FNUERRTOT_OPT_REF':   ['E', 'uJy'  ], #, 'flt16' ],
-        'MAG_OPT_REF':         ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_OPT_REF':      ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_OPT_REF':   ['E', 'mag'  ], #, 'flt16' ],
-        'FLAGS_MASK_REF':      ['I', ''     ], #, 'uint8' ],
+        'X_MOFFAT_D':          ['E', 'pix'      , 'X-pixel coordinate from Moffat fit to difference image'],
+        'XERR_MOFFAT_D':       ['E', 'pix'      , 'X-pixel coordinate error from Moffat fit to difference image'],
+        'Y_MOFFAT_D':          ['E', 'pix'      , 'Y-pixel coordinate from Moffat fit to difference image'],
+        'YERR_MOFFAT_D':       ['E', 'pix'      , 'Y-pixel coordinate error from Moffat fit to difference image'],
+        'RA_MOFFAT_D':         ['D', 'deg'      , 'Right ascension (ICRS; based on X_MOFFAT_D, Y_MOFFAT_D)'],
+        'DEC_MOFFAT_D':        ['D', 'deg'      , 'Declination (ICRS; based on X_MOFFAT_D, Y_MOFFAT_D)'],
+        'FWHM_MOFFAT_D':       ['E', 'pix'      , 'Average FWHM from Moffat fit to difference image'],
+        'ELONG_MOFFAT_D':      ['E', ''         , 'Elongation from Moffat fit to difference image'],
+        'CHI2_MOFFAT_D':       ['E', ''         , 'Reduced chi-square of Moffat fit to difference image'],
         #
-        'SEP_NEAR_RED':        ['E', 'arcsec'], #, 'flt32' ],
-        'FWHM_NEAR_RED':       ['E', 'pix'  ], #, 'flt32' ],
-        'ELONG_NEAR_RED':      ['E', ''     ], #, 'flt32' ],
-        'CLASS_STAR_NEAR_RED': ['E', ''     ], #, 'flt32' ],
-        'FNU_OPT_RED':         ['E', 'uJy'  ], #, 'flt32' ],
-        'FNUERR_OPT_RED':      ['E', 'uJy'  ], #, 'flt16' ],
-        'FNUERRTOT_OPT_RED':   ['E', 'uJy'  ], #, 'flt16' ],
-        'MAG_OPT_RED':         ['E', 'mag'  ], #, 'flt32' ],
-        'MAGERR_OPT_RED':      ['E', 'mag'  ], #, 'flt16' ],
-        'MAGERRTOT_OPT_RED':   ['E', 'mag'  ], #, 'flt16' ],
-        'FLAGS_MASK_RED':      ['I', ''     ], #, 'uint8' ],
+        'X_GAUSS_D':           ['E', 'pix'      , 'X-pixel coordinate from Gauss fit to difference image'],
+        'XERR_GAUSS_D':        ['E', 'pix'      , 'X-pixel coordinate error from Gauss fit to difference image'],
+        'Y_GAUSS_D':           ['E', 'pix'      , 'Y-pixel coordinate from Gauss fit to difference image'],
+        'YERR_GAUSS_D':        ['E', 'pix'      , 'Y-pixel coordinate error from Gauss fit to difference image'],
+        'RA_GAUSS_D':          ['D', 'deg'      , 'Right ascension (ICRS; based on X_GAUSS_D, Y_GAUSS_D)'],
+        'DEC_GAUSS_D':         ['D', 'deg'      , 'Declination (ICRS; based on X_GAUSS_D, Y_GAUSS_D)'],
+        'FWHM_GAUSS_D':        ['E', 'pix'      , 'Average FWHM from Gauss fit to difference image'],
+        'ELONG_GAUSS_D':       ['E', ''         , 'Elongation from Gauss fit to difference image'],
+        'CHI2_GAUSS_D':        ['E', ''         , 'Reduced chi-square of Gauss fit to difference image'],
+        #
+        'CLASS_REAL':          ['E', ''         , 'Machine-learning probability that transient is real'],
+        'X_FAKE':              ['E', 'pix'      , 'X-pixel coordinate of inserted/fake transient'],
+        'Y_FAKE':              ['E', 'pix'      , 'Y-pixel coordinate of inserted/fake transient'],
+        'SNR_FAKE_IN':         ['E', ''         , 'Signal-to-noise ratio of inserted/fake transient'],
+        'E_FLUX_FAKE_IN':      ['E', 'e-/s'     , 'Electron flux of inserted/fake transient'],
+        'MAG_FAKE_IN':         ['E', 'mag'      , 'AB mag of inserted/fake transient'],
+        'FNU_FAKE_IN':         ['E', 'uJy'      , 'Flux of inserted/fake transient'],
+        'THUMBNAIL_RED':       [tn_fmt, 'e-'    , 'Reduced image thumbnail centered on transient'],
+        'THUMBNAIL_REF':       [tn_fmt, 'e-'    , 'Reference image thumbnail centered on transient'],
+        'THUMBNAIL_D':         [tn_fmt, 'e-'    , 'Difference image thumbnail centered on transient'],
+        'THUMBNAIL_SCORR':     [tn_fmt, 'sigma' , 'Significance/Scorr image thumbnail centered on transient'],
+        #
+        'SOURCE_ID':           ['K', ''         , 'Gaia source ID'],
+        'LIMMAG_OPT':          ['E', 'mag'      , 'Optimal limiting AB magnitude'],
+        'SNR_OPT':             ['E', ''         , 'Optimal signal-to-noise ratio'],
+        #
+        'SOURCE_ID_NEAR_GAIA': ['K', ''         , 'Source ID of Gaia source nearest to the transient'],
+        'SEP_NEAR_GAIA':       ['E', 'arcsec'   , 'Separation to nearest Gaia source'],
+        'MAG_G_NEAR_GAIA':     ['E', 'mag'      , 'Gaia G-band magnitude (Vega) of nearest source'],
+        'MAGERR_G_NEAR_GAIA':  ['E', 'mag'      , 'Gaia G-band magnitude error (Vega) of nearest source'],
+        'SEP_BRIGHT_GAIA':     ['E', 'arcsec'   , 'Separation to nearest bright (G<14) Gaia source'],
+        'MAG_G_BRIGHT_GAIA':   ['E', 'mag'      , 'Gaia DR3 G-band magnitude of nearest bright (G<14) source'],
+        #
+        'NUMBER_NEAR_REF':     ['J', ''         , 'Running number of source in reference image nearest to the transient'],
+        'SEP_NEAR_REF':        ['E', 'arcsec'   , 'Separation to nearest source in reference image'],
+        'FWHM_NEAR_REF':       ['E', 'pix'      , 'FWHM of nearest source in reference image'],
+        'ELONG_NEAR_REF':      ['E', ''         , 'Elongation of nearest source in reference image'],
+        'CLASS_STAR_NEAR_REF': ['E', ''         , 'SExtractor star/galaxy classification of nearest source in reference image'],
+        'MAG_AUTO_NEAR_REF':   ['E', 'mag'      , 'Kron/AUTO AB mag of nearest source in reference image'],
+        'MAGERR_AUTO_NEAR_REF':['E', 'mag'      , 'Kron/AUTO AB mag error of nearest source in reference image'],
+        'MAGERRTOT_AUTO_NEAR_REF':['E', 'mag'   , 'Kron/AUTO AB mag total error (incl. ZP error) of nearest source in reference image'],
+        'FNU_OPT_REF':         ['E', 'uJy'      , 'Forced-photometry optimal flux in reference image at transient position'],
+        'FNUERR_OPT_REF':      ['E', 'uJy'      , 'Forced-photometry optimal flux error in reference image at transient position'],
+        'FNUERRTOT_OPT_REF':   ['E', 'uJy'      , 'Forced-photometry optimal flux total error (incl. ZP error) in reference image at transient position'],
+        'MAG_OPT_REF':         ['E', 'mag'      , 'Forced-photometry optimal AB mag in reference image at transient position'],
+        'MAGERR_OPT_REF':      ['E', 'mag'      , 'Forced-photometry optimal AB mag error in reference image at transient position'],
+        'MAGERRTOT_OPT_REF':   ['E', 'mag'      , 'Forced-photometry optimal AB mag total error (incl. ZP error) in reference image at transient position'],
+        'FLAGS_MASK_REF':      ['I', ''         , 'OR-combined flags over inner profile in reference image mask'],
+        #
+        #'NUMBER_NEAR_RED':     ['J', ''         , 'Running number of full-source catalogue source nearest to the transient'],
+        'SEP_NEAR_RED':        ['E', 'arcsec'   , 'Separation to nearest source in reduced image'],
+        'FWHM_NEAR_RED':       ['E', 'pix'      , 'FWHM of nearest source in reduced image'],
+        'ELONG_NEAR_RED':      ['E', ''         , 'Elongation of nearest source in reduced image'],
+        'CLASS_STAR_NEAR_RED': ['E', ''         , 'SExtractor star/galaxy classification of nearest source in reduced image'],
+        'FNU_OPT_RED':         ['E', 'uJy'      , 'Forced-photometry optimal flux in reduced image at transient position'],
+        'FNUERR_OPT_RED':      ['E', 'uJy'      , 'Forced-photometry optimal flux error in reduced image at transient position'],
+        'FNUERRTOT_OPT_RED':   ['E', 'uJy'      , 'Forced-photometry optimal flux total error (incl. ZP error) in reduced image at transient position'],
+        'MAG_OPT_RED':         ['E', 'mag'      , 'Forced-photometry optimal AB mag in reduced image at transient position'],
+        'MAGERR_OPT_RED':      ['E', 'mag'      , 'Forced-photometry optimal AB mag error in reduced image at transient position'],
+        'MAGERRTOT_OPT_RED':   ['E', 'mag'      , 'Forced-photometry optimal AB mag total error (incl. ZP error) in reduced image at transient position'],
+        'FLAGS_MASK_RED':      ['I', ''         , 'OR-combined flags over inner profile in reduced image mask'],
     }
 
 
@@ -3835,10 +3845,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         # split into the separate apertures, and the aperture sizes
         # enter in the new key name as well.
 
-        # if exposure time is non-zero, modify all 'electron/s'
-        # columns accordingly
+        # if exposure time is non-zero, modify all 'e-/s' or
+        # 'electron/s' columns accordingly
         if exptime != 0:
-            if formats[key][1]=='electron/s' or formats[key][1]=='e-/s':
+            if '/s' in formats[key][1]:
                 data_key /= exptime
                 #key_new = 'E-{}'.format(key_new)
                 key_new = '{}'.format(key_new)
@@ -3898,6 +3908,31 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
     # create hdu from columns
     hdu = fits.BinTableHDU.from_columns(columns, character_as_bytes=True)
     mem_use (label='after hdu creation in format_cat')
+
+
+    # add column descriptions to hdu header; column names are in the
+    # TTYPE[i+1] keywords and the descriptions should be saved in
+    # TCOMM[i+1]
+    for ic, col0 in enumerate(hdu.data.dtype.names):
+        ncol = ic + 1
+        # edit aperture names
+        if 'APER' in col0:
+            if 'E_' in col0:
+                col = '_'.join(col0.split('_')[:3])
+            else:
+                col = '_'.join(col0.split('_')[:2])
+        else:
+            col = col0
+
+        # check if col is present in formats
+        if col in formats:
+            descr = formats[col][2]
+        else:
+            log.warning ('{} not in formats dictionary'.format(col))
+            descr = ''
+
+        # update relevant header keyword COMM
+        hdu.header['TCOMM{}'.format(ncol)] = descr
 
 
 
@@ -3982,52 +4017,6 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
 
     return
-
-
-################################################################################
-
-def create_col_descr(keys2add, header):
-
-    col_descr = {
-        'SOURCE_ID':      'Gaia DR3 source id',
-        'X_POS':          '[pix] x pixel coordinate',
-        'Y_POS':          '[pix] y pixel coordinate',
-        'FLAGS_MASK':     'OR-combined flagged pixels within 2xFWHM of X_POS, Y_POS',
-        'BACKGROUND':     '[e-] estimated sky background at X_POS, Y_POS',
-        'FNU_APER':       '[microJy] flux within radius x FWHM in red image',
-        'FNUERR_APER':    '[microJy] flux error within radius x FWHM in red image',
-        'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
-        'FNUERR_OPT':     '[microJy] flux error in red image',
-        #
-        'NUMBER':         'running object number',
-        'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
-        'FNUERR_ZOGY':    '[microJy] transient flux error',
-        'MAG_ZOGY':       '[mag] transient AB magnitude',
-        'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
-        #
-        'THUMBNAIL_RED':  'square thumbnail of the red image centered at input coords',
-        'THUMBNAIL_REF':  'square thumbnail of the ref image centered at input coords',
-        'THUMBNAIL_D':    'square thumbnail of the difference image centered at input coords',
-        'THUMBNAIL_SCORR':'square thumbnail of the significance image centered at input coords',
-        #
-    }
-
-
-    # loop keywords of table header, where the column names are in the
-    # TTYPE[i+1] keywords and the descriptions are in TCOMM[i+1]
-    for i in range(header['TFIELDS']):
-        key = header['TTYPE{}'.format(i+1)]
-        # check if key is in the input keys2add
-        if key in keys2add:
-            # check if relevant TCOMM is in header
-            key_descr = 'TCOMM{}'.format(i+1)
-            if key_descr in header:
-                # if so, add its description to col_descr
-                descr = header[key_descr]
-                col_descr[key] = descr
-
-
-    return col_descr
 
 
 ################################################################################
