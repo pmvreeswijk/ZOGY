@@ -1923,28 +1923,28 @@ def create_col_descr(keys2add, header):
         'BACKGROUND':     '[e-] sky background estimated from sky annulus in red image',
         'MAG_OPT':        '[mag] optimal AB magnitude in red image',
         'MAGERR_OPT':     '[mag] optimal AB magnitude error in red image',
-        'MAGERRTOT_OPT':  '[mag] optimal AB magnitude total error in red image',
+        'MAGERRTOT_OPT':  '[mag] optimal AB magnitude total error (incl. ZP error) in red image',
         'SNR_OPT':        'signal-to-noise ratio in red image',
         'LIMMAG_OPT':     '[mag] limiting AB magnitude at nsigma significance in red image',
         'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_OPT':     '[microJy] flux error in red image',
-        'FNUERRTOT_OPT':  '[microJy] flux total error (incl. zeropoint error) in red image',
+        'FNUERRTOT_OPT':  '[microJy] flux total error (incl. ZP error) in red image',
         'MAG_APER':       '[mag] aperture AB mag within radius x FWHM in red image',
         'MAGERR_APER':    '[mag] aperture AB mag error within radius x FWHM in red image',
-        'MAGERRTOT_APER': '[mag] aperture AB mag total error (incl. zeropoint error) within radius x FWHM in red image',
+        'MAGERRTOT_APER': '[mag] aperture AB mag total error (incl. ZP error) within radius x FWHM in red image',
         'SNR_APER':       'aperture signal-to-noise ratio within radius x FWHM in red image',
-        'FNU_APER':       '[microJy] flux within radius x FWHM in red image',
-        'FNUERR_APER':    '[microJy] flux error within radius x FWHM in red image',
-        'FNUERRTOT_APER': '[microJy] flux total error within radius x FWHM in red image',
+        'FNU_APER':       '[microJy] aperture flux within radius x FWHM in red image',
+        'FNUERR_APER':    '[microJy] aperture flux error within radius x FWHM in red image',
+        'FNUERRTOT_APER': '[microJy] aperture flux total error (incl. ZP error) within radius x FWHM in red image',
         #
         'MAG_ZOGY':       '[mag] transient AB magnitude',
         'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
-        'MAGERRTOT_ZOGY': '[mag] transient AB magnitude total error',
+        'MAGERRTOT_ZOGY': '[mag] transient AB magnitude total error (incl. ZP error)',
         'SNR_ZOGY':       'transient signal-to-noise ratio',
         'LIMMAG_ZOGY':    '[mag] transient limiting AB magnitude at input nsigma significance',
         'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_ZOGY':    '[microJy] transient flux error',
-        'FNUERRTOT_ZOGY': '[microJy] transient flux total error',
+        'FNUERRTOT_ZOGY': '[microJy] transient flux total error  (incl. ZP error)',
         #
         'X_POS_REF':      '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
         'Y_POS_REF':      '[pix] y pixel coordinate corresponding to input RA/DEC in ref image',
@@ -1952,19 +1952,19 @@ def create_col_descr(keys2add, header):
         'BACKGROUND_REF': '[e-] sky background estimated from sky annulus in ref image',
         'MAG_OPT_REF':    '[mag] optimal AB magnitude in ref image',
         'MAGERR_OPT_REF': '[mag] optimal AB magnitude error in ref image',
-        'MAGERRTOT_OPT_REF': '[mag] optimal AB magnitude total error in ref image',
+        'MAGERRTOT_OPT_REF': '[mag] optimal AB magnitude total error (incl. ZP error) in ref image',
         'SNR_OPT_REF':    'signal-to-noise ratio in ref image',
         'LIMMAG_OPT_REF': '[mag] limiting AB magnitude at nsigma significance in ref image',
         'FNU_OPT_REF':    '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.9)',
         'FNUERR_OPT_REF': '[microJy] flux error in ref image',
-        'FNUERRTOT_OPT_REF': '[microJy] flux total error in ref image',
+        'FNUERRTOT_OPT_REF': '[microJy] flux total error (incl. ZP error) in ref image',
         'MAG_APER_REF':   '[mag] aperture AB mag within radius x FWHM in ref image',
         'MAGERR_APER_REF':'[mag] aperture AB mag error within radius x FWHM in ref image',
-        'MAGERRTOT_APER_REF':'[mag] aperture AB mag total error within radius x FWHM in ref image',
+        'MAGERRTOT_APER_REF':'[mag] aperture AB mag total error (incl. ZP error) within radius x FWHM in ref image',
         'SNR_APER_REF':   'aperture signal-to-noise ratio within radius x FWHM in ref image',
-        'FNU_APER_REF':   '[microJy] flux within radius x FWHM in ref image',
-        'FNUERR_APER_REF':'[microJy] flux error within radius x FWHM in ref image',
-        'FNUERRTOT_APER_REF':'[microJy] flux total error within radius x FWHM in ref image',
+        'FNU_APER_REF':   '[microJy] aperture flux within radius x FWHM in ref image',
+        'FNUERR_APER_REF':'[microJy] aperture flux error within radius x FWHM in ref image',
+        'FNUERRTOT_APER_REF':'[microJy] aperture flux total error (incl. ZP error) within radius x FWHM in ref image',
         #
         'THUMBNAIL_RED':  'square thumbnail of the red image centered at input coords',
         'THUMBNAIL_REF':  'square thumbnail of the ref image centered at input coords',
@@ -1973,14 +1973,14 @@ def create_col_descr(keys2add, header):
         #
         'MAG_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude',
         'MAGERR_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude error',
-        'MAGERRTOT_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude total error',
+        'MAGERRTOT_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude total error (incl. ZP errors)',
         'SNR_ZOGY_PLUSREF':    'sum of ZOGY and ref image magnitude signal-to-noise ratio',
         #
         'TQC-FLAG':       'transient QC flag (green|yellow|orange|red)',
     }
 
 
-    # loop keywords of table header, where the column names are in the
+    # loop keywords of input header, where the column names are in the
     # TTYPE[i+1] keywords and the descriptions are in TCOMM[i+1]
     for i in range(header['TFIELDS']):
         key = header['TTYPE{}'.format(i+1)]
