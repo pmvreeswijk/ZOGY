@@ -112,7 +112,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.6'
+__version__ = '1.3.7'
 
 
 ################################################################################
@@ -3910,30 +3910,8 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
     mem_use (label='after hdu creation in format_cat')
 
 
-    # add column descriptions to hdu header; column names are in the
-    # TTYPE[i+1] keywords and the descriptions should be saved in
-    # TCOMM[i+1]
-    for ic, col0 in enumerate(hdu.data.dtype.names):
-        ncol = ic + 1
-        # edit aperture names
-        if 'APER' in col0:
-            if 'E_' in col0:
-                col = '_'.join(col0.split('_')[:3])
-            else:
-                col = '_'.join(col0.split('_')[:2])
-        else:
-            col = col0
-
-        # check if col is present in formats
-        if col in formats:
-            descr = formats[col][2]
-        else:
-            log.warning ('{} not in formats dictionary'.format(col))
-            descr = ''
-
-        # update relevant header keyword COMM
-        hdu.header['TCOMM{}'.format(ncol)] = descr
-
+    # add column descriptions
+    add_col_descriptions (hdu, formats)
 
 
     # save light version of transient catalog before heavy
@@ -3970,6 +3948,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         mem_use (label='after hdu creation including thumbnails in format_cat')
 
 
+        # add column descriptions
+        add_col_descriptions (hdu, formats)
+
+
         # loop thumbnail data and add them to the hdu
         for i_tn, key in enumerate(dict_thumbnails.keys()):
 
@@ -3985,16 +3967,6 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                 if not get_par(set_zogy.keep_tmp,tel):
                     remove_files ([dict_thumbnails[key]])
 
-
-
-    if False:
-        # update column units in header
-        for ic, col in enumerate(hdu.data.dtype.names):
-            unit_str = [formats[k][1] for k in formats.keys()
-                        if k.split('_')[0:2]==col.split('_')[0:2]][0]
-            if len(unit_str) > 0:
-                hdu.header.set('TUNIT{}'.format(ic+1), value=unit_str,
-                               after='TFORM{}'.format(ic+1))
 
 
     # add header keyword indicating catalog was successfully formatted
@@ -4017,6 +3989,35 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
 
     return
+
+
+################################################################################
+
+def add_col_descriptions (hdu, formats):
+
+    # add column descriptions to hdu header; column names are in the
+    # TTYPE[i+1] keywords and the descriptions should be saved in
+    # TCOMM[i+1]
+    for ic, col0 in enumerate(hdu.data.dtype.names):
+        ncol = ic + 1
+        # edit aperture names
+        if 'APER' in col0:
+            if 'E_' in col0:
+                col = '_'.join(col0.split('_')[:3])
+            else:
+                col = '_'.join(col0.split('_')[:2])
+        else:
+            col = col0
+
+        # check if col is present in formats
+        if col in formats:
+            descr = formats[col][2]
+        else:
+            log.warning ('{} not in formats dictionary'.format(col))
+            descr = ''
+
+        # update relevant header keyword COMM
+        hdu.header['TCOMM{}'.format(ncol)] = descr
 
 
 ################################################################################
@@ -4619,6 +4620,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         # even though MLBG_phot_apply_chanzp is True, channel
         # zeropoints may not be available and moreover they could be
         # zero; use image zp in those cases
+        xcoords = table_trans['X_PEAK'].value
+        ycoords = table_trans['Y_PEAK'].value
+
         zp_chan = [header_new['PC-ZP{}'.format(i+1)]
                    if 'PC-ZP{}'.format(i+1) in header_new
                    and header_new['PC-ZP{}'.format(i+1)] != 0
@@ -6130,15 +6134,21 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
     # list of parareters to provide to [get_psfoptflux_loop]
-    pars = [xcoords, ycoords, data_psf, psf_size, psf_samp, polzero1, polscal1,
-            polzero2, polscal2, poldeg, imtype, xsize, ysize, D, D_mask, bkg_var,
-            data_psf_ref, psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
-            polscal2_ref, poldeg_ref, data_new_bkg_std, data_ref_bkg_std,
-            header_new, header_ref, header_trans, psffit, moffat,
-            gauss, get_limflux, limflux_nsigma, fwhm_fit_init, inject_fake,
-            nsigma_fake, replace_sat_psf, replace_sat_nmax, remove_psf, fwhm_use,
-            diff, get_flags_mask_central, psf_clean_factor, source_minpixfrac,
-            mask_value, local_bkg, get_psf_footprint, tel]
+    pars = [xcoords, ycoords, data_psf, psf_size, psf_samp,
+            polzero1, polscal1, polzero2, polscal2, poldeg, imtype, xsize, ysize,
+            D, D_mask, bkg_var, data_psf_ref, psf_samp_ref,
+            polzero1_ref, polscal1_ref,
+            polzero2_ref, polscal2_ref, poldeg_ref,
+            data_new_bkg_std, data_ref_bkg_std,
+            header_new, header_ref, header_trans,
+            psffit, moffat, gauss,
+            get_limflux, limflux_nsigma, fwhm_fit_init,
+            inject_fake, nsigma_fake,
+            replace_sat_psf, replace_sat_nmax, remove_psf,
+            fwhm_use, diff, get_flags_mask_central,
+            psf_clean_factor, source_minpixfrac, mask_value,
+            local_bkg, get_psf_footprint, tel]
+
 
     # feed these lists to pool_func
     if nthreads == 1:
@@ -6163,25 +6173,21 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 ################################################################################
 
-def get_psfoptflux_loop (index_start_stop, xcoords, ycoords, data_psf, psf_size,
-                         psf_samp, polzero1, polscal1, polzero2,
-                         polscal2, poldeg, imtype, xsize, ysize,
-                         D, D_mask, bkg_var,
-                         data_psf_ref=None,  psf_samp_ref=None,
-                         polzero1_ref=None, polscal1_ref=None,
-                         polzero2_ref=None, polscal2_ref=None, poldeg_ref=None,
-                         data_new_bkg_std=None, data_ref_bkg_std=None,
-                         header_new=None, header_ref=None, header_trans=None,
-                         psffit=False, moffat=False, gauss=False,
-                         get_limflux=False, limflux_nsigma=5,
-                         fwhm_fit_init=None, inject_fake=False, nsigma_fake=10,
-                         replace_sat_psf=False, replace_sat_nmax=100,
-                         remove_psf=False, fwhm_use=None, diff=True,
-                         get_flags_mask_central=False,
-                         psf_clean_factor=None, source_minpixfrac=None,
-                         mask_value=None, local_bkg=None, get_psf_footprint=False,
-                         tel=None):
-
+def get_psfoptflux_loop (
+        index_start_stop, xcoords, ycoords, data_psf, psf_size, psf_samp,
+        polzero1, polscal1, polzero2, polscal2, poldeg, imtype, xsize, ysize,
+        D, D_mask, bkg_var, data_psf_ref=None,  psf_samp_ref=None,
+        polzero1_ref=None, polscal1_ref=None,
+        polzero2_ref=None, polscal2_ref=None, poldeg_ref=None,
+        data_new_bkg_std=None, data_ref_bkg_std=None,
+        header_new=None, header_ref=None, header_trans=None,
+        psffit=False, moffat=False, gauss=False,
+        get_limflux=False, limflux_nsigma=5, fwhm_fit_init=None,
+        inject_fake=False, nsigma_fake=10,
+        replace_sat_psf=False, replace_sat_nmax=100, remove_psf=False,
+        fwhm_use=None, diff=True, get_flags_mask_central=False,
+        psf_clean_factor=None, source_minpixfrac=None, mask_value=None,
+        local_bkg=None, get_psf_footprint=False, tel=None):
 
 
     #if remove_psf:
@@ -9229,8 +9235,9 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                     value = coeff
                 else:
                     value = 'None'
-                    header['PC-ZPF{}'.format(nc)] = (
-                        value, 'zeropoint 2D poly fit coefficient {}'.format(nc))
+
+                header['PC-ZPF{}'.format(nc)] = (
+                    value, 'zeropoint 2D poly fit coefficient {}'.format(nc))
 
 
             if get_par(set_zogy.make_plots,tel):
@@ -13945,11 +13952,11 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             res = fratio - fratio_med
             sigma = find_sigma (res, fratio_err)
             log.info ('sigma in get_mean_fratio: {:.3f}'.format(sigma))
-            fratio_errtot = np.sqrt(fratio_err**2 + sigma**2)
+            fratio_vartot = fratio_err**2 + sigma**2
 
             # corresponding weights
-            m_nz = (fratio_errtot != 0)
-            weights = 1/fratio_errtot[m_nz]**2
+            m_nz = (fratio_vartot != 0)
+            weights = 1/fratio_vartot[m_nz]
 
             # weighted mean and its error
             fratio_mean = np.average(fratio[m_nz], weights=weights)
