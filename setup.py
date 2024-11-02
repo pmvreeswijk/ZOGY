@@ -11,5 +11,5 @@ setup(
     packages=find_packages(),
     install_requires=['numpy', 'astropy', 'matplotlib', 'scipy', 'psutil',
                       'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
-                      'tensorflow==2.13', 'fitsio', 'fsspec', 'gcsfs']
+                      'tensorflow-cpu==2.13', 'fitsio', 'fsspec', 'gcsfs']
 )
