@@ -58,7 +58,7 @@ import astropy.io.fits as fits
 from astropy.io import ascii
 from astropy.wcs import WCS
 from astropy.table import Table, vstack, unique
-from astropy.stats import sigma_clipped_stats, sigma_clip
+from astropy.stats import sigma_clipped_stats, sigma_clip, mad_std
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, Angle
 from astropy import units as u
@@ -1346,7 +1346,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             table_new = Table.read(cat_new)
 
             # add the zeropoint error to the fnu errors
-            add_zperr (table_new, header_new, imtype='new', tel=tel)
+            add_zp_err (table_new, header_new, imtype='new', tel=tel)
 
             # add magnitude columns??
             add_magcols (table_new, overwrite=False)
@@ -1483,7 +1483,7 @@ def add_refkeys (header_trans, header_ref):
 
 ################################################################################
 
-def add_zperr (table_in, header, header_ref=None, imtype='trans', tel=None):
+def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None):
 
     """add photometric zeropoint error (taken from the header keyword
        PC-ZPERR or PC-ZPSTD) to all flux measurement error columns of
@@ -1499,7 +1499,7 @@ def add_zperr (table_in, header, header_ref=None, imtype='trans', tel=None):
 
     if imtype=='trans' and header_ref is None:
         log.error ('parameter header_ref is not defined while imtype=\'trans\' '
-                   'in zogy.add_zperr(); total errors related to _REF columns '
+                   'in zogy.add_zp_err(); total errors related to _REF columns '
                    'in the transient catalog will not be computed correctly')
 
 
@@ -1509,9 +1509,9 @@ def add_zperr (table_in, header, header_ref=None, imtype='trans', tel=None):
     # loop columns
     for col in table_in.colnames:
 
-        # initialize zperr to zero in case it fails to be defined
+        # initialize zp_err to zero in case it fails to be defined
         # below
-        zperr = 0
+        zp_err = 0
 
         # pick FNUERR columns
         if col.startswith('FNUERR_'):
@@ -1525,27 +1525,15 @@ def add_zperr (table_in, header, header_ref=None, imtype='trans', tel=None):
             if (imtype == 'trans' and header_ref is not None
                 and col.endswith('_REF')):
 
-                if 'PC-ZPERR' in header_ref:
-                    zperr = header_ref['PC-ZPERR']
-                elif 'PC-ZPSTD' in header_ref:
-                    zperr = header_ref['PC-ZPSTD']
-                else:
-                    log.error ('neither PC-ZPERR nor PC-ZPSTD found in ref '
-                               'header in zogy.add_zperr(); adopting zperr=0')
+                zp_err = get_zp_err (header_ref)
 
 
             # for non-ML/BG images or (ML/BG) reference catalogs, no
             # need to take care of different read-out channels
             elif imtype=='ref' or tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
 
-                if 'PC-ZPERR' in header:
-                    zperr = header['PC-ZPERR']
-                elif 'PC-ZPSTD' in header:
-                    zperr = header['PC-ZPSTD']
-                else:
-                    log.error ('neither PC-ZPERR nor PC-ZPSTD found in {}'
-                               'header in zogy.add_zperr(); adopting zperr=0'
-                               .format(imtype))
+                zp_err = get_zp_err (header)
+
 
             else:
 
@@ -1575,20 +1563,20 @@ def add_zperr (table_in, header, header_ref=None, imtype='trans', tel=None):
 
 
                 if 'PC-ZPERR' in header:
-                    zperr = np.array([header['PC-ZPE{}'.format(chan)]
-                                      for chan in channels])
+                    zp_err = np.array([header['PC-ZPE{}'.format(chan)]
+                                       for chan in channels])
                 elif 'PC-ZPSTD' in header:
-                    zperr = np.array([header['PC-ZPS{}'.format(chan)]
-                                      for chan in channels])
+                    zp_err = np.array([header['PC-ZPS{}'.format(chan)]
+                                       for chan in channels])
                 else:
                     log.error ('neither PC-ZPERR nor PC-ZPSTD found in {} '
-                               'header in zogy.add_zperr(); adopting zperr=0'
+                               'header in zogy.add_zp_err(); adopting zp_err=0'
                                .format(imtype))
 
 
 
             # add zeropoint error to measurement error
-            fnuerr_zp = zperr * np.abs(fnu) / pogson
+            fnuerr_zp = zp_err * np.abs(fnu) / pogson
             fnuerrtot = np.sqrt(fnuerr**2 + fnuerr_zp**2).astype('float32')
 
 
@@ -1701,6 +1689,7 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     MAG_AUTO_NEAR_REF:    [mag] Kron/AUTO magnitude (AB) of nearest source in ref
                           catalog
     MAGERR_AUTO_NEAR_REF: [mag] corresponding error
+    MAGERRTOT_AUTO_NEAR_REF: [mag] corresponding total error (incl. ZP error)
     FNU_OPT_REF           [microJy] forced-photometry flux in reference image at
                           transient position
     FNUERR_OPT_REF        [microJy] corresponding error
@@ -1719,6 +1708,7 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     FNU_OPT_RED           [microJy] forced-photometry flux in reduced image at
                           transient position
     FNUERR_OPT_RED        [microJy] corresponding error
+    FNUERRTOT_OPT_RED     [microJy] corresponding total error (incl. ZP error)
     FLAGS_MASK_RED        OR comb. of bad pixels inner PSF profile in reduced
                           image
 
@@ -1836,6 +1826,23 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     table_trans['CLASS_STAR_NEAR_REF'] = table_ref['CLASS_STAR'][index_ref]
     table_trans['MAG_AUTO_NEAR_REF'] = table_ref['MAG_AUTO'][index_ref]
     table_trans['MAGERR_AUTO_NEAR_REF'] = table_ref['MAGERR_AUTO'][index_ref]
+    if 'MAGERRTOT_AUTO' in table_ref.colnames:
+        table_trans['MAGERRTOT_AUTO_NEAR_REF'] = table_ref['MAGERRTOT_AUTO'][index_ref]
+    else:
+        # for older ref catalogs, infer zp_err from header and add to
+        # MAGERR_AUTO_NEAR_REF
+        log.warning ('MAGERRTOT_AUTO not found in reference catalog; inferring '
+                     'it using PC-ZPERR or PC-ZPSTD keyword')
+
+        # read ref header
+        header_ref = read_hdulist(fits_ref, get_data=False, get_header=True)
+        zp_err = get_zp_err (header_ref)
+
+        # combine errors
+        magerrtot = np.sqrt(zp_err**2 + table_ref['MAGERR_AUTO'][index_ref]**2)
+        table_trans['MAGERRTOT_AUTO_NEAR_REF'] = magerrtot
+
+
 
 
     # forced photometry in ref image
@@ -1889,14 +1896,23 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     index_out = table_fphot_ref['INDEX_IN'].value
 
     # initialise columns
-    table_trans['FNU_OPT_REF'] = np.zeros(ntrans, dtype='float32')
-    table_trans['FNUERR_OPT_REF'] = np.zeros(ntrans, dtype='float32')
+    zeros_tmp = np.zeros(ntrans, dtype='float32')
+    table_trans['FNU_OPT_REF'] = np.zeros_like(zeros_tmp)
+    table_trans['FNUERR_OPT_REF'] = np.zeros_like(zeros_tmp)
+    table_trans['FNUERRTOT_OPT_REF'] = np.zeros_like(zeros_tmp)
+    table_trans['MAG_OPT_REF'] = np.zeros_like(zeros_tmp)
+    table_trans['MAGERR_OPT_REF'] = np.zeros_like(zeros_tmp)
+    table_trans['MAGERRTOT_OPT_REF'] = np.zeros_like(zeros_tmp)
     table_trans['FLAGS_MASK_REF'] = np.zeros(ntrans, dtype='uint8')
 
     # fill values at correct index
-    table_trans['FNU_OPT_REF'][index_out] = table_fphot_ref['FNU_OPT']
-    table_trans['FNUERR_OPT_REF'][index_out] = table_fphot_ref['FNUERR_OPT']
-    table_trans['FLAGS_MASK_REF'][index_out] = table_fphot_ref['FLAGS_MASK']
+    table_trans['FNU_OPT_REF'][index_out] = table_fphot_ref['FNU_OPT_RED']
+    table_trans['FNUERR_OPT_REF'][index_out] = table_fphot_ref['FNUERR_OPT_RED']
+    table_trans['FNUERRTOT_OPT_REF'][index_out] = table_fphot_ref['FNUERRTOT_OPT_RED']
+    table_trans['MAG_OPT_REF'][index_out] = table_fphot_ref['MAG_OPT_RED']
+    table_trans['MAGERR_OPT_REF'][index_out] = table_fphot_ref['MAGERR_OPT_RED']
+    table_trans['MAGERRTOT_OPT_REF'][index_out] = table_fphot_ref['MAGERRTOT_OPT_RED']
+    table_trans['FLAGS_MASK_REF'][index_out] = table_fphot_ref['FLAGS_MASK_RED']
 
 
     # crossmatch with new source-extractor catalog
@@ -1953,14 +1969,23 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     index_out = table_fphot_red['INDEX_IN'].value
 
     # initialise columns
-    table_trans['FNU_OPT_RED'] = np.zeros(ntrans, dtype='float32')
-    table_trans['FNUERR_OPT_RED'] = np.zeros(ntrans, dtype='float32')
+    zeros_tmp = np.zeros(ntrans, dtype='float32')
+    table_trans['FNU_OPT_RED'] = np.zeros_like(zeros_tmp)
+    table_trans['FNUERR_OPT_RED'] = np.zeros_like(zeros_tmp)
+    table_trans['FNUERRTOT_OPT_RED'] = np.zeros_like(zeros_tmp)
+    table_trans['MAG_OPT_RED'] = np.zeros_like(zeros_tmp)
+    table_trans['MAGERR_OPT_RED'] = np.zeros_like(zeros_tmp)
+    table_trans['MAGERRTOT_OPT_RED'] = np.zeros_like(zeros_tmp)
     table_trans['FLAGS_MASK_RED'] = np.zeros(ntrans, dtype='uint8')
 
     # fill values at correct index
-    table_trans['FNU_OPT_RED'][index_out] = table_fphot_red['FNU_OPT']
-    table_trans['FNUERR_OPT_RED'][index_out] = table_fphot_red['FNUERR_OPT']
-    table_trans['FLAGS_MASK_RED'][index_out] = table_fphot_red['FLAGS_MASK']
+    table_trans['FNU_OPT_RED'][index_out] = table_fphot_red['FNU_OPT_RED']
+    table_trans['FNUERR_OPT_RED'][index_out] = table_fphot_red['FNUERR_OPT_RED']
+    table_trans['FNUERRTOT_OPT_RED'][index_out] = table_fphot_red['FNUERRTOT_OPT_RED']
+    table_trans['MAG_OPT_RED'][index_out] = table_fphot_red['MAG_OPT_RED']
+    table_trans['MAGERR_OPT_RED'][index_out] = table_fphot_red['MAGERR_OPT_RED']
+    table_trans['MAGERRTOT_OPT_RED'][index_out] = table_fphot_red['MAGERRTOT_OPT_RED']
+    table_trans['FLAGS_MASK_RED'][index_out] = table_fphot_red['FLAGS_MASK_RED']
 
 
     log.info ('len(table_trans) at end of trans_crossmatch_fphot: {}'
@@ -1972,6 +1997,25 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
 
 
     return table_trans
+
+
+################################################################################
+
+def get_zp_err (header):
+
+    # get zeropoint error from [header]
+    if 'PC-ZPERR' in header:
+        zp_err = header['PC-ZPERR']
+    elif 'PC-ZPSTD' in header:
+        zp_err = header['PC-ZPSTD']
+        log.warning ('keyword PC-ZPERR not found; adopting '
+                     'zp_err=header[PC-ZPSTD]')
+    else:
+        zp_err = 0
+        log.warning ('keywords PC-ZPERR nor PC-ZPSTD found; adopting zp_err=0')
+
+
+    return zp_err
 
 
 ################################################################################
@@ -3725,6 +3769,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                               'SEP_NEAR_REF', 'FWHM_NEAR_REF', 'ELONG_NEAR_REF',
                               'CLASS_STAR_NEAR_REF',
                               'MAG_AUTO_NEAR_REF', 'MAGERR_AUTO_NEAR_REF',
+                              'MAGERRTOT_AUTO_NEAR_REF',
                               'FNU_OPT_REF', 'FNUERR_OPT_REF', 'FNUERRTOT_OPT_REF',
                               'MAG_OPT_REF', 'MAGERR_OPT_REF', 'MAGERRTOT_OPT_REF',
                               'FLAGS_MASK_REF',
@@ -4182,6 +4227,15 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
               .format(len(table_trans)))
 
 
+
+    # add channels to table
+    channels = coords2chan (table_trans['X_PEAK'].value,
+                            table_trans['Y_PEAK'].value)
+    if 'CHANNEL' not in table_trans.colnames:
+        table_trans['CHANNEL'] = channels
+
+
+
     # Filter on significance
     # ======================
 
@@ -4535,18 +4589,16 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # get zeropoint from [header_new]
     if 'PC-ZP' in header_new:
         zp = header_new['PC-ZP']
+        log.info ('zp from header_new: {}'.format(zp))
     else:
         zp = get_par(set_zogy.zp_default,tel)[filt]
+        log.warning ('keyword PC-ZP not found in header_new; adopting default '
+                     'zeropoint of {}'.format(zp))
 
 
     # corresponding error
-    if 'PC-ZPERR' in header_new:
-        zperr = header_new['PC-ZPERR']
-    elif 'PC-ZPSTD' in header_new:
-        zperr = header_new['PC-ZPSTD']
-    else:
-        log.warning ('keywords PC-ZPERR nor PC-ZPSTD found; adopting zperr=0')
-        zperr = 0
+    zp_err = get_zp_err (header_new)
+    log.info ('zp_err from header_new: {}'.format(zp_err))
 
 
     # for ML/BG: if set_zogy.MLBG_phot_apply_chanzp is True, replace
@@ -4554,6 +4606,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # [zp_err]
     if (tel[0:2] in ['ML','BG']
         and get_par(set_zogy.MLBG_phot_apply_chanzp,tel)):
+
+        log.info ('inferring channel-dependent zp and zp_err')
 
         # even though MLBG_phot_apply_chanzp is True, channel
         # zeropoints may not be available and moreover they could be
@@ -4565,15 +4619,17 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                    if 'PC-ZP{}'.format(i+1) in header_new
                    and header_new['PC-ZP{}'.format(i+1)] != 0
                    else zp for i in range(16)]
+        log.info ('zp_chan: {}'.format(zp_chan))
         zp = get_zp_coords (xcoords, ycoords, zp_chan, zp)
 
 
-        # same for zperr
-        zperr_chan = [header_new['PC-ZPE{}'.format(i+1)]
-                      if 'PC-ZPE{}'.format(i+1) in header_new
-                      and header_new['PC-ZPE{}'.format(i+1)] != 0
-                      else zperr for i in range(16)]
-        zperr = get_zp_coords (xcoords, ycoords, zperr_chan, zperr)
+        # same for zp_err
+        zp_err_chan = [header_new['PC-ZPE{}'.format(i+1)]
+                       if 'PC-ZPE{}'.format(i+1) in header_new
+                       and header_new['PC-ZP{}'.format(i+1)] != 0
+                       else zp_err for i in range(16)]
+        log.info ('zp_err_chan: {}'.format(zp_err_chan))
+        zp_err = get_zp_coords (xcoords, ycoords, zp_err_chan, zp_err)
 
 
 
@@ -4611,14 +4667,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     mag_peak, magerr_peak, magerrtot_peak, fnu_peak, fnuerr_peak, \
         fnuerrtot_peak = apply_zp (flux_peak, zp, airmass_trans, exptime,
                                    ext_coeff, fluxerr=fluxerr_peak,
-                                   return_fnu=True, zperr=zperr)
+                                   return_fnu=True, zp_err=zp_err)
 
 
     mag_psf_D, magerr_psf_D, magerrtot_psf_D, fnu_psf_D, fnuerr_psf_D, \
         fnuerrtot_psf_D = apply_zp (table_trans['E_FLUX_PSF_D'], zp,
                                     airmass_trans, exptime, ext_coeff,
                                     fluxerr=table_trans['E_FLUXERR_PSF_D'],
-                                    return_fnu=True, zperr=zperr)
+                                    return_fnu=True, zp_err=zp_err)
 
 
     log.info ('[get_trans] time after converting flux to mag: {}'
@@ -4667,14 +4723,6 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # in case of new transient catalog columns, execute block below
     if get_par(set_zogy.use_new_transcat,tel):
 
-        # if source extractor catalog does not exist, need to create it
-        #if not os.path.exists(sexcat_new):
-        #    success = sex_wcs(
-        #        base_new, sexcat_new, get_par(set_zogy.sex_par,tel), pixscale_new,
-        #        fwhm_new, 'new', new_fits_mask, ra_new, dec_new, xsize_new,
-        #        ysize_new, header_new)
-
-
         # add some additional columns to transient catalog, by crossmatching
         # with Gaia and reference catalogs, and performing forced photometry
         # at transients positions in new and ref image
@@ -4684,13 +4732,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             ref_fits, ref_fits_mask, fits_ref_cat, nthreads=nthreads)
 
 
+
         # CHECK!!! - this should not be needed anymore, but need to
         # double-checck this
         if False:
 
             # add the zeropoint error to the fnu errors in transient table
-            add_zperr (table_trans, header_new, header_ref=header_ref_cat,
-                       imtype='trans', tel=tel)
+            add_zp_err (table_trans, header_new, header_ref=header_ref_cat,
+                        imtype='trans', tel=tel)
 
             # add magnitudes corresponding to fnu and error columns in
             # transient catalog
@@ -4748,8 +4797,6 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     return table_trans
-
-
 
 
 ################################################################################
@@ -6380,6 +6427,7 @@ def get_psfoptflux_loop (
             if data_new_bkg_std is not None and data_ref_bkg_std is not None:
                 sn = np.median(data_new_bkg_std[index])
                 sr = np.median(data_ref_bkg_std[index])
+
             elif header_new is not None:
                 if 'S-BKGSTD' in header_new:
                     sn = header_new['S-BKGSTD']
@@ -8013,13 +8061,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     if ('PC-P' in header and header['PC-P'] == True and not redo
         and 'PC-ZP' in header and 'PC-ZPSTD' in header):
 
-        # read zp and zp_std from header
+        # read zp, zp_std and zp_err from header
         zp = header['PC-ZP']
         zp_std = header['PC-ZPSTD']
-        if 'PC-ZPERR' in header:
-            zp_err = header['PC-ZPERR']
-        else:
-            zp_err = 0
+        zp_err = get_zp_err(header)
 
         log.warning ('zeropoint present in header; skipping photometric '
                      'calibration and creation of limiting magnitude image for '
@@ -8293,7 +8338,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
                 table_cat, header, exptime, filt, obsdate, base, data_wcs,
-                data_bkg_std, data_mask, objmask, imtype, zp, fwhm, nthreads)
+                data_bkg_std, data_mask, objmask, imtype, zp, zp_err, fwhm,
+                nthreads)
 
 
             # merge fake stars and catalog
@@ -8641,7 +8687,7 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
 def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                            data_wcs, data_bkg_std, data_mask, objmask, imtype,
-                           zp, fwhm, nthreads):
+                           zp, zp_err, fwhm, nthreads):
 
 
     if get_par(set_zogy.timing,tel): t1 = time.time()
@@ -8846,12 +8892,12 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         zp = get_zp_coords (xwin, ywin, zp_chan, zp)
 
 
-        # same for zperr
+        # same for zp_err
         zp_err_chan = [header['PC-ZPE{}'.format(i+1)]
                        if 'PC-ZPE{}'.format(i+1) in header
                        and header['PC-ZP{}'.format(i+1)] != 0
-                       else zp for i in range(16)]
-        zp = get_zp_coords (xwin, ywin, zp_chan, zp)
+                       else zp_err for i in range(16)]
+        zp_err = get_zp_coords (xwin, ywin, zp_err_chan, zp_err)
 
 
 
@@ -8878,7 +8924,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                 fnuerrtot_tmp = apply_zp(table_cat[col_flux], zp, airmass_sex,
                                          exptime, ext_coeff,
                                          fluxerr=table_cat[col_fluxerr],
-                                         return_fnu=True, zperr=zperr)
+                                         return_fnu=True, zp_err=zp_err)
 
 
             # if present, delete original col_mag and col_fnu columns
@@ -9169,7 +9215,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         # collect individual zeropoints across entire image;
         # N.B. these output arrays are sorted in brightess according
         # to mag_cal
-        x_array, y_array, zp_array, zperr_array = collect_zps (
+        x_array, y_array, zp_array, zp_err_array = collect_zps (
             xpos[mask_zp], ypos[mask_zp], flux_opt[mask_zp],
             fluxerr_opt[mask_zp], mag_cal[mask_zp], airmass_cal[mask_zp],
             exptime, filt)
@@ -9177,7 +9223,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
         # determine single zeropoint for entire image
         zp, zp_std, zp_err, ncal_used = calc_zp (
-            x_array, y_array, zp_array, zperr_array, filt, imtype,
+            x_array, y_array, zp_array, zp_err_array, filt, imtype,
             data_wcs.shape, zp_type='single')
 
 
@@ -9233,7 +9279,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # defined by get_par(set_zogy.phot_ncal_use,tel)
             # which is used in the single-value ZP above
             zp_chan, zp_std_chan, zp_err_chan, ncal_chan = calc_zp (
-                x_array, y_array, zp_array, zperr_array, filt, imtype,
+                x_array, y_array, zp_array, zp_err_array, filt, imtype,
                 zp_type='channels')
 
 
@@ -9309,10 +9355,10 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             if get_par(set_zogy.make_plots,tel):
 
                 # save zeropoint arrays
-                ascii.write([x_array, y_array, zp_array, zperr_array],
+                ascii.write([x_array, y_array, zp_array, zp_err_array],
                             '{}_zp.dat'.format(base),
                             names=['x_array', 'y_array', 'zp_array',
-                                   'zperr_array'], overwrite=True)
+                                   'zp_err_array'], overwrite=True)
 
                 # plot
                 plt.imshow(zp_2dfit, origin='lower', aspect=1)
@@ -9333,7 +9379,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # check if they are constant across the image
             subsize = get_par(set_zogy.subimage_size,tel)
             zp_mini, zp_std_mini, zp_err_mini, ncal_mini = calc_zp (
-                x_array, y_array, zp_array, zperr_array, filt, imtype,
+                x_array, y_array, zp_array, zp_err_array, filt, imtype,
                 data_shape=data_wcs.shape, zp_type='background',
                 boxsize=subsize)
 
@@ -9558,6 +9604,7 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
     cols2delete += [c for c in colnames
                     if ('FLUX' in c or 'SNR' in c) and 'APER' in c]
     for colname in colnames:
+
         if colname in cols2delete:
             # delete column
             del table_force_phot[colname]
@@ -9568,6 +9615,11 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
             # catalogs
             if 'APER' not in colname:
                 table_force_phot[colname].name = colname.upper()
+
+
+            # also cut off '_RED' from column names
+            if colname.endswith('_RED'):
+                table_force_phot[colname].name = colname.split('_RED')[0]
 
 
 
@@ -10169,24 +10221,24 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
     if magerr_cal is None:
         # if magerr_cal is not provided, then set zp error equal
         # to the measurment error
-        zperr_array = magerr_opt_inst
+        zp_err_array = magerr_opt_inst
     else:
         # in case magerr_cal is provided
-        zperr_array = np.sqrt(magerr_opt_inst**2 + magerr_cal**2)
+        zp_err_array = np.sqrt(magerr_opt_inst**2 + magerr_cal**2)
 
 
-    # return x_array, y_array, zp_array and zperr_array in order of
+    # return x_array, y_array, zp_array and zp_err_array in order of
     # brightness determined by [mag_cal]
     index_sort = np.argsort(mag_cal)
 
     return x_array[index_sort], y_array[index_sort], zp_array[index_sort], \
-        zperr_array[index_sort]
+        zp_err_array[index_sort]
 
 
 
 ################################################################################
 
-def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
+def calc_zp (x_array, y_array, zp_array, zp_err_array, filt, imtype,
              data_shape=None, zp_type='single', boxsize=None, nsigma=2.5):
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -10203,7 +10255,7 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
             ma_clipped = sigma_clip(zp_array, sigma=nsigma)
             mask_use = ~ma_clipped.mask
             zp, zp_std, zp_err = weighted_mean (zp_array[mask_use],
-                                                zperr_array[mask_use])
+                                                zp_err_array[mask_use])
             nused = np.sum(mask_use)
 
 
@@ -10234,7 +10286,7 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
 
         ncal_min_chan = get_par(set_zogy.MLBG_phot_ncal_min_chan,tel)
         zp, zp_std, zp_err, __, nused = zps_weighted_mean (
-            x_array, y_array, zp_array, zperr_array, 1320, 5280,
+            x_array, y_array, zp_array, zp_err_array, 1320, 5280,
             (2,8), ncal_min=ncal_min_chan, nsigma=nsigma)
 
         # arrays need to be flattened to get 1D array with index = nchan-1
@@ -10255,7 +10307,7 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
         nysubs = int(ysize / boxsize)
         nxsubs = int(xsize / boxsize)
         zp, zp_std, zp_err, __, nused = zps_weighted_mean (
-            x_array, y_array, zp_array, zperr_array, boxsize, boxsize,
+            x_array, y_array, zp_array, zp_err_array, boxsize, boxsize,
             (nysubs, nxsubs), ncal_min=5, nsigma=nsigma)
 
 
@@ -10268,7 +10320,7 @@ def calc_zp (x_array, y_array, zp_array, zperr_array, filt, imtype,
 
 
     if get_par(set_zogy.verbose,tel) and zp_type=='single':
-        log.info('zp: {:.3f}; zp_std: {:.3f}; zp_err: {:.3f}; nused: {}'
+        log.info('zp: {:.4f}; zp_std: {:.4f}; zp_err: {:.4f}; nused: {}'
                  .format(zp, zp_std, zp_err, nused))
 
     if get_par(set_zogy.timing,tel):
@@ -10415,7 +10467,7 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, dx, dy, array_shape,
 
 ################################################################################
 
-def weighted_mean (mag, magerr, magerr_wlim=0.001):
+def weighted_mean (mag, magerr, magerr_wlim=0):
 
     """calculate weighted mean of sample provided by the arrays [mag]
        and [magerr], where the weighting is performed in flux
@@ -10442,6 +10494,8 @@ def weighted_mean (mag, magerr, magerr_wlim=0.001):
     try:
         res = mag - np.median(mag)
         sigma = find_sigma (res, magerr)
+        log.info ('inferred additional sigma in weighted_mean: {}'
+                  .format(sigma))
     except Exception as e:
         # in case of an exception in find_sigma, set sigma to zero
         log.warning ('following exception occurred in zogy.find_sigma, '
@@ -10451,38 +10505,77 @@ def weighted_mean (mag, magerr, magerr_wlim=0.001):
 
     # total magnitude error
     magerrtot = np.sqrt(magerr**2 + sigma**2)
+    # make sure it is not smaller than the input magerr_wlim
+    magerrtot = np.maximum(magerrtot, magerr_wlim)
 
 
-    # convert mag and magerrtot to flux
+    # Pogson constant
     pogson = 2.5/np.log(10)
-    flux = 10**(-0.4*mag)
-    fluxerrtot = flux * magerrtot / pogson
 
 
-    # initialize weights to fluxerrtot corresponding to magerr_wlim
-    # (which is in magnitude units)
-    fluxerr_min = flux * magerr_wlim / pogson
-    weights = 1/fluxerr_min**2
-    # set usual weights for stars with flux errors above magerr_wlim
-    # threshold
-    mask = (pogson*fluxerrtot/flux > magerr_wlim)
-    weights[mask] = 1/fluxerrtot[mask]**2
+    use_flux = False
+    if use_flux:
+
+        # convert mag and magerrtot to flux
+        flux = 10**(-0.4*mag)
+        fluxerrtot = flux * magerrtot / pogson
+
+        # set usual weights
+        weights = 1/fluxerrtot**2
+
+        # weighted mean flux and magnitude
+        flux_wmean = np.average(flux, weights=weights)
+        mag_wmean = -2.5*np.log10(flux_wmean)
+
+        # weighted sample standard deviation
+        flux_wstd = np.sqrt(np.sum(weights * (flux - flux_wmean)**2) /
+                            np.sum(weights))
+        mag_wstd = pogson * flux_wstd / flux_wmean
+
+        # simple STD
+        flux_std = np.std(flux)
+        mag_std = pogson * flux_std / flux_wmean
+
+        # MAD STD
+        flux_mad_std = mad_std(flux)
+        mag_mad_std = pogson * flux_mad_std / flux_wmean
+
+        # error in the weighted mean
+        flux_wmeanerr = np.sqrt(1/np.sum(weights))
+        mag_wmeanerr = pogson * flux_wmeanerr / flux_wmean
 
 
-    # weighted mean flux and magnitude
-    flux_wmean = np.average(flux, weights=weights)
-    mag_wmean = -2.5*np.log10(flux_wmean)
+    else:
+
+        # simply use magnitudes; this is not strictly correct, but
+        # close to the true values because magnitude errors of
+        # calibration stars are typically small
+
+        # set usual weights
+        weights = 1/magerrtot**2
+
+        # weighted mean magnitude
+        mag_wmean = np.average(mag, weights=weights)
+
+        # weighted sample standard deviation
+        mag_wstd = np.sqrt(np.sum(weights * (mag - mag_wmean)**2) /
+                           np.sum(weights))
+
+        # simple STD
+        mag_std = np.std(mag)
+
+        # MAD STD
+        mag_mad_std = mad_std(mag)
+
+        # error in the weighted mean
+        mag_wmeanerr = np.sqrt(1/np.sum(weights))
 
 
-    # weighted sample standard deviation
-    flux_wstd = np.sqrt(np.sum(weights * (flux - flux_wmean)**2) /
-                        np.sum(weights))
-    mag_wstd = pogson * flux_wstd / flux_wmean
 
 
-    # error in the weighted mean
-    flux_wmeanerr = np.sqrt(1/np.sum(weights))
-    mag_wmeanerr = pogson * flux_wmeanerr / flux_wmean
+    log.info ('mag_wmean: {}, mag_std: {}, mag_mad_std: {}, mag_wstd: {}, '
+              'mag_wmeanerr: {}'
+              .format(mag_wmean, mag_std, mag_mad_std, mag_wstd, mag_wmeanerr))
 
 
     return mag_wmean, mag_wstd, mag_wmeanerr
@@ -10643,7 +10736,7 @@ def get_chi2red (res, err, sigma=0, axis=None):
 ################################################################################
 
 def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
-              zperr=None, xcoords=None, ycoords=None, return_fnu=False):
+              zp_err=None, xcoords=None, ycoords=None, return_fnu=False):
 
     """Function that converts the array [flux in e-] into calibrated
     magnitudes using [zp in mag] (a scalar or array with same size as
@@ -10651,15 +10744,15 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
     exptime (scalar) and filter-specific [ext_coeff].
 
     If [fluxerr] is provided, the function will also return the
-    magnitude errors. If [zperr in mag] is provided, an additional
+    magnitude errors. If [zp_err in mag] is provided, an additional
     total magnitude error is also returned, which is the quadratic
-    average of fluxerr and zperr. The output will be numpy arrays with
+    average of fluxerr and zp_err. The output will be numpy arrays with
     the same number of elements as the input flux.
 
     If [return_fnu] is True, then Fnu in microJy (and the
     corresponding Fnu and total error if relevant) are also returned
     alongside the magnitude (and its errors if relevant). If both
-    fluxerr and zperr are not None, the arrays will be returned in the
+    fluxerr and zp_err are not None, the arrays will be returned in the
     following order:
 
         mag, magerr, magerrtot, fnu, fnuerr, fnuerrtot
@@ -10705,9 +10798,9 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
         list2return.append(magerr)
 
 
-        # determine magerrtot if [zperr] is provided
-        if zperr is not None:
-            magerrtot = np.sqrt(magerr**2 + zperr**2)
+        # determine magerrtot if [zp_err] is provided
+        if zp_err is not None:
+            magerrtot = np.sqrt(magerr**2 + zp_err**2)
             list2return.append(magerrtot)
 
 
@@ -10728,11 +10821,11 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
             list2return.append(fnuerr)
 
 
-            # determine fnuerrtot if [zperr] is provided
-            if zperr is not None:
+            # determine fnuerrtot if [zp_err] is provided
+            if zp_err is not None:
                 # fnuerrtot should not be inferred from magerrtot, as
                 # that is not defined for negative fluxes
-                fnuerrtot = np.sqrt(fnuerr**2 + (zperr*fnu/pogson)**2)
+                fnuerrtot = np.sqrt(fnuerr**2 + (zp_err*fnu/pogson)**2)
                 list2return.append(fnuerrtot)
 
 
@@ -10857,7 +10950,8 @@ def get_zp_coords (xcoords, ycoords, zp_chan, zp):
     """
 
     # initialize output array
-    zps = np.zeros_like(xcoords)
+    ncoords = len(xcoords)
+    zps = np.zeros(ncoords)
 
     # make sure zp_chan is a numpy array
     zp_chan = np.array(zp_chan)
@@ -14017,7 +14111,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             # (using function from dreamreduce: zeropoints.find_sigma)
             res = fratio - fratio_med
             sigma = find_sigma (res, fratio_err)
-            log.info ('sigma in get_mean_fratio: {:.3f}'.format(sigma))
+            log.info ('inferred additional sigma in get_mean_fratio: {:.3f}'
+                      .format(sigma))
             fratio_vartot = fratio_err**2 + sigma**2
 
             # corresponding weights

@@ -205,7 +205,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
     # add the filename and pixel positions
-    names += ['FILENAME', 'X_POS', 'Y_POS']
+    names += ['FILENAME', 'X_POS_RED', 'Y_POS_RED']
     dtypes += ['U30', float, float]
 
 
@@ -231,10 +231,10 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
                 dtypes += ['U6']
 
 
-    # add FLAGS_MASK, which is determined irrespective of a match with
+    # add FLAGS_MASK_RED, which is determined irrespective of a match with
     # a full-source catalog source
-    if 'FLAGS_MASK' not in names:
-        names += ['FLAGS_MASK']
+    if 'FLAGS_MASK_RED' not in names:
+        names += ['FLAGS_MASK_RED']
         dtypes += ['int16']
 
 
@@ -242,14 +242,14 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     if fullsource:
 
         # optimal photometry columns
-        names_fullsource = ['BACKGROUND', 'MAG_OPT', 'MAGERR_OPT',
-                            'MAGERRTOT_OPT', 'SNR_OPT', 'LIMMAG_OPT']
+        names_fullsource = ['BACKGROUND_RED', 'MAG_OPT_RED', 'MAGERR_OPT_RED',
+                            'MAGERRTOT_OPT_RED', 'SNR_OPT_RED', 'LIMMAG_OPT_RED']
         names += names_fullsource
         dtypes += ['float32'] * 6
 
 
         # add corresponding fluxes
-        names += ['FNU_OPT', 'FNUERR_OPT', 'FNUERRTOT_OPT']
+        names += ['FNU_OPT_RED', 'FNUERR_OPT_RED', 'FNUERRTOT_OPT_RED']
         dtypes += ['float32'] * 3
 
 
@@ -257,17 +257,17 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
         if apphot_radii is not None:
 
             for radius in apphot_radii:
-                names += ['MAG_APER_R{}xFWHM'.format(radius),
-                          'MAGERR_APER_R{}xFWHM'.format(radius),
-                          'MAGERRTOT_APER_R{}xFWHM'.format(radius),
-                          'SNR_APER_R{}xFWHM'.format(radius)]
+                names += ['MAG_APER_R{}xFWHM_RED'.format(radius),
+                          'MAGERR_APER_R{}xFWHM_RED'.format(radius),
+                          'MAGERRTOT_APER_R{}xFWHM_RED'.format(radius),
+                          'SNR_APER_R{}xFWHM_RED'.format(radius)]
                 dtypes += ['float32'] * 4
 
 
                 # add corresponding fluxes
-                names += ['FNU_APER_R{}xFWHM'.format(radius),
-                          'FNUERR_APER_R{}xFWHM'.format(radius),
-                          'FNUERRTOT_APER_R{}xFWHM'.format(radius)]
+                names += ['FNU_APER_R{}xFWHM_RED'.format(radius),
+                          'FNUERR_APER_R{}xFWHM_RED'.format(radius),
+                          'FNUERRTOT_APER_R{}xFWHM_RED'.format(radius)]
                 dtypes += ['float32'] * 3
 
 
@@ -797,7 +797,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
     # similar dictionary for additional string to add to output table colnames
-    s2add_dict = {'new': '', 'ref': '_REF', 'trans': '_TRANS'}
+    s2add_dict = {'new': '_RED', 'ref': '_REF', 'trans': '_TRANS'}
     s2add = s2add_dict[imtype]
 
 
@@ -958,8 +958,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         table['X_POS_REF'] = xcoords
         table['Y_POS_REF'] = ycoords
     else:
-        table['X_POS'] = xcoords
-        table['Y_POS'] = ycoords
+        table['X_POS_RED'] = xcoords
+        table['Y_POS_RED'] = ycoords
 
 
 
@@ -971,7 +971,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
     # determine several other header keyword values; NB: use of
     # mask_ok, which narrows the table down to valid coordinates
-    exptime, filt, zp, zperr, airmass, ext_coeff = get_keys (
+    exptime, filt, zp, zp_err, airmass, ext_coeff = get_keys (
         header, table['RA_IN'], table['DEC_IN'], tel)
 
 
@@ -988,12 +988,12 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                    else zp for i in range(16)]
         zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
 
-        # same for zperr
-        zperr_chan = [header['PC-ZPE{}'.format(i+1)]
+        # same for zp_err
+        zp_err_chan = [header['PC-ZPE{}'.format(i+1)]
                       if 'PC-ZPE{}'.format(i+1) in header
                       and header['PC-ZPE{}'.format(i+1)] != 0
-                      else zperr for i in range(16)]
-        zperr = zogy.get_zp_coords (xcoords, ycoords, zperr_chan, zperr)
+                      else zp_err for i in range(16)]
+        zp_err = zogy.get_zp_coords (xcoords, ycoords, zp_err_chan, zp_err)
 
 
 
@@ -1027,7 +1027,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # this will lead to an exception in [zogy.get_psfoptflux] as
         # (probably) the shape attribute is not available when data is
         # read through fitsio.FITS
-        data = zogy.read_hdulist (fits_red)
+        data = zogy.read_hdulist (fits_red, dtype='float32')
 
         # corresponding mask may not be available, so first check if
         # it exists
@@ -1142,7 +1142,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 mag_ap, magerr_ap, magerrtot_ap, \
                     fnu_ap, fnuerr_ap, fnuerrtot_ap = zogy.apply_zp (
                         flux_ap, zp, airmass, exptime, ext_coeff,
-                        fluxerr=fluxerr_ap, return_fnu=True, zperr=zperr)
+                        fluxerr=fluxerr_ap, return_fnu=True, zp_err=zp_err)
 
 
                 mask_pos = (flux_ap > 0)
@@ -1244,7 +1244,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             mag_opt, magerr_opt, magerrtot_opt, fnu_opt, fnuerr_opt, \
                 fnuerrtot_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
                                                ext_coeff, fluxerr=fluxerr_opt,
-                                               return_fnu=True, zperr=zperr)
+                                               return_fnu=True, zp_err=zp_err)
 
             mask_pos = (flux_opt > 0)
             mag_opt[~mask_pos] = 99
@@ -1334,7 +1334,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 fnuerrtot_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
                                                 exptime, ext_coeff,
                                                 fluxerr=Fpsferr,
-                                                return_fnu=True, zperr=zperr)
+                                                return_fnu=True, zp_err=zp_err)
 
             mask_zero = (Fpsf==0)
             mag_zogy[mask_zero] = 99
@@ -1562,14 +1562,8 @@ def get_keys (header, ra_in, dec_in, tel):
         zp = None
 
 
-    # get zeropoint error from [header]
-    if 'PC-ZPERR' in header:
-        zperr = header['PC-ZPERR']
-    elif 'PC-ZPSTD' in header:
-        zperr = header['PC-ZPSTD']
-    else:
-        zperr = 0
-        log.warning ('keywords PC-ZPERR nor PC-ZPSTD found; adopting zperr=0')
+    # zp_err using function in zogy
+    zp_err = zogy.get_zp_err (header)
 
 
     # determine object airmass, unless input image is a combined
@@ -1587,7 +1581,7 @@ def get_keys (header, ra_in, dec_in, tel):
     ext_coeff = zogy.get_par(set_zogy.ext_coeff,tel)[filt]
 
 
-    return exptime, filt, zp, zperr, airmass, ext_coeff
+    return exptime, filt, zp, zp_err, airmass, ext_coeff
 
 
 ################################################################################
@@ -1915,68 +1909,68 @@ def verify_lengths(p1, p2):
 def create_col_descr(keys2add, header):
 
     col_descr = {
-        'NUMBER_IN':      'line number of coordinates in input list',
-        'FILENAME':       'base filename of matching image',
-        'X_POS':          '[pix] x pixel coordinate corresponding to input RA/DEC in red image',
-        'Y_POS':          '[pix] y pixel coordinate corresponding to input RA/DEC in red image',
-        'FLAGS_MASK':     'OR-combined flagged pixels within 2xFWHM of coords in red image',
-        'BACKGROUND':     '[e-] sky background estimated from sky annulus in red image',
-        'MAG_OPT':        '[mag] optimal AB magnitude in red image',
-        'MAGERR_OPT':     '[mag] optimal AB magnitude error in red image',
-        'MAGERRTOT_OPT':  '[mag] optimal AB magnitude total error (incl. ZP error) in red image',
-        'SNR_OPT':        'signal-to-noise ratio in red image',
-        'LIMMAG_OPT':     '[mag] limiting AB magnitude at nsigma significance in red image',
-        'FNU_OPT':        '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
-        'FNUERR_OPT':     '[microJy] flux error in red image',
-        'FNUERRTOT_OPT':  '[microJy] flux total error (incl. ZP error) in red image',
-        'MAG_APER':       '[mag] aperture AB mag within radius x FWHM in red image',
-        'MAGERR_APER':    '[mag] aperture AB mag error within radius x FWHM in red image',
-        'MAGERRTOT_APER': '[mag] aperture AB mag total error (incl. ZP error) within radius x FWHM in red image',
-        'SNR_APER':       'aperture signal-to-noise ratio within radius x FWHM in red image',
-        'FNU_APER':       '[microJy] aperture flux within radius x FWHM in red image',
-        'FNUERR_APER':    '[microJy] aperture flux error within radius x FWHM in red image',
-        'FNUERRTOT_APER': '[microJy] aperture flux total error (incl. ZP error) within radius x FWHM in red image',
+        'NUMBER_IN':         'line number of coordinates in input list',
+        'FILENAME':          'base filename of matching image',
+        'X_POS_RED':         '[pix] x pixel coordinate corresponding to input RA/DEC in red image',
+        'Y_POS_RED':         '[pix] y pixel coordinate corresponding to input RA/DEC in red image',
+        'FLAGS_MASK_RED':    'OR-combined flagged pixels within 2xFWHM of coords in red image',
+        'BACKGROUND_RED':    '[e-] sky background estimated from sky annulus in red image',
+        'MAG_OPT_RED':       '[mag] optimal AB magnitude in red image',
+        'MAGERR_OPT_RED':    '[mag] optimal AB magnitude error in red image',
+        'MAGERRTOT_OPT_RED': '[mag] optimal AB magnitude total error (incl. ZP error) in red image',
+        'SNR_OPT_RED':       'signal-to-noise ratio in red image',
+        'LIMMAG_OPT_RED':    '[mag] limiting AB magnitude at nsigma significance in red image',
+        'FNU_OPT_RED':       '[microJy] flux in red image (AB mag = -2.5 log10 fnu + 23.9)',
+        'FNUERR_OPT_RED':    '[microJy] flux error in red image',
+        'FNUERRTOT_OPT_RED': '[microJy] flux total error (incl. ZP error) in red image',
+        'MAG_APER_RED':      '[mag] aperture AB mag within radius x FWHM in red image',
+        'MAGERR_APER_RED':   '[mag] aperture AB mag error within radius x FWHM in red image',
+        'MAGERRTOT_APER_RED':'[mag] aperture AB mag total error (incl. ZP error) within radius x FWHM in red image',
+        'SNR_APER_RED':      'aperture signal-to-noise ratio within radius x FWHM in red image',
+        'FNU_APER_RED':      '[microJy] aperture flux within radius x FWHM in red image',
+        'FNUERR_APER_RED':   '[microJy] aperture flux error within radius x FWHM in red image',
+        'FNUERRTOT_APER_RED':'[microJy] aperture flux total error (incl. ZP error) within radius x FWHM in red image',
         #
-        'MAG_ZOGY':       '[mag] transient AB magnitude',
-        'MAGERR_ZOGY':    '[mag] transient AB magnitude error',
-        'MAGERRTOT_ZOGY': '[mag] transient AB magnitude total error (incl. ZP error)',
-        'SNR_ZOGY':       'transient signal-to-noise ratio',
-        'LIMMAG_ZOGY':    '[mag] transient limiting AB magnitude at input nsigma significance',
-        'FNU_ZOGY':       '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
-        'FNUERR_ZOGY':    '[microJy] transient flux error',
-        'FNUERRTOT_ZOGY': '[microJy] transient flux total error  (incl. ZP error)',
+        'MAG_ZOGY':          '[mag] transient AB magnitude',
+        'MAGERR_ZOGY':       '[mag] transient AB magnitude error',
+        'MAGERRTOT_ZOGY':    '[mag] transient AB magnitude total error (incl. ZP error)',
+        'SNR_ZOGY':          'transient signal-to-noise ratio',
+        'LIMMAG_ZOGY':       '[mag] transient limiting AB magnitude at input nsigma significance',
+        'FNU_ZOGY':          '[microJy] transient flux in red image (mag = -2.5 log10 fnu + 23.9)',
+        'FNUERR_ZOGY':       '[microJy] transient flux error',
+        'FNUERRTOT_ZOGY':    '[microJy] transient flux total error  (incl. ZP error)',
         #
-        'X_POS_REF':      '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
-        'Y_POS_REF':      '[pix] y pixel coordinate corresponding to input RA/DEC in ref image',
-        'FLAGS_MASK_REF': 'OR-combined flagged pixels within 2xFWHM of coords in ref image',
-        'BACKGROUND_REF': '[e-] sky background estimated from sky annulus in ref image',
-        'MAG_OPT_REF':    '[mag] optimal AB magnitude in ref image',
-        'MAGERR_OPT_REF': '[mag] optimal AB magnitude error in ref image',
+        'X_POS_REF':         '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
+        'Y_POS_REF':         '[pix] y pixel coordinate corresponding to input RA/DEC in ref image',
+        'FLAGS_MASK_REF':    'OR-combined flagged pixels within 2xFWHM of coords in ref image',
+        'BACKGROUND_REF':    '[e-] sky background estimated from sky annulus in ref image',
+        'MAG_OPT_REF':       '[mag] optimal AB magnitude in ref image',
+        'MAGERR_OPT_REF':    '[mag] optimal AB magnitude error in ref image',
         'MAGERRTOT_OPT_REF': '[mag] optimal AB magnitude total error (incl. ZP error) in ref image',
-        'SNR_OPT_REF':    'signal-to-noise ratio in ref image',
-        'LIMMAG_OPT_REF': '[mag] limiting AB magnitude at nsigma significance in ref image',
-        'FNU_OPT_REF':    '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.9)',
-        'FNUERR_OPT_REF': '[microJy] flux error in ref image',
+        'SNR_OPT_REF':       'signal-to-noise ratio in ref image',
+        'LIMMAG_OPT_REF':    '[mag] limiting AB magnitude at nsigma significance in ref image',
+        'FNU_OPT_REF':       '[microJy] flux in ref image (AB mag = -2.5 log10 fnu + 23.9)',
+        'FNUERR_OPT_REF':    '[microJy] flux error in ref image',
         'FNUERRTOT_OPT_REF': '[microJy] flux total error (incl. ZP error) in ref image',
-        'MAG_APER_REF':   '[mag] aperture AB mag within radius x FWHM in ref image',
-        'MAGERR_APER_REF':'[mag] aperture AB mag error within radius x FWHM in ref image',
+        'MAG_APER_REF':      '[mag] aperture AB mag within radius x FWHM in ref image',
+        'MAGERR_APER_REF':   '[mag] aperture AB mag error within radius x FWHM in ref image',
         'MAGERRTOT_APER_REF':'[mag] aperture AB mag total error (incl. ZP error) within radius x FWHM in ref image',
-        'SNR_APER_REF':   'aperture signal-to-noise ratio within radius x FWHM in ref image',
-        'FNU_APER_REF':   '[microJy] aperture flux within radius x FWHM in ref image',
-        'FNUERR_APER_REF':'[microJy] aperture flux error within radius x FWHM in ref image',
+        'SNR_APER_REF':      'aperture signal-to-noise ratio within radius x FWHM in ref image',
+        'FNU_APER_REF':      '[microJy] aperture flux within radius x FWHM in ref image',
+        'FNUERR_APER_REF':   '[microJy] aperture flux error within radius x FWHM in ref image',
         'FNUERRTOT_APER_REF':'[microJy] aperture flux total error (incl. ZP error) within radius x FWHM in ref image',
         #
-        'THUMBNAIL_RED':  'square thumbnail of the red image centered at input coords',
-        'THUMBNAIL_REF':  'square thumbnail of the ref image centered at input coords',
-        'THUMBNAIL_D':    'square thumbnail of the difference image centered at input coords',
-        'THUMBNAIL_SCORR':'square thumbnail of the significance image centered at input coords',
+        'THUMBNAIL_RED':     'square thumbnail of the red image centered at input coords',
+        'THUMBNAIL_REF':     'square thumbnail of the ref image centered at input coords',
+        'THUMBNAIL_D':       'square thumbnail of the difference image centered at input coords',
+        'THUMBNAIL_SCORR':   'square thumbnail of the significance image centered at input coords',
         #
-        'MAG_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude',
-        'MAGERR_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude error',
+        'MAG_ZOGY_PLUSREF':       '[mag] sum of ZOGY and ref image magnitude',
+        'MAGERR_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude error',
         'MAGERRTOT_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude total error (incl. ZP errors)',
-        'SNR_ZOGY_PLUSREF':    'sum of ZOGY and ref image magnitude signal-to-noise ratio',
+        'SNR_ZOGY_PLUSREF':       'sum of ZOGY and ref image magnitude signal-to-noise ratio',
         #
-        'TQC-FLAG':       'transient QC flag (green|yellow|orange|red)',
+        'TQC-FLAG':          'transient QC flag (green|yellow|orange|red)',
     }
 
 
