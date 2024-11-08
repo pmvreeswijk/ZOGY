@@ -38,7 +38,7 @@ import fitsio
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.0'
+__version__ = '1.2.1'
 
 
 ################################################################################
@@ -971,7 +971,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
     # determine several other header keyword values; NB: use of
     # mask_ok, which narrows the table down to valid coordinates
-    exptime, filt, zp, zp_err, airmass, ext_coeff = get_keys (
+    exptime, filt, zp, zp_std, zp_err, airmass, ext_coeff = get_keys (
         header, table['RA_IN'], table['DEC_IN'], tel)
 
 
@@ -979,21 +979,18 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
     # array of zeropoints, one for each object; same for [zp_err]
     if new and zogy.get_par(set_zogy.MLBG_phot_apply_chanzp,tel):
 
-        # even though MLBG_phot_apply_chanzp is True, channel
-        # zeropoints may not be available and moreover they could be
-        # zero; use image zp in those cases
-        zp_chan = [header['PC-ZP{}'.format(i+1)]
-                   if 'PC-ZP{}'.format(i+1) in header
-                   and header['PC-ZP{}'.format(i+1)] != 0
-                   else zp for i in range(16)]
-        zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
+        log.info ('inferring channel-dependent zp, zp_std and zp_err')
+        zp_chan, zp_std_chan, zp_err_chan = zogy.get_zp_header (
+            header, set_zogy=set_zogy, channels=True)
 
-        # same for zp_err
-        zp_err_chan = [header['PC-ZPE{}'.format(i+1)]
-                      if 'PC-ZPE{}'.format(i+1) in header
-                      and header['PC-ZPE{}'.format(i+1)] != 0
-                      else zp_err for i in range(16)]
+
+        # use get_zp_coords() to convert channel zeropoints
+        # to coordinate-specific zeropoints, i.e. zp will
+        # have same length as number of coordinates
+        zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
+        zp_std = zogy.get_zp_coords (xcoords, ycoords, zp_std_chan, zp_std)
         zp_err = zogy.get_zp_coords (xcoords, ycoords, zp_err_chan, zp_err)
+
 
 
 
@@ -1142,7 +1139,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 mag_ap, magerr_ap, magerrtot_ap, \
                     fnu_ap, fnuerr_ap, fnuerrtot_ap = zogy.apply_zp (
                         flux_ap, zp, airmass, exptime, ext_coeff,
-                        fluxerr=fluxerr_ap, return_fnu=True, zp_err=zp_err)
+                        # CHECK!!! - use zp_std or zp_err??
+                        fluxerr=fluxerr_ap, return_fnu=True, zp_err=zp_std)
 
 
                 mask_pos = (flux_ap > 0)
@@ -1244,7 +1242,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             mag_opt, magerr_opt, magerrtot_opt, fnu_opt, fnuerr_opt, \
                 fnuerrtot_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
                                                ext_coeff, fluxerr=fluxerr_opt,
-                                               return_fnu=True, zp_err=zp_err)
+                                               # CHECK!!! - use zp_std or zp_err??
+                                               return_fnu=True, zp_err=zp_std)
 
             mask_pos = (flux_opt > 0)
             mag_opt[~mask_pos] = 99
@@ -1334,7 +1333,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 fnuerrtot_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
                                                 exptime, ext_coeff,
                                                 fluxerr=Fpsferr,
-                                                return_fnu=True, zp_err=zp_err)
+                                                # CHECK!!! - use zp_std or zp_err?
+                                                return_fnu=True, zp_err=zp_std)
 
             mask_zero = (Fpsf==0)
             mag_zogy[mask_zero] = 99
@@ -1563,7 +1563,7 @@ def get_keys (header, ra_in, dec_in, tel):
 
 
     # zp_err using function in zogy
-    zp_err = zogy.get_zp_err (header)
+    zp, zp_std, zp_err = zogy.get_zp_header(header, set_zogy=set_zogy)
 
 
     # determine object airmass, unless input image is a combined
@@ -1581,7 +1581,7 @@ def get_keys (header, ra_in, dec_in, tel):
     ext_coeff = zogy.get_par(set_zogy.ext_coeff,tel)[filt]
 
 
-    return exptime, filt, zp, zp_err, airmass, ext_coeff
+    return exptime, filt, zp, zp_std, zp_err, airmass, ext_coeff
 
 
 ################################################################################
