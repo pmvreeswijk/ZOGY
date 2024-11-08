@@ -113,7 +113,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.8'
+__version__ = '1.3.9'
 
 
 ################################################################################
@@ -712,13 +712,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # frame the "_subs" output arrays are the values to be used for
         # the subimages below in the function [run_ZOGY]
         use_optflux = get_par(set_zogy.fratio_optflux,tel)
-        ok, x_fratio, y_fratio, dx, dy, fratio_subs, fratio_err_subs, dx_subs, \
-            dy_subs = (get_fratio_dxdy ('{}_cat.fits'.format(base_new),
-                                        '{}_cat.fits'.format(base_ref),
-                                        '{}_psfex.cat'.format(base_new),
-                                        '{}_psfex.cat'.format(base_ref),
-                                        header_new, header_ref, nsubs, cuts_ima,
-                                        header_trans, use_optflux=use_optflux))
+        ok, x_fratio, y_fratio, dx, dy, fratio_subs, fratio_std_subs, \
+            fratio_err_subs, dx_subs, dy_subs = (get_fratio_dxdy (
+                '{}_cat.fits'.format(base_new),
+                '{}_cat.fits'.format(base_ref),
+                '{}_psfex.cat'.format(base_new),
+                '{}_psfex.cat'.format(base_ref),
+                header_new, header_ref, nsubs, cuts_ima,
+                header_trans, use_optflux=use_optflux))
+
 
         if not ok:
             # leave because of too few matching stars in new and ref
@@ -742,7 +744,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 dmag = ((zp_ref - airmass_ref*extco_ref) -
                         (zp_new - airmass_new*extco_new))
                 fratio_zps = 10**(-0.4*dmag)  # fnew/fref
-                log.info('fratio from delta ZPs: {}'.format(fratio_zps))
+                log.info('fratio from delta ZPs: {:.4f}'.format(fratio_zps))
 
                 # adopt this value for the moment
                 #fratio = fratio_zps
@@ -753,6 +755,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # fratio is in counts if input images were in counts; convert
         # to electrons
         fratio_subs *= gain_new / gain_ref
+        fratio_std_subs *= gain_new / gain_ref
         fratio_err_subs *= gain_new / gain_ref
 
 
@@ -854,9 +857,13 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            psf_ref_sub, psf_new_sub,
                                            data_ref_bkg_std_sub,
                                            data_new_bkg_std_sub,
-                                           fratio_subs[nsub], fratio_err_subs[nsub],
+                                           fratio_subs[nsub],
+                                           # CHECK!!! - use fratio_err_subs or
+                                           # fratio_std_subs?
+                                           fratio_std_subs[nsub],
                                            dx_subs[nsub], dy_subs[nsub],
                                            use_FFTW=use_FFTW, nthreads=nthreads)
+
 
                 results_zogy.append(result_sub)
 
@@ -1143,8 +1150,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             and not os.path.exists(sexcat_new)):
 
             log.info ('{} not found, while it is needed for the new transient '
-                      'column definition; re-running source extractor'
-                      .format(sexcat_new))
+                      'column definition; running source extractor on the '
+                      'reduced image'.format(sexcat_new))
 
             result = run_sextractor(
                 fits_new, sexcat_new, get_par(set_zogy.sex_cfg,tel),
@@ -1220,10 +1227,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
             keywords = ['exptime', 'filter']
             exptime, filt = read_header(header_new, keywords)
-            zeropoint = header_new['PC-ZP']
+            zp = header_new['PC-ZP']
             airmass = header_new['AIRMASSC']
             ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-            [[lmag], [lfnu]] = apply_zp([lflux], zeropoint, airmass, exptime,
+            [[lmag], [lfnu]] = apply_zp([lflux], zp, airmass, exptime,
                                         ext_coeff, return_fnu=True)
             header_trans['T-LFNU'] = (lfnu, '[microJy] full-frame transient '
                                       '{}-sigma limiting Fnu'.format(
@@ -1525,14 +1532,16 @@ def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None):
             if (imtype == 'trans' and header_ref is not None
                 and col.endswith('_REF')):
 
-                zp_err = get_zp_err (header_ref)
+                zp, zp_std, zp_err = get_zp_header (header_ref,
+                                                    set_zogy=set_zogy)
 
 
             # for non-ML/BG images or (ML/BG) reference catalogs, no
             # need to take care of different read-out channels
             elif imtype=='ref' or tel not in ['ML1', 'BG2', 'BG3', 'BG4']:
 
-                zp_err = get_zp_err (header)
+                zp, zp_std, zp_err = get_zp_header (header,
+                                                    set_zogy=set_zogy)
 
 
             else:
@@ -1562,21 +1571,18 @@ def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None):
                     table_in['CHANNEL'] = channels
 
 
-                if 'PC-ZPERR' in header:
-                    zp_err = np.array([header['PC-ZPE{}'.format(chan)]
-                                       for chan in channels])
-                elif 'PC-ZPSTD' in header:
-                    zp_err = np.array([header['PC-ZPS{}'.format(chan)]
-                                       for chan in channels])
-                else:
-                    log.error ('neither PC-ZPERR nor PC-ZPSTD found in {} '
-                               'header in zogy.add_zp_err(); adopting zp_err=0'
-                               .format(imtype))
+                # extract channel-dependent zp, zp_std and zp_err from
+                # header
+                zp, zp_std, zp_err = get_zp_header (header,
+                                                    set_zogy=set_zogy,
+                                                    channels=True)
 
 
 
             # add zeropoint error to measurement error
-            fnuerr_zp = zp_err * np.abs(fnu) / pogson
+            # CHECK!!! - use zp_std or zp_err??
+            #fnuerr_zp = zp_err * np.abs(fnu) / pogson
+            fnuerr_zp = zp_std * np.abs(fnu) / pogson
             fnuerrtot = np.sqrt(fnuerr**2 + fnuerr_zp**2).astype('float32')
 
 
@@ -1836,10 +1842,13 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
 
         # read ref header
         header_ref = read_hdulist(fits_ref, get_data=False, get_header=True)
-        zp_err = get_zp_err (header_ref)
+        zp, zp_std, zp_err = get_zp_header (header_ref, set_zogy=set_zogy)
+
 
         # combine errors
-        magerrtot = np.sqrt(zp_err**2 + table_ref['MAGERR_AUTO'][index_ref]**2)
+        # CHECK!!! - use zp_std or zp_err??
+        #magerrtot = np.sqrt(zp_err**2 + table_ref['MAGERR_AUTO'][index_ref]**2)
+        magerrtot = np.sqrt(zp_std**2 + table_ref['MAGERR_AUTO'][index_ref]**2)
         table_trans['MAGERRTOT_AUTO_NEAR_REF'] = magerrtot
 
 
@@ -2001,21 +2010,56 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
 
 ################################################################################
 
-def get_zp_err (header):
+def get_zp_header (header, set_zogy=None, channels=False):
 
-    # get zeropoint error from [header]
-    if 'PC-ZPERR' in header:
-        zp_err = header['PC-ZPERR']
-    elif 'PC-ZPSTD' in header:
-        zp_err = header['PC-ZPSTD']
-        log.warning ('keyword PC-ZPERR not found; adopting '
-                     'zp_err=header[PC-ZPSTD]')
+    if channels:
+        # channel-dependent keyword names related to zp, zp_std and
+        # zp_err
+        key_list = [['PC-ZP{}'.format(i+1) for i in range(16)],
+                    ['PC-ZPS{}'.format(i+1) for i in range(16)],
+                    ['PC-ZPE{}'.format(i+1) for i in range(16)]]
     else:
-        zp_err = 0
-        log.warning ('keywords PC-ZPERR nor PC-ZPSTD found; adopting zp_err=0')
+        # image-average keyword names
+        key_list = [['PC-ZP'], ['PC-ZPSTD'], ['PC-ZPERR']]
 
 
-    return zp_err
+    # output list
+    l_out = []
+
+    # loop keys:
+    for npar, l in enumerate(key_list):
+        l_tmp = []
+        for key in l:
+            if key in header:
+                val = header[key]
+            else:
+                # npar=0 concerns the zeropoint itself
+                if npar==0:
+                    # if keyword not found, adopt default zeropoint
+                    # value instead
+                    val = header['PC-ZPDEF']
+                    log.warning ('keyword {} not found in header; adopting '
+                                 'default ZP value of {}'.format(key, val))
+                else:
+                    val = 0
+                    log.warning ('keyword {} not found in header; adopting '
+                                 'value of 0'.format(key))
+
+            # append value to list
+            l_tmp.append(val)
+
+
+        # append l_tmp to output list
+        l_out.append(l_tmp)
+
+
+
+    if not channels:
+        # simplify output [[zp],[zp_std], [zp_err]] to [zp, zp_std, zp_err]
+        l_out = list(itertools.chain.from_iterable(l_out))
+
+
+    return l_out
 
 
 ################################################################################
@@ -4336,14 +4380,18 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     # read fratio (Fn/Fr) from header_trans in order to scale the
     # reference image and its variance
-    sn, sr, fratio, fratio_err = 1, 1, 1, 0
+    sn, sr, fratio, fratio_std, fratio_err = 1, 1, 1, 0, 0
     if 'Z-FNR' in header_trans:
         fratio = header_trans['Z-FNR']
+
+    if 'Z-FNRSTD' in header_trans:
+        fratio_std = header_trans['Z-FNRSTD']
 
     if 'Z-FNRERR' in header_trans:
         fratio_err = header_trans['Z-FNRERR']
 
-    log.info ('fratio from header_trans: {} +- {}'.format(fratio, fratio_err))
+    log.info ('header_trans fratio: {:.4f}, fratio_std: {:.4f}, fratio_err: '
+              '{:.4f}'.format(fratio, fratio_std, fratio_err))
 
 
     # read difference image
@@ -4364,7 +4412,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     data_ref_bkg_std = read_hdulist(fits_ref_bkg_std, dtype='float32')
     data_D_var = ((np.maximum(data_new,0) + data_new_bkg_std**2) +
                   (np.maximum(data_ref,0) + data_ref_bkg_std**2) * fratio**2 +
-                  (data_ref * fratio_err)**2)
+                  # CHECK!!! - use fratio_err or fratio_std?
+                  (data_ref * fratio_std)**2)
     del data_new, data_ref
 
 
@@ -4586,19 +4635,10 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     exptime, filt, obsdate = read_header (header_new, keywords)
 
 
-    # get zeropoint from [header_new]
-    if 'PC-ZP' in header_new:
-        zp = header_new['PC-ZP']
-        log.info ('zp from header_new: {}'.format(zp))
-    else:
-        zp = get_par(set_zogy.zp_default,tel)[filt]
-        log.warning ('keyword PC-ZP not found in header_new; adopting default '
-                     'zeropoint of {}'.format(zp))
-
-
-    # corresponding error
-    zp_err = get_zp_err (header_new)
-    log.info ('zp_err from header_new: {}'.format(zp_err))
+    # get zeropoint, its STD and error from [header_new]
+    zp, zp_std, zp_err = get_zp_header (header_new, set_zogy=set_zogy)
+    log.info ('zp: {:.4f}, zp_std: {:.4f}, zp_err: {:.4f} from header_new'
+              .format(zp, zp_std, zp_err))
 
 
     # for ML/BG: if set_zogy.MLBG_phot_apply_chanzp is True, replace
@@ -4607,28 +4647,22 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     if (tel[0:2] in ['ML','BG']
         and get_par(set_zogy.MLBG_phot_apply_chanzp,tel)):
 
-        log.info ('inferring channel-dependent zp and zp_err')
+        log.info ('inferring channel-dependent zp, zp_std and zp_err')
+        zp_chan, zp_std_chan, zp_err_chan = get_zp_header (header_new,
+                                                           set_zogy=set_zogy,
+                                                           channels=True)
+        log.info ('zp_chan: {}'.format(zp_chan))
+        log.info ('zp_std_chan: {}'.format(zp_std_chan))
+        log.info ('zp_err_chan: {}'.format(zp_err_chan))
 
-        # even though MLBG_phot_apply_chanzp is True, channel
-        # zeropoints may not be available and moreover they could be
-        # zero; use image zp in those cases
+
+        # use get_zp_coords() to convert channel zeropoints, zp_std
+        # and zp_err to coordinate-specific zeropoints, i.e. zp will
+        # have same length as number of coordinates
         xcoords = table_trans['X_PEAK'].value
         ycoords = table_trans['Y_PEAK'].value
-
-        zp_chan = [header_new['PC-ZP{}'.format(i+1)]
-                   if 'PC-ZP{}'.format(i+1) in header_new
-                   and header_new['PC-ZP{}'.format(i+1)] != 0
-                   else zp for i in range(16)]
-        log.info ('zp_chan: {}'.format(zp_chan))
         zp = get_zp_coords (xcoords, ycoords, zp_chan, zp)
-
-
-        # same for zp_err
-        zp_err_chan = [header_new['PC-ZPE{}'.format(i+1)]
-                       if 'PC-ZPE{}'.format(i+1) in header_new
-                       and header_new['PC-ZP{}'.format(i+1)] != 0
-                       else zp_err for i in range(16)]
-        log.info ('zp_err_chan: {}'.format(zp_err_chan))
+        zp_std = get_zp_coords (xcoords, ycoords, zp_std_chan, zp_std)
         zp_err = get_zp_coords (xcoords, ycoords, zp_err_chan, zp_err)
 
 
@@ -4667,14 +4701,16 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     mag_peak, magerr_peak, magerrtot_peak, fnu_peak, fnuerr_peak, \
         fnuerrtot_peak = apply_zp (flux_peak, zp, airmass_trans, exptime,
                                    ext_coeff, fluxerr=fluxerr_peak,
-                                   return_fnu=True, zp_err=zp_err)
+                                   # CHECK!!! - use zp_std or zp_err?
+                                   return_fnu=True, zp_err=zp_std)
 
 
     mag_psf_D, magerr_psf_D, magerrtot_psf_D, fnu_psf_D, fnuerr_psf_D, \
         fnuerrtot_psf_D = apply_zp (table_trans['E_FLUX_PSF_D'], zp,
                                     airmass_trans, exptime, ext_coeff,
                                     fluxerr=table_trans['E_FLUXERR_PSF_D'],
-                                    return_fnu=True, zp_err=zp_err)
+                                    # CHECK!!! - use zp_std or zp_err?
+                                    return_fnu=True, zp_err=zp_std)
 
 
     log.info ('[get_trans] time after converting flux to mag: {}'
@@ -6601,12 +6637,13 @@ def get_psfoptflux_loop (
                     dpix_edge = 5
                     if (dpix_edge < xcoords[i] < xsize-dpix_edge and
                         dpix_edge < ycoords[i] < ysize-dpix_edge):
-                        log.warning ('fraction of useable pixels around source '
-                                     'at x,y: {:.0f},{:.0f}: {} is less than limit '
-                                     'set by set_zogy.source_minpixfrac: {}; '
-                                     'returning zero flux and flux error'
-                                     .format(xcoords[i], ycoords[i], frac_tmp,
-                                             source_minpixfrac))
+                        log.warning (
+                            'fraction of useable pixels around source at x,y: '
+                            '{:.0f},{:.0f}: {:.3f} is less than limit set by '
+                            'set_zogy.source_minpixfrac: {}; returning zero '
+                            'flux and flux error'
+                            .format(xcoords[i], ycoords[i], frac_tmp,
+                                    source_minpixfrac))
                     continue
 
 
@@ -6790,7 +6827,6 @@ def get_psfoptflux_loop (
                 if data_psf_ref is not None:
                     log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
                               .format(t_ref, t_ref/t_loop))
-
 
 
 
@@ -8062,9 +8098,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         and 'PC-ZP' in header and 'PC-ZPSTD' in header):
 
         # read zp, zp_std and zp_err from header
-        zp = header['PC-ZP']
-        zp_std = header['PC-ZPSTD']
-        zp_err = get_zp_err(header)
+        zp, zp_std, zp_err = get_zp_header(header, set_zogy=set_zogy)
 
         log.warning ('zeropoint present in header; skipping photometric '
                      'calibration and creation of limiting magnitude image for '
@@ -8338,8 +8372,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # execute [infer_optimal_fluxmag]
             table_cat = infer_optimal_fluxmag (
                 table_cat, header, exptime, filt, obsdate, base, data_wcs,
-                data_bkg_std, data_mask, objmask, imtype, zp, zp_err, fwhm,
-                nthreads)
+                data_bkg_std, data_mask, objmask, imtype, zp, zp_std, zp_err,
+                fwhm, nthreads)
 
 
             # merge fake stars and catalog
@@ -8687,7 +8721,7 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
 def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                            data_wcs, data_bkg_std, data_mask, objmask, imtype,
-                           zp, zp_err, fwhm, nthreads):
+                           zp, zp_std, zp_err, fwhm, nthreads):
 
 
     if get_par(set_zogy.timing,tel): t1 = time.time()
@@ -8882,21 +8916,16 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     if (tel[0:2] in ['ML','BG'] and imptype=='new'
         and get_par(set_zogy.MLBG_phot_apply_chanzp,tel)):
 
-        # even though MLBG_phot_apply_chanzp is True, channel
-        # zeropoints may not be available and moreover they could be
-        # zero; use image zp in those cases
-        zp_chan = [header['PC-ZP{}'.format(i+1)]
-                   if 'PC-ZP{}'.format(i+1) in header
-                   and header['PC-ZP{}'.format(i+1)] != 0
-                   else zp for i in range(16)]
+        log.info ('inferring channel-dependent zp, zp_std and zp_err')
+        zp_chan, zp_std_chan, zp_err_chan = get_zp_header (header,
+                                                           set_zogy=set_zogy,
+                                                           channels=True)
+
+        # use get_zp_coords() to convert channel zeropoints, zp_std
+        # and zp_err to coordinate-specific zeropoints, i.e. zp will
+        # have same length as number of coordinates
         zp = get_zp_coords (xwin, ywin, zp_chan, zp)
-
-
-        # same for zp_err
-        zp_err_chan = [header['PC-ZPE{}'.format(i+1)]
-                       if 'PC-ZPE{}'.format(i+1) in header
-                       and header['PC-ZP{}'.format(i+1)] != 0
-                       else zp_err for i in range(16)]
+        zp_std = get_zp_coords (xwin, ywin, zp_std_chan, zp_std)
         zp_err = get_zp_coords (xwin, ywin, zp_err_chan, zp_err)
 
 
@@ -8924,7 +8953,8 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                 fnuerrtot_tmp = apply_zp(table_cat[col_flux], zp, airmass_sex,
                                          exptime, ext_coeff,
                                          fluxerr=table_cat[col_fluxerr],
-                                         return_fnu=True, zp_err=zp_err)
+                                         # CHECK!!! - use zp_std or zp_err??
+                                         return_fnu=True, zp_err=zp_std)
 
 
             # if present, delete original col_mag and col_fnu columns
@@ -10320,8 +10350,9 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, filt, imtype,
 
 
     if get_par(set_zogy.verbose,tel) and zp_type=='single':
-        log.info('zp: {:.4f}; zp_std: {:.4f}; zp_err: {:.4f}; nused: {}'
-                 .format(zp, zp_std, zp_err, nused))
+        log.info('{} zp: {:.4f}; zp_std: {:.4f}; zp_err: {:.4f}; nused: {}'
+                 .format(zp_type, zp, zp_std, zp_err, nused))
+
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='in calc_zp')
@@ -10494,7 +10525,7 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
     try:
         res = mag - np.median(mag)
         sigma = find_sigma (res, magerr)
-        log.info ('inferred additional sigma in weighted_mean: {}'
+        log.info ('inferred additional sigma in weighted_mean: {:.4f}'
                   .format(sigma))
     except Exception as e:
         # in case of an exception in find_sigma, set sigma to zero
@@ -10573,8 +10604,8 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
 
 
 
-    log.info ('mag_wmean: {}, mag_std: {}, mag_mad_std: {}, mag_wstd: {}, '
-              'mag_wmeanerr: {}'
+    log.info ('mag_wmean: {:.4f}, mag_std: {:.4f}, mag_mad_std: {:.4f}, '
+              'mag_wstd: {:.4f}, mag_wmeanerr: {:.4f}'
               .format(mag_wmean, mag_std, mag_mad_std, mag_wstd, mag_wmeanerr))
 
 
@@ -13226,17 +13257,17 @@ def extract_psf_datapars (psfex_bintable, verbose=True):
 
     if verbose:
         if poldeg != 0:
-            log.info('polzero1:                     {}'.format(polzero1))
-            log.info('polscal1:                     {}'.format(polscal1))
-            log.info('polzero2:                     {}'.format(polzero2))
-            log.info('polscal2:                     {}'.format(polscal2))
+            log.info('polzero1:                     {:8.2f}'.format(polzero1))
+            log.info('polscal1:                     {:8.2f}'.format(polscal1))
+            log.info('polzero2:                     {:8.2f}'.format(polzero2))
+            log.info('polscal2:                     {:8.2f}'.format(polscal2))
 
         log.info('order polynomial:             {}'.format(poldeg))
-        log.info('PSFex FWHM (pix):             {}'.format(psf_fwhm))
-        log.info('PSF sampling size (pix):      {}'.format(psf_samp))
+        log.info('PSFex FWHM (pix):             {:.3f}'.format(psf_fwhm))
+        log.info('PSF sampling size (pix):      {:.3f}'.format(psf_samp))
         log.info('PSF config size (config. pix):{}'.format(psf_size_config))
         log.info('number of accepted PSF stars: {}'.format(psf_nstars))
-        log.info('final reduced chi2 PSFEx fit: {}'.format(psf_chi2))
+        log.info('final reduced chi2 PSFEx fit: {:.3f}'.format(psf_chi2))
 
 
     return (data_psf, header_psf, psf_fwhm, psf_samp, psf_size_config, psf_chi2,
@@ -14084,6 +14115,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     # now also determine fratio, dx and dy for each subimage which can
     # be used in function [run_ZOGY]:
     fratio_subs = np.ones(nsubs)
+    fratio_std_subs = np.zeros(nsubs)
     fratio_err_subs = np.zeros(nsubs)
     dx_subs = np.zeros(nsubs)
     dy_subs = np.zeros(nsubs)
@@ -14246,7 +14278,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             if get_par(set_zogy.fratio_local,tel):
 
                 # local fratio stats using function get_mean_fratio
-                fratio_mean, fratio_med, fratio_std, fratio_err =\
+                fratio_mean, fratio_med, fratio_std, fratio_err = \
                     get_mean_fratio (fratio_match[mask_sub],
                                      fratio_err_match, weighted=True)
                 fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
@@ -14273,6 +14305,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
 
         fratio_subs[nsub] = fratio_mean
+        fratio_std_subs[nsub] = fratio_std
         fratio_err_subs[nsub] = fratio_err
         dx_subs[nsub] = dx
         dy_subs[nsub] = dy
@@ -14282,7 +14315,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         log_timing_memory (t0=t, label='in get_fratio_dxdy')
 
     return success, x_psf_new_match, y_psf_new_match, dx_match, dy_match, \
-        fratio_subs, fratio_err_subs, dx_subs, dy_subs
+        fratio_subs, fratio_std_subs, fratio_err_subs, dx_subs, dy_subs
 
 
 ################################################################################
