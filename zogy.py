@@ -5736,7 +5736,8 @@ def pool_func (func, itemlist, *args, nproc=1):
         # list to record the results
         results = []
         # create pool of workers
-        pool = mp_ctx.Pool(nproc)
+        #pool = mp_ctx.Pool(nproc)
+        pool = get_mp_Pool(nproc)
 
         # info on processes and children
         #log.info ('pool._processes: {}'.format(pool._processes))
@@ -5775,7 +5776,8 @@ def pool_func_lists (func, list_of_imagelists, *args, nproc=1):
         log.info ('creating pool of {} worker(s) in zogy.pool_func_lists()'
                   .format(nproc))
         results = []
-        pool = mp_ctx.Pool(nproc)
+        #pool = mp_ctx.Pool(nproc)
+        pool = get_mp_Pool(nproc)
         for nlist, filelist in enumerate(list_of_imagelists):
             args_temp = [filelist]
             for arg in args:
@@ -6583,7 +6585,7 @@ def get_psfoptflux_loop (
 
         if get_psf_footprint:
             mask_footprint = (P_shift >= 0.001 * np.amax(P_shift))
-            mask_psf_footprint[index] += mask_footprint
+            mask_psf_footprint[index] |= mask_footprint
 
 
         # determine optimal or psf or limiting flux
@@ -10209,13 +10211,13 @@ def create_modify_mask (data, satlevel, data_mask=None):
     # if no saturated pixels already present, add them
     if np.sum(mask_sat_check) == 0:
         mask_sat = (data >= 0.8*satlevel)
-        data_mask[mask_sat] += get_par(set_zogy.mask_value['saturated'],tel)
+        data_mask[mask_sat] |= get_par(set_zogy.mask_value['saturated'],tel)
         # pixels connected to saturated pixels
         mask_sat_adj = ndimage.binary_dilation(mask_sat,structure=
                                                np.ones((3,3)).astype('bool'),
                                                iterations=1)
         mask_sat_adj[mask_sat] = False
-        data_mask[mask_sat_adj] += get_par(set_zogy.mask_value
+        data_mask[mask_sat_adj] |= get_par(set_zogy.mask_value
                                            ['saturated-connected'],tel)
 
     return data_mask
