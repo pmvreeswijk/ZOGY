@@ -281,7 +281,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     if trans:
 
-        names_trans = ['MAG_ZOGY', 'MAGERR_ZOGY', 'MAGERRTOT_ZOGY'
+        names_trans = ['MAG_ZOGY', 'MAGERR_ZOGY', 'MAGERRTOT_ZOGY',
                        'SNR_ZOGY', 'LIMMAG_ZOGY']
         names += names_trans
         dtypes += ['float32'] * 5
