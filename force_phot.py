@@ -790,6 +790,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 tel='ML1', ncpus=None):
 
 
+    log.info ('executing infer_mags() ...')
+
+
     # is google cloud being used?
     google_cloud = (basename[0:5] == 'gs://')
 
@@ -838,12 +841,29 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             list2check = [fits_red, psfex_bintable]
 
 
+
     # check if required images/catalogs are available
-    for fn in list2check:
-        if fn is None or not zogy.isfile (fn):
-            log.warning ('{} not found; skipping extraction of {} magnitudes '
-                         'for {}'.format(fn, label, basename))
-            return table
+    if not google_cloud:
+
+        for fn in list2check:
+            if fn is None or not zogy.isfile (fn):
+                log.warning ('{} not found; skipping extraction of {} magnitudes '
+                             'for {}'.format(fn, label, basename))
+                return table
+
+    else:
+        # above check on each file separately is very slow
+        # in Google cloud; instead get list of all files with
+        # same basename
+        flist = zogy.list_files(basename)
+
+        # check if required files are in this list
+        for fn in list2check:
+            if fn is None or fn not in flist:
+                log.warning ('{} not found; skipping extraction of {} magnitudes '
+                             'for {}'.format(fn, label, basename))
+                return table
+
 
 
     # read header
@@ -856,12 +876,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
         if 'IMAGEW' in header and 'IMAGEH' in header:
-
             # infer data shape from header keywords
             data_shape = (header['IMAGEH'], header['IMAGEW'])
 
         else:
-
             # need to read fits_red instead of _hdr.fits file until
             # both reduced image and reference image contain IMAGEW
             # and IMAGEH keywords (added by Astrometry.net for reduced
