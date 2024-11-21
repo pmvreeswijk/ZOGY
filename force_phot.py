@@ -1205,7 +1205,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # force single thread when stars are being actively
                 # removed from image after the measurement
                 if remove_psf:
-                    ncpus = 1
+                    # CHECK!!! - works ok with multiple processors?
+                    #ncpus = 1
+                    pass
 
 
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
@@ -1228,8 +1230,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
         except Exception as e:
             log.error ('exception was raised while executing '
-                       '[zogy.get_psfoptflux]; skipping extraction of {} '
+                       '[zogy.get_psfoptflux_mp]; skipping extraction of {} '
                        'magnitudes for {}: {}'.format(label, basename, e))
+            log.error (traceback.format_exc())
             return table
 
 
@@ -2200,7 +2203,7 @@ if __name__ == "__main__":
                         help='header keyword values to add to output '
                         'table; default={}'.format(par_default))
 
-    par_default = 'float,U5,U1,float32,float32,float32,float32,float32,U6'
+    par_default = 'float,U5,U1,float32,float32,float32,float32,float32,float32,U6'
     parser.add_argument('--keys2add_dtypes', type=str, default=par_default,
                         help='corresponding header keyword dtypes; default={}'
                         .format(par_default))
