@@ -846,13 +846,48 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             return table
 
 
-    # read header; need to read fits_red instead of _hdr.fits file, to
-    # be able to infer the image shape for both new and ref
+    # read header
     try:
-        hdrfile2read = fits_red
+
+        hdrfile2read = '{}_hdr.fits'.format(fits_red.split('.fits')[0])
         #header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
         with fits.open(hdrfile2read) as hdulist:
             header = hdulist[-1].header
+
+
+        if 'IMAGEW' in header and 'IMAGEH' in header:
+
+            # infer data shape from header keywords
+            data_shape = (header['IMAGEH'], header['IMAGEW'])
+
+        else:
+
+            # need to read fits_red instead of _hdr.fits file until
+            # both reduced image and reference image contain IMAGEW
+            # and IMAGEH keywords (added by Astrometry.net for reduced
+            # image; in buildref.py for ref image since Dec 2024)
+
+            hdrfile2read = fits_red
+            #header = zogy.read_hdulist (hdrfile2read, get_data=False,
+            #                            get_header=True)
+            with fits.open(hdrfile2read) as hdulist:
+                header = hdulist[-1].header
+
+            # infer data_shape from header
+            if 'ZNAXIS2' in header and 'ZNAXIS1' in header:
+                data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
+            elif 'NAXIS2' in header and 'NAXIS1' in header:
+                data_shape = (header['NAXIS2'], header['NAXIS1'])
+            else:
+                log.error ('not able to infer data shape from header of {}'
+                           .format(fits_red))
+
+
+
+        ysize, xsize = data_shape
+        log.info ('data shape inferred from header of {}: {}'
+                  .format(hdrfile2read, data_shape))
+
 
 
         # also read transient header
@@ -882,19 +917,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                      'for {}; assuming fwhm=5 pix'.format(basename))
 
 
-    # infer data_shape from header
-    if 'ZNAXIS2' in header and 'ZNAXIS1' in header:
-        data_shape = (header['ZNAXIS2'], header['ZNAXIS1'])
-    elif 'NAXIS2' in header and 'NAXIS1' in header:
-        data_shape = (header['NAXIS2'], header['NAXIS1'])
-    else:
-        log.error ('not able to infer data shape from header of {}'
-                   .format(fits_red))
-
-
-    ysize, xsize = data_shape
-    log.info ('data shape inferred from header of {}: {}'.format(fits_red,
-                                                                 data_shape))
 
 
     # if proper motion need to be corrected for (if [pm_epoch] is not
