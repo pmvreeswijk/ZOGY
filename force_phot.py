@@ -612,7 +612,10 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         # fitsio
         #header = fitsio.FITS(hdrfile2read)[-1].read_header()
         # astropy
-        header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
+        #header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
+        with fits.open(hdrfile2read) as hdulist:
+            header = hdulist[-1].header
+
     except:
         log.exception ('trouble reading header of {}; skipping its extraction'
                        .format(hdrfile2read))
@@ -847,13 +850,19 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
     # be able to infer the image shape for both new and ref
     try:
         hdrfile2read = fits_red
-        header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
+        #header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
+        with fits.open(hdrfile2read) as hdulist:
+            header = hdulist[-1].header
+
 
         # also read transient header
         if trans:
             hdrfile2read = '{}_hdr.fits'.format(fits_trans.split('.fits')[0])
-            header_trans = zogy.read_hdulist (hdrfile2read, get_data=False,
-                                              get_header=True)
+            #header_trans = zogy.read_hdulist (hdrfile2read, get_data=False,
+            #                                  get_header=True)
+            with fits.open(hdrfile2read) as hdulist:
+                header_trans = hdulist[-1].header
+
     except:
         log.exception ('trouble reading header of {}; skipping extraction of {} '
                        'magnitudes for {}'
@@ -1013,7 +1022,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # exists
         if (fits_objmask is not None and zogy.isfile(fits_objmask)
             and bkg_objmask):
-            objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
+            #objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
+            with fits.open(fits_objmask) as hdulist:
+                objmask = hdulist[-1].data.astype(bool)
+
         else:
             # if it does not exist, or input parameter bkg_objmask is
             # False, create an all-False object mask
@@ -1024,13 +1036,19 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # this will lead to an exception in [zogy.get_psfoptflux] as
         # (probably) the shape attribute is not available when data is
         # read through fitsio.FITS
-        data = zogy.read_hdulist (fits_red, dtype='float32')
+        #data = zogy.read_hdulist (fits_red, dtype='float32')
+        with fits.open(fits_red) as hdulist:
+            data = hdulist[-1].data.astype('float32')
+
 
         # corresponding mask may not be available, so first check if
         # it exists
         if fits_mask is not None and zogy.isfile(fits_mask):
             log.info ('fits_mask used: {}'.format(fits_mask))
-            data_mask = zogy.read_hdulist (fits_mask, dtype='int16')
+            #data_mask = zogy.read_hdulist (fits_mask, dtype='int16')
+            with fits.open(fits_mask) as hdulist:
+                data_mask = hdulist[-1].data.astype('int16')
+
             # mask can be read using fitsio.FITS, but only little bit
             # faster than astropy.io.fits
             #data_mask = fitsio.FITS(fits_mask)[-1][:,:]
@@ -1380,7 +1398,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
                     if google_cloud:
                         # read data using astropy
-                        data = zogy.read_hdulist(fn)
+                        #data = zogy.read_hdulist(fn)
+                        with fits.open(fn) as hdulist:
+                            data = hdulist[-1].data
+
                     else:
                         # read data using fitsio.FITS
                         data = fitsio.FITS(fn)[-1]
@@ -1495,7 +1516,10 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
 
         # use astropy.io.fits for google_cloud bucket files
         if False:
-            data = zogy.read_hdulist(filename)
+            #data = zogy.read_hdulist(filename)
+            with fits.open(filename) as hdulist:
+                data = hdulist[-1].data
+
             if y_indices is None or x_indices is None:
                 values = data
             else:
@@ -1511,16 +1535,16 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
                 value0 = hdulist[-1].section[y_indices[0]:y_indices[0]+1,
                                              x_indices[0]:x_indices[0]+1]
                 values = np.zeros(nvalues, dtype=value0.dtype)
+                values[0] = value0[0][0]
 
                 log.info ('{} value(s) extracted from {}:'.format(nvalues,
                                                                   filename))
-                for i in range(nvalues):
-                    values[i] = hdulist[-1].section[
-                        y_indices[i]:y_indices[i]+1,
-                        x_indices[i]:x_indices[i]+1][0][0]
+                if nvalues > 1:
+                    for i in range(1,nvalues):
+                        values[i] = hdulist[-1].section[
+                            y_indices[i]:y_indices[i]+1,
+                            x_indices[i]:x_indices[i]+1][0][0]
 
-                    #log.info ('i: {}, index: (y,x)=({},{}), value: {}'
-                    #          .format(i, y_indices[i], x_indices[i], values[i]))
 
     else:
 
@@ -1594,19 +1618,28 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
     # background STD
     fits_bkg_std = '{}_bkg_std.fits'.format(basename)
     if zogy.isfile (fits_bkg_std):
-        data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
+        #data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
+        with fits.open(fits_bkg_std) as hdulist:
+            data_bkg_std = hdulist[-1].data.astype('float32')
+
         # only little bit faster with fitsio.FITS
         #data_bkg_std = fitsio.FITS(fits_bkg_std)[-1][:,:]
 
     elif zogy.isfile ('{}.fz'.format(fits_bkg_std)):
-        data_bkg_std = zogy.read_hdulist ('{}.fz'.format(fits_bkg_std),
-                                          dtype='float32')
+        #data_bkg_std = zogy.read_hdulist ('{}.fz'.format(fits_bkg_std),
+        #                                  dtype='float32')
+        with fits.open('{}.fz'.format(fits_bkg_std)) as hdulist:
+            data_bkg_std = hdulist[-1].data.astype('float32')
 
     else:
         # if it does not exist, create it from the background mesh
         fits_bkg_std_mini = '{}_bkg_std_mini.fits'.format(basename)
-        data_bkg_std_mini, header_mini = zogy.read_hdulist (
-            fits_bkg_std_mini, get_header=True, dtype='float32')
+        #data_bkg_std_mini, header_mini = zogy.read_hdulist (
+        #    fits_bkg_std_mini, get_header=True, dtype='float32')
+        with fits.open(fits_bkg_std_mini) as hdulist:
+            data_bkg_std_mini = hdulist[-1].data.astype('float32')
+            header_mini = hdulist[-1].header
+
 
         if 'BKG-SIZE' in header_mini:
             bkg_size = header_mini['BKG-SIZE']
@@ -1843,8 +1876,10 @@ def get_headkeys (filenames):
     for nfile, basename in enumerate(basenames):
 
         # read header
-        header = zogy.read_hdulist ('{}_hdr.fits'.format(basename),
-                                    get_data=False, get_header=True)
+        #header = zogy.read_hdulist ('{}_hdr.fits'.format(basename),
+        #                            get_data=False, get_header=True)
+        with fits.open('{}_hdr.fits'.format(basename)) as hdulist:
+            header = hdulist[-1].header
 
 
         objects[nfile] = int(header['OBJECT'])
@@ -2914,9 +2949,13 @@ if __name__ == "__main__":
 
 
         # read header of trans table for description of keywords
-        header_transtable = zogy.read_hdulist(
-            fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
-            get_data=False, get_header=True)
+        #header_transtable = zogy.read_hdulist(
+        #    fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
+        #    get_data=False, get_header=True)
+        fn_tmp = fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits')
+        with fits.open(fn_tmp) as hdulist:
+            header_transtable = hdulist[-1].header
+
 
 
         col_descr_dict = create_col_descr (keys2add, header_transtable)
