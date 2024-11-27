@@ -17,12 +17,16 @@ import itertools
 import gc
 import numbers
 import psutil
+import inspect
 
 
 import multiprocessing as mp
+from multiprocessing.shared_memory import SharedMemory
 #from multiprocessing import active_children
 # define mp start method through context; this same method is used in
-# blackbox, buildref and force_phot
+# blackbox, buildref and force_phot; set to 'spawn' because 'fork'
+# will lead to an issue when using multiple CPUs in combination with
+# force_phot
 mp_ctx = mp.get_context('spawn')
 
 
@@ -113,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.3.9'
+__version__ = '1.4.0'
 
 
 ################################################################################
@@ -858,8 +862,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                                            data_ref_bkg_std_sub,
                                            data_new_bkg_std_sub,
                                            fratio_subs[nsub],
-                                           # CHECK!!! - use fratio_err_subs or
-                                           # fratio_std_subs?
+                                           #fratio_err_subs[nsub],
                                            fratio_std_subs[nsub],
                                            dx_subs[nsub], dy_subs[nsub],
                                            use_FFTW=use_FFTW, nthreads=nthreads)
@@ -1579,8 +1582,7 @@ def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None):
 
 
 
-            # add zeropoint error to measurement error
-            # CHECK!!! - use zp_std or zp_err??
+            # add zeropoint STD to measurement error
             #fnuerr_zp = zp_err * np.abs(fnu) / pogson
             fnuerr_zp = zp_std * np.abs(fnu) / pogson
             fnuerrtot = np.sqrt(fnuerr**2 + fnuerr_zp**2).astype('float32')
@@ -1846,7 +1848,6 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
 
 
         # combine errors
-        # CHECK!!! - use zp_std or zp_err??
         #magerrtot = np.sqrt(zp_err**2 + table_ref['MAGERR_AUTO'][index_ref]**2)
         magerrtot = np.sqrt(zp_std**2 + table_ref['MAGERR_AUTO'][index_ref]**2)
         table_trans['MAGERRTOT_AUTO_NEAR_REF'] = magerrtot
@@ -2988,11 +2989,17 @@ def isfile (filename):
 
     if filename[0:5] == 'gs://':
 
+        #t0 = time.time()
+
         storage_client = storage.Client()
         bucket_name, bucket_file = get_bucket_name (filename)
         # N.B.: bucket_file should not start with '/'
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(bucket_file)
+
+        #log.info ('time to check if {} exists in bucket {}: {:.2f}s'
+        #          .format(filename, bucket_name, time.time()-t0))
+
         return blob.exists()
 
     else:
@@ -4412,7 +4419,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     data_ref_bkg_std = read_hdulist(fits_ref_bkg_std, dtype='float32')
     data_D_var = ((np.maximum(data_new,0) + data_new_bkg_std**2) +
                   (np.maximum(data_ref,0) + data_ref_bkg_std**2) * fratio**2 +
-                  # CHECK!!! - use fratio_err or fratio_std?
+                  #(data_ref * fratio_err)**2)
                   (data_ref * fratio_std)**2)
     del data_new, data_ref
 
@@ -4701,7 +4708,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     mag_peak, magerr_peak, magerrtot_peak, fnu_peak, fnuerr_peak, \
         fnuerrtot_peak = apply_zp (flux_peak, zp, airmass_trans, exptime,
                                    ext_coeff, fluxerr=fluxerr_peak,
-                                   # CHECK!!! - use zp_std or zp_err?
+                                   #return_fnu=True, zp_err=zp_err)
                                    return_fnu=True, zp_err=zp_std)
 
 
@@ -4709,7 +4716,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         fnuerrtot_psf_D = apply_zp (table_trans['E_FLUX_PSF_D'], zp,
                                     airmass_trans, exptime, ext_coeff,
                                     fluxerr=table_trans['E_FLUXERR_PSF_D'],
-                                    # CHECK!!! - use zp_std or zp_err?
+                                    #return_fnu=True, zp_err=zp_err)
                                     return_fnu=True, zp_err=zp_std)
 
 
@@ -5160,11 +5167,10 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     log.info('executing get_psfoptflux ...')
     if get_par(set_zogy.timing,tel): t = time.time()
 
-    # make sure x and y have same length
-    if np.isscalar(xcoords) or np.isscalar(ycoords):
-        log.error('xcoords and ycoords should be arrays')
-    else:
-        assert len(xcoords) == len(ycoords)
+
+    if remove_psf:
+        log.warning ('object PSFs are removed from image using flux measurement')
+
 
     # initialize output arrays
     ncoords = len(xcoords)
@@ -5266,6 +5272,9 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     mask_value = get_par(set_zogy.mask_value,tel)
     value_sat = mask_value['saturated']
     value_satcon = mask_value['saturated-connected']
+
+    # limit of peak PSF value to define central PSF mask
+    inner_psflim = get_par(set_zogy.inner_psflim,tel)
 
 
     log.info ('psf_size used in [get_psfoptflux]: {} pix for imtype: {}'
@@ -5440,7 +5449,7 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
         # define central mask of object using the PSF
-        mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+        mask_central = (P_shift >= inner_psflim * np.amax(P_shift))
 
         # if flags_mask_central is specified, calculate the combined
         # flags_mask of the central object area
@@ -5530,7 +5539,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fwhm=fwhm_use, sky_bkg=sky_bkg, show=show, tel=tel)
+                    fwhm=fwhm_use, sky_bkg=sky_bkg, inner_psflim=inner_psflim,
+                    show=show, tel=tel)
 
 
             except Exception as e:
@@ -5559,7 +5569,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         flux_psf[i], fluxerr_psf[i], chi2_psf[i] = (
                             flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
                                          mask_use=mask_use, fwhm=fwhm_fit_init,
-                                         show=show, max_nfev=200, diff=diff))
+                                         show=show, max_nfev=200, diff=diff,
+                                         inner_psflim=inner_psflim))
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
@@ -5586,7 +5597,8 @@ def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                             fit_moffat_single (
                                 D_sub, D_sub_err, mask_use=mask_use,
                                 fit_gauss=gauss, fwhm=fwhm_fit_init,
-                                P_shift=P_shift, show=show, max_nfev=200)
+                                P_shift=P_shift, show=show, max_nfev=200,
+                                inner_psflim=inner_psflim)
 
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
@@ -5839,11 +5851,11 @@ def get_apflux (xcoords, ycoords, data, data_mask, fwhm, objmask=None,
 
     # split input coordinates into nthreads roughly-equal lists
     ncoords = len(xcoords)
-    indices = list(np.linspace(0, ncoords, num=nthreads+1).astype(int))
-    # indices_start_stop is a list of lists with the start and stop
-    # indices for each of the threads to be run
-    indices_start_stop = [indices[i:i+2] for i in range(len(indices)-1)]
-    log.info ('get_apflux indices_start_stop: {}'.format(indices_start_stop))
+    log.info ('{} coordinates to process'.format(ncoords))
+    #idx = list(np.linspace(0, ncoords, num=nthreads+1).astype(int))
+    #idx_list = [range(idx[i],idx[i+1]) for i in range(len(idx)-1)]
+    idx_list = prep_indices (xcoords, nthreads)
+    log.info ('idx_list in get_apflux: {}'.format(idx_list))
 
 
     # read zoom factor from settings file
@@ -5876,11 +5888,10 @@ def get_apflux (xcoords, ycoords, data, data_mask, fwhm, objmask=None,
     # feed these lists to pool_func
     if nthreads == 1:
         # do not bother to multiprocess
-        list2return = get_apflux_loop (indices_start_stop[0], *pars)
+        list2return = get_apflux_loop (idx_list[0], *pars)
     else:
         # multiprocess
-        results = pool_func (get_apflux_loop, indices_start_stop, *pars,
-                             nproc=nthreads)
+        results = pool_func (get_apflux_loop, idx_list, *pars, nproc=nthreads)
         # results is a list of output arrays; need to concatenate
         # these into single arrays, treating flux_ap, fluxerr_ap and
         # flux_bkg separately because of their different shapes
@@ -5899,16 +5910,15 @@ def get_apflux (xcoords, ycoords, data, data_mask, fwhm, objmask=None,
 
 ################################################################################
 
-def get_apflux_loop (index_start_stop, xcoords, ycoords, data, data_mask,
-                     objmask, apphot_radii, bkg_radii, bkg_limfrac, fzoom,
-                     bkg_std_coords, verbose=False):
+def get_apflux_loop (idx, xcoords, ycoords, data, data_mask, objmask,
+                     apphot_radii, bkg_radii, bkg_limfrac, fzoom, bkg_std_coords,
+                     verbose=False):
 
 
-    # limit coordinates to index_start_stop range
-    i1, i2 = index_start_stop
-    xcoords = xcoords[i1:i2]
-    ycoords = ycoords[i1:i2]
-    ncoords = len(xcoords)
+    # limit coordinates to idx
+    xpos = xcoords[idx]
+    ypos = ycoords[idx]
+    ncoords = len(xpos)
 
 
     # initialize output arrays
@@ -5964,7 +5974,7 @@ def get_apflux_loop (index_start_stop, xcoords, ycoords, data, data_mask,
             # the coordinates
             data_sect, data_mask_sect, objmask_sect, dist, \
                 yc_sect, xc_sect = get_sect_dist (data, data_mask, objmask,
-                                                  xcoords[i], ycoords[i],
+                                                  xpos[i], ypos[i],
                                                   size, fzoom=1)
 
 
@@ -6014,7 +6024,7 @@ def get_apflux_loop (index_start_stop, xcoords, ycoords, data, data_mask,
             # the coordinates
             data_sect, data_mask_sect, objmask_sect, dist, \
                 yc_sect, xc_sect = get_sect_dist (data, data_mask, objmask,
-                                                  xcoords[i], ycoords[i],
+                                                  xpos[i], ypos[i],
                                                   size, fzoom=fzoom)
 
 
@@ -6156,6 +6166,194 @@ def get_sect_dist (data, data_mask, objmask, xcoord, ycoord, size, fzoom=1):
 
 ################################################################################
 
+def count_fainter_neighbours (xcoords, ycoords, sep_max_pix=30, nthreads=1):
+
+    """function to count the number of fainter neighbours within
+    [sep_max_pix] around each object at pixel position defined by
+    xcoords[i], ycoords[i], where the object coordinate arrays are
+    assumed to have already been ordered in brightness
+    """
+
+    if get_par(set_zogy.timing,tel):
+        log.info('executing count_fainter_neighbours ...')
+        t = time.time()
+
+
+    # number of input coordinates
+    ncoords = len(xcoords)
+
+    if ncoords <= 2e5:
+
+        # if number of coordinates is not that large, multiprocessing
+        # is slower
+        idx = range(ncoords)
+        list_i_neighbours = count_loop(idx, xcoords, ycoords, sep_max_pix)
+
+    else:
+
+        # prepare list of indices to feed to multiprocessing function;
+        # define f times nthreads lists, because the last n coordinates
+        # are much faster to process than the initial n coords
+        f = 10
+        idx = list(np.linspace(0, ncoords, num=(f*nthreads)+1).astype(int))
+        idx_list = [range(idx[i],idx[i+1]) for i in range(len(idx)-1)]
+        #log.info ('idx_list in count_fainter_neighbours: {}'.format(idx_list))
+
+        # multiprocess coordinates
+        results = pool_func (count_loop, idx_list, xcoords, ycoords,
+                             sep_max_pix, nproc=nthreads)
+
+        # results is a list of lists with items (i,n_neighbours);
+        # convert it to single list of items
+        list_i_neighbours = list(itertools.chain.from_iterable(results))
+
+
+
+    # split indices and n_neighbours
+    indices, n_neighbours = zip(*list_i_neighbours)
+    n_neighbours = np.array(n_neighbours)
+
+
+    # log number of sources with/without fainter neighbours
+    mask_with = (n_neighbours > 0)
+    log.info ('{}/{} sources with/without fainter neighbours'
+              .format(np.sum(mask_with), np.sum(~mask_with)))
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='in count_fainter_neighbours')
+
+
+    # return array sorted by input indices (different threads may have
+    # changed the order) with number of fainter neighbours
+    return n_neighbours[np.argsort(indices)]
+
+
+################################################################################
+
+def count_loop (idx, xcoords, ycoords, sep_max_pix):
+
+    # initialize output list with neighbours
+    list_i_neighbours = []
+
+    # loop coordinates
+    sep_max_pix2 = sep_max_pix**2
+    for i in idx:
+
+        # define x,y as current pixel coordinates
+        x = xcoords[i]
+        y = ycoords[i]
+
+        # coordinates of entries fainter than source at x,y
+        xfainter = xcoords[i+1:]
+        yfainter = ycoords[i+1:]
+
+        # make a big cut in the number of objects for which the
+        # separation needs to be calculated, by selecting the relevant
+        # window in x-coordinate; this speeds up the loop calculation
+        idx_use = np.nonzero((xfainter >= x-sep_max_pix) &
+                             (xfainter <= x+sep_max_pix))[0]
+
+        # calculate separation for remaining entries
+        sep2 = ((xfainter[idx_use] - x)**2 +
+                (yfainter[idx_use] - y)**2)
+
+        # count the nearby neighbours and update output list
+        mask_neighbours = (sep2 <= sep_max_pix2)
+        n_neighbours = np.sum(mask_neighbours)
+        list_i_neighbours.append((i,n_neighbours))
+
+
+    log.info ('finished counting neighbours for indices {}'.format(idx))
+
+    return list_i_neighbours
+
+
+################################################################################
+
+def prep_indices (xcoords, nthreads, mask=None, x_sort=False):
+
+
+    # define mask
+    if mask is None:
+        mask_use = np.ones(len(xcoords), dtype=bool)
+    else:
+        mask_use = mask
+
+
+    # indices to return are with respect to xcoords before any mask is
+    # applied
+    idx_orig = np.arange(len(xcoords))
+
+    # the relevant indices according to the input mask
+    idx_use = idx_orig[mask_use]
+    ncoords_use = np.sum(mask_use)
+
+
+    # split coordinates into nthreads roughly-equal lists
+    idx = list(np.linspace(0, ncoords_use, num=nthreads+1).astype(int))
+    # idx_list is a list of ranges with the start and stop indices for
+    # each of the threads to be run
+    idx_list_tmp = [range(idx[i],idx[i+1]) for i in range(len(idx)-1)]
+
+
+    if not x_sort:
+
+        # if a mask was provided, need to explicitly list the relevant
+        # indices instead of the ranges
+        if mask is not None:
+            idx_list = [list(idx_use[idx]) for idx in idx_list_tmp]
+        else:
+            idx_list = idx_list_tmp
+
+
+        return idx_list
+
+
+    else:
+
+        # sort coordinates in xcoords instead of the original
+        # order in brightness
+        idx_use_xsort = idx_use[np.argsort(xcoords[mask_use])]
+
+
+        # split image into nthreads sections with equal number of
+        # sources in them; the initial idx_list already determined
+        # above to split coordinates into nthreads equal parts can
+        # also be used here
+        idx_list = []
+        for idx in idx_list_tmp:
+            # select coordinates from indices sorted in x, according
+            # to idx_list_tmp, and sort them so that per section they
+            # are ordered in brightness again
+            idx_bsort = sorted(idx_use_xsort[idx])
+            idx_list.append(idx_bsort)
+            log.info ('{} sources in section {}'.format(len(idx), len(idx_list)))
+
+
+
+        # define x_borders to be average between last x-coordinate of
+        # i-th section and first x-coordinate of i+1-th section
+        x_min = np.array([np.min(xcoords[idx_use_xsort[idx]])
+                          if len(idx)>0 else 0
+                          for idx in idx_list_tmp])
+        x_max = np.array([np.max(xcoords[idx_use_xsort[idx]])
+                          if len(idx)>0 else 0
+                          for idx in idx_list_tmp])
+        x_max = np.array([np.max(xcoords[idx_use_xsort[idx]])
+                          for idx in idx_list_tmp])
+        x_borders = (x_max[:-1] + x_min[1:]) / 2
+
+
+        #log.info ('idx_list: {}'.format(idx_list))
+        log.info ('x_borders: {}'.format(x_borders))
+
+
+        return idx_list, x_borders
+
+
+################################################################################
+
 def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        psffit=False, moffat=False, gauss=False, get_limflux=False,
                        limflux_nsigma=5., psfex_bintable_ref=None,
@@ -6169,6 +6367,15 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        get_psf_footprint=False, nthreads=1):
 
 
+    # function name
+    fname = inspect.currentframe().f_code.co_name
+
+
+    # CHECK!!! - force single_pass without multiprocessing
+    single_pass = False
+    if single_pass:
+        nthreads = 1
+
 
     # when creating mask of objects' psf central footprints, force
     # nthreads=1
@@ -6176,9 +6383,12 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         nthreads = 1
 
 
-    log.info('executing get_psfoptflux_mp with {} thread(s) ...'
-             .format(nthreads))
+    log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
     if get_par(set_zogy.timing,tel): t = time.time()
+
+
+    if remove_psf:
+        log.warning ('object PSFs are removed from image using flux measurement')
 
 
     # get dimensions of D
@@ -6252,18 +6462,15 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         psf_size -= 1
 
 
-    log.info ('psf_size used in [get_psfoptflux_mp]: {} pix for imtype: {}'
-              .format(psf_size, imtype))
+    log.info ('psf_size used in {}: {} pix for imtype: {}'
+              .format(fname, psf_size, imtype))
 
 
     # split input coordinates into nthreads roughly-equal lists
     ncoords = len(xcoords)
-    indices = list(np.linspace(0, ncoords, num=nthreads+1).astype(int))
-    # indices_start_stop is a list of lists with the start and stop
-    # indices for each of the threads to be run
-    indices_start_stop = [indices[i:i+2] for i in range(len(indices)-1)]
-    log.info ('get_psfoptflux_mp indices_start_stop: {}'
-              .format(indices_start_stop))
+    idx_list = prep_indices (xcoords, nthreads)
+    log.info ('{} coordinates to process'.format(ncoords))
+
 
 
     # set_zogy parameters that were previously inferred in
@@ -6272,7 +6479,78 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # multiprocessing breaking down
     psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
     source_minpixfrac = get_par(set_zogy.source_minpixfrac,tel)
+    inner_psflim = get_par(set_zogy.inner_psflim,tel)
     mask_value = get_par(set_zogy.mask_value,tel)
+
+
+    # create shared memory arrays and a lock in case remove_psf is
+    # True and nthreads > 1
+    if remove_psf and nthreads > 1:
+
+        # create manager lock and list
+        manager = mp_ctx.Manager()
+        lock = manager.Lock()
+        pid_list = manager.list([])
+
+
+        # create a shared memory for D
+        shm_D = SharedMemory(name='D_shared', size=D.nbytes, create=True)
+        # create a new numpy array that uses the shared memory
+        D_shared = np.ndarray(D.shape, D.dtype, buffer=shm_D.buf)
+        # populate the array
+        D_shared[:] = D
+
+
+        # create a shared memory for the xy coordinates being processed
+        xy = np.zeros((2,nthreads))
+        shm_xy = SharedMemory(name='xy_shared', size=xy.nbytes, create=True)
+        # xy_shared array will have shape (2,nthreads), where xy[0]
+        # and xy[1] will refer to the xcoords and ycoords, respectively
+        xy_shared = np.ndarray(xy.shape, xy.dtype, buffer=shm_xy.buf)
+        # initialize at zero
+        xy_shared[:] = 0
+
+
+        # create a shared memory for a temporary data array to use to
+        # record the PSFs of the sources without any nearby
+        # neighbours, to be subtracted from the original D image to be
+        # used in the next iteration; so same shape and size as D
+        shm_tmp = SharedMemory(name='tmp_shared', size=D.nbytes, create=True)
+        # create a new numpy array that uses the shared memory
+        tmp_shared = np.ndarray(D.shape, D.dtype, buffer=shm_tmp.buf)
+        # initialize to zero
+        tmp_shared[:] = 0
+
+
+        # alternative could be to split coordinates according to
+        # x-coordinate, with an equal number for each section; this
+        # way there is only minor overlap of conflicting neighbours;
+        # downside is that there the brightness order will not be
+        # maintained very well
+        idx_list, x_borders = prep_indices (xcoords, nthreads, x_sort=True)
+
+
+
+        # using [count_fainter_neighbours], determine integer array
+        # with same length and order as input coordinates, that
+        # indicates number of fainter neighbours for each source
+        # within a pixel radius of sep_max_pix; 0.6 * psf_size means
+        # nearby sources within 0.6 * 2 * set_zogy.psf_rad_phot * FWHM
+        # are included
+        sep_max_pix = 0.6 * psf_size
+        n_fainter_neighbours = count_fainter_neighbours (
+            xcoords, ycoords, sep_max_pix=sep_max_pix, nthreads=nthreads)
+
+
+    else:
+
+        # these input parameters to get_psfoptflux_loop need to be
+        # defined
+        lock = None
+        pid_list = None
+        n_fainter_neighbours = None
+        x_borders = None
+
 
 
     # list of parareters to provide to [get_psfoptflux_loop]
@@ -6288,25 +6566,264 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             inject_fake, nsigma_fake,
             replace_sat_psf, replace_sat_nmax, remove_psf,
             fwhm_use, diff, get_flags_mask_central,
-            psf_clean_factor, source_minpixfrac, mask_value,
-            local_bkg, get_psf_footprint, tel]
+            psf_clean_factor, source_minpixfrac, inner_psflim,
+            mask_value, local_bkg, get_psf_footprint,
+            lock, pid_list, n_fainter_neighbours, x_borders,
+            tel, nthreads]
+
 
 
     # feed these lists to pool_func
-    # CHECK!!!
-    if nthreads == 1:
-        # do not bother to multiprocess
-        results = get_psfoptflux_loop (indices_start_stop[0], *pars)
-        # convert to same list as the multiprocess list2return
-        list2return = np.concatenate([results], axis=1)
+    if not remove_psf or single_pass:
+
+        if nthreads == 1:
+
+            # do not bother to multiprocess
+            results = get_psfoptflux_loop (idx_list[0], *pars)
+            # convert to same list as the multiprocess list2return
+            list2return = np.concatenate([results], axis=1)
+
+        else:
+
+            # multiprocess
+            results = pool_func (get_psfoptflux_loop, idx_list, *pars,
+                                 nproc=nthreads)
+            # results is a list of output arrays; need to concatenate these
+            # into single arrays
+            list2return = np.concatenate(results, axis=1)
 
     else:
-        # multiprocess
-        results = pool_func (get_psfoptflux_loop, indices_start_stop, *pars,
-                             nproc=nthreads)
-        # results is a list of output arrays; need to concatenate these
-        # into single arrays
-        list2return = np.concatenate(results, axis=1)
+
+        # initialize flux_opt and fluxerr_opt
+        flux_opt = np.zeros(ncoords, dtype='float32')
+        fluxerr_opt = np.zeros(ncoords, dtype='float32')
+
+        npass = 0
+        while True:
+
+            npass += 1
+
+            # in case of remove_psf, execute get_psfoptflux_loop
+            # multiple times, so that nearby neighbours are removed
+            # before the final flux is measured
+            #
+            # split this up into two runs per iteration: (1) run
+            # on all objects with neighbours, followed by (2) all
+            # objects without neighbours. That would ensure all
+            # objects without neighbours are free from nearby
+            # objects. Could perhaps also arrange this inside
+            # get_psfoptflux_loop.
+            #
+            # for the zero-neighbour objects, need to keep a
+            # shared-memory data array with the zero-neighbour
+            # PSFs * their fluxes added to it, which can be
+            # used in the next iteration to subtract from the
+            # original input data array; the 2nd iteration needs
+            # to work on that image
+            #
+            # once both iterations are done, subtract 1 from
+            # n_fainter_neighbours
+            #
+            # keep iterating until nothing left to process; keep
+            # original xcoords, ycoords and n_fainter_neighbours
+
+            for source_type in ['with', 'without']:
+
+                if source_type == 'with':
+                    # 1st iteration: pick objects with neighbours
+                    mask = (n_fainter_neighbours > 0)
+                else:
+                    # 2nd iteration: pick zero-neighbour objects
+                    mask = (n_fainter_neighbours == 0)
+
+
+                # list number and type of sources to process
+                n_todo = np.sum(mask)
+                log.info ('{} sources {} fainter neighbours to process'
+                          .format(n_todo, source_type))
+
+
+                # if no sources left, continue; this can happen at the
+                # end when there are some sources without neighbours
+                # but none anymore with neighbours, or vice versa
+                if n_todo == 0:
+                    continue
+
+
+                # process id list needs to be emptied, because new
+                # IDs will appear with new mp calls; by emptying
+                # pid_list instead of redefining a new empty list,
+                # pars - already defined above - will be updated
+                # as well
+                pid_list[:] = []
+
+
+                # if less than 30,000 sources, switch to single
+                # thread as overhead becomes considerable
+                if n_todo < 30000:
+
+                    log.info ('using single thread')
+
+                    # based on new selection of sources, create single
+                    # list of indices
+                    idx_list = prep_indices (xcoords, 1, mask=mask)
+
+
+                    # input D image should refer to D_shared,
+                    # and set nthreads to 1
+                    pars[13] = D_shared
+                    pars[-1] = 1
+
+
+                    # need to keep track of the sources with
+                    # neighbours that were subtracted
+                    if source_type == 'with':
+                        D_shared_orig = np.copy(D_shared)
+
+
+
+                    # do not bother to multiprocess
+                    results = get_psfoptflux_loop (idx_list[0], *pars)
+                    # convert to same list as the multiprocess list2return
+                    list2return = np.concatenate([results], axis=1)
+
+
+                    # save PSFs of sources with neighbours that were
+                    # subtracted from D_shared in tmp_shared; if
+                    # nthreads>1, that is done inside
+                    # get_psfoptflux_loop; tmp_shared is added to
+                    # D_shared below to create image without the
+                    # neighbourless sources to be used in the next
+                    # pass
+                    if source_type == 'with':
+                        tmp_shared[:] = D_shared_orig - D_shared
+
+
+                    # reset pars
+                    pars[13] = D
+                    pars[-1] = nthreads
+
+
+                else:
+
+                    # based on new selection of sources, create lists
+                    # to multiprocess, and define x_borders of the
+                    # image sections
+                    idx_list, x_borders = prep_indices (xcoords, nthreads,
+                                                        mask=mask, x_sort=True)
+                    # update pars with x_borders
+                    pars[-3] = x_borders
+
+
+                    # check if different threads have reasonably
+                    # similar number of sources to process
+                    log.info ('multi-threading with #sources per thread: {}'
+                              .format([len(idx) for idx in idx_list]))
+
+                    # multiprocess
+                    results = pool_func (get_psfoptflux_loop, idx_list, *pars,
+                                         nproc=nthreads)
+                    # results is a list of output arrays; need to
+                    # concatenate these into single arrays
+                    list2return = np.concatenate(results, axis=1)
+
+
+
+                # save intermediate tmp_shared images
+                #basename = psfex_bintable.split('/')[-1].split('_psf.fits')[0]
+                #fits_tmp = ('{}_test_image_tmp_shared_{}_{}.fits'
+                #            .format(basename, npass, it))
+                #fits.writeto (fits_tmp, tmp_shared, overwrite=True)
+                #fits_tmp = ('{}_test_image_D_shared_{}_{}.fits'
+                #            .format(basename, npass, it))
+                #fits.writeto (fits_tmp, D_shared, overwrite=True)
+
+
+
+            # need to update the output fluxes of the
+            # neighbourless measurements in list2return; these are
+            # indices of the zero-neighbour objects, which is
+            # idx_list since the objects without neighbours are
+            # done in the 2nd iteration
+
+            #if npass > 90:
+            #    log.info ('list2return: {}'.format(list2return))
+            #    log.info ('xcoords[idx]: {}'.format(xcoords[idx]))
+            #    log.info ('ycoords[idx]: {}'.format(ycoords[idx]))
+
+
+            # if there are no sources without neighbours this pass,
+            # idx will be an empty list
+            idx = list(itertools.chain.from_iterable(idx_list))
+            if len(idx) > 0:
+                flux_opt[idx], fluxerr_opt[idx] = list2return
+                #log.info ('flux_opt: {}'.format(flux_opt))
+                #log.info ('fluxerr_opt: {}'.format(fluxerr_opt))
+
+
+            # number of objects done and still left to process
+            ndone = np.sum(n_fainter_neighbours <= 0)
+            nleft = np.sum(n_fainter_neighbours > 0)
+            log.info ('{} sources done, {} sources left to process after '
+                      'pass {}'.format(ndone, nleft, npass))
+
+
+            # if none left, break out of while True loop
+            if nleft == 0:
+                break
+
+
+            # before going to the nex pass, add the tmp_shared
+            # image that contains the PSFs of the sources with
+            # neighbours; they were subtracted from D_shared and
+            # need to be added back in for the next pass
+            D_shared += tmp_shared
+
+
+            # re-initialize tmp_shared back to zero
+            tmp_shared[:] = 0
+
+
+            # update n_fainter_neighbours, so currently
+            # neighbourless objects will go negative
+            n_fainter_neighbours -= 1
+
+
+
+        # now that all passes are done, update output list2return
+        list2return = (flux_opt, fluxerr_opt)
+
+
+
+
+    if False and remove_psf:
+
+        # temporarily record D and coordinates
+        basename = psfex_bintable.split('/')[-1].split('_psf.fits')[0]
+        fits_tmp = '{}_test_image_psf_removed.fits'.format(basename)
+
+        if 'D_shared' in locals():
+            fits.writeto (fits_tmp, D_shared, overwrite=True)
+        else:
+            fits.writeto (fits_tmp, D, overwrite=True)
+
+        # and save xcoords, ycoords in numpy file
+        npy_tmp = '{}_test_xycoords.npy'.format(basename)
+        np.save(npy_tmp, np.array([xcoords,ycoords]))
+
+
+
+    if remove_psf and nthreads > 1:
+
+        # close the shared memories
+        shm_D.close()
+        shm_xy.close()
+        shm_tmp.close()
+        # release the shared memories
+        shm_D.unlink()
+        shm_xy.unlink()
+        shm_tmp.unlink()
+
 
 
     if get_par(set_zogy.timing,tel):
@@ -6319,7 +6836,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 ################################################################################
 
 def get_psfoptflux_loop (
-        index_start_stop, xcoords, ycoords, data_psf, psf_size, psf_samp,
+        idx, xcoords, ycoords, data_psf, psf_size, psf_samp,
         polzero1, polscal1, polzero2, polscal2, poldeg, imtype, xsize, ysize,
         D, D_mask, bkg_var, data_psf_ref=None,  psf_samp_ref=None,
         polzero1_ref=None, polscal1_ref=None,
@@ -6331,24 +6848,31 @@ def get_psfoptflux_loop (
         inject_fake=False, nsigma_fake=10,
         replace_sat_psf=False, replace_sat_nmax=100, remove_psf=False,
         fwhm_use=None, diff=True, get_flags_mask_central=False,
-        psf_clean_factor=None, source_minpixfrac=None, mask_value=None,
-        local_bkg=None, get_psf_footprint=False, tel=None):
+        psf_clean_factor=None, source_minpixfrac=None, inner_psflim=None,
+        mask_value=None, local_bkg=None, get_psf_footprint=False,
+        lock=None, pid_list=None, n_fainter_neighbours=None, x_borders=None,
+        tel=None, nthreads=None):
 
 
-    #if remove_psf:
-    #    fits_tmp = 'test_image.fits'
-    #    fits.writeto (fits_tmp, D, overwrite=True)
+
+    # function name
+    fname = inspect.currentframe().f_code.co_name
+    log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
 
 
-    # loop indices
-    i1, i2 = index_start_stop
+    # select relevant coordinates
+    xpos = xcoords[idx]
+    ypos = ycoords[idx]
 
-    # limit coordinates to i1:i2 range
-    xcoords = xcoords[i1:i2]
-    ycoords = ycoords[i1:i2]
 
-    # initialize output arrays
-    ncoords = len(xcoords)
+    # take care to also select relevant indices of local_bkg!
+    if local_bkg is not None:
+        local_sky_bkg = local_bkg[idx]
+
+
+    # initialize output arrays, which will have the same length as the
+    # input indices
+    ncoords = len(xpos)
     flux_opt = np.zeros(ncoords, dtype='float32')
     fluxerr_opt = np.zeros_like(flux_opt)
 
@@ -6388,16 +6912,75 @@ def get_psfoptflux_loop (
 
 
     # if reference image PSF is involved, infer ref image pixel
-    # coordinates corresponding to the new image xcoords, ycoords
+    # coordinates corresponding to the new image xpos, ypos
     if data_psf_ref is not None:
 
-        # convert xycoords to ra, dec in the new image
+        # convert xypos to ra, dec in the new image
         wcs_new = WCS(header_new)
-        ra_new, dec_new = wcs_new.all_pix2world(xcoords, ycoords, 1)
+        ra_new, dec_new = wcs_new.all_pix2world(xpos, ypos, 1)
 
         # convert these to pixel positions in the ref image
         wcs_ref = WCS(header_ref)
-        xcoords_ref, ycoords_ref = wcs_ref.all_world2pix(ra_new, dec_new, 1)
+        xpos_ref, ypos_ref = wcs_ref.all_world2pix(ra_new, dec_new, 1)
+
+
+
+    if remove_psf and nthreads > 1:
+
+        # attach shared memory array D_shared
+        shm_D = SharedMemory('D_shared')
+        # create a new numpy array that uses the shared memory
+        D_shared = np.ndarray(D.shape, dtype=D.dtype, buffer=shm_D.buf)
+        # let input D refer to the shared array
+        #del D # is this needed??
+        D = D_shared
+
+
+        # attach shared memory array xy_shared
+        shm_xy = SharedMemory('xy_shared')
+        # create a new numpy array that uses the shared memory
+        xy_shared = np.ndarray((2,nthreads), dtype=float, buffer=shm_xy.buf)
+
+
+        # boolean to indicate if this iteration processes objects with
+        # or without neighbours
+        neighbourless = (np.sum(n_fainter_neighbours[idx]) == 0)
+        log.info ('neighbourless?: {}'.format(neighbourless))
+
+        if not neighbourless:
+            # attach shared memory array tmp_shared
+            shm_tmp = SharedMemory('tmp_shared')
+            # create a new numpy array that uses the shared memory
+            tmp_shared = np.ndarray(D.shape, dtype=D.dtype, buffer=shm_tmp.buf)
+
+
+        # define threshold pixel distance for nearby neighbour, so
+        # that there is no overlap between the PSF footprints; this is
+        # used only to avoid that different threads are messing with
+        # the same pixels at the same time, not for determining nearby
+        # neighbours
+        dpix_neighbour = psf_size + 1
+
+
+        # infer current process id to be able to relate the current
+        # process with the right index in xy_shared, so that the
+        # correct coordinates are updated
+        process = mp.current_process()
+        p_name = process.name
+        p_id = process.pid
+
+        # if not already present, add process id to pid_list, which is
+        # a mp.manager.List() readable and writeble by all processes
+        if p_id not in pid_list:
+            pid_list.append(p_id)
+            log.info ('added process ID {} to pid_list, which now contains: {}'
+                      .format(p_id, pid_list))
+
+        # the index of p_id in pid_list is the relevant index of the
+        # 2nd axis of xy_shared
+        p_idx = pid_list.index(p_id)
+        log.info ('p_name: {}, p_id: {}, p_idx: {}'
+                  .format(p_name, p_id, p_idx))
 
 
 
@@ -6406,31 +6989,32 @@ def get_psfoptflux_loop (
     # psfex_bintable_ref is replaced by data_psf_ref
     for i in range(ncoords):
 
-        t_tmp = time.time()
+        # shorthand
+        x, y = xpos[i], ypos[i]
+
 
         # using function [get_psf_ima], construct the PSF image with
-        # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
-        # image is at the original pixel scale
-        #psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
+        # shape (psf_size, psf_size) at x, y; this image is at the
+        # original pixel scale psf_clean_factor =
+        # get_par(set_zogy.psf_clean_factor,tel)
         psf_ima, __ = get_psf_ima (
-            data_psf, xcoords[i], ycoords[i], psf_size,
-            psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-            imtype=imtype, psf_clean_factor=psf_clean_factor, tel=tel)
+            data_psf, x, y, psf_size, psf_samp, polzero1, polscal1, polzero2,
+            polscal2, poldeg, imtype=imtype, psf_clean_factor=psf_clean_factor,
+            tel=tel)
 
 
-        if i % 1000 == 0:
-            t_new = time.time()-t_tmp
+        #if i % 1000 == 0:
+        #    t_new = time.time()-t_tmp
 
 
         # determine indices of PSF square footprint (with size:
         # [psf_size]) in an image with shape (ysize, xsize) at pixel
-        # coordinates xcoords[i], ycoords[i]; if the footprint is
-        # partially off the image, index_P is needed to define the
-        # subset of pixels in the PSF footprint that are on the full
-        # image. After remapping of the ref image, these indices also
-        # apply to the ref image.
-        index, index_P = get_P_indices (
-            xcoords[i], ycoords[i], xsize, ysize, psf_size)
+        # coordinates x, y; if the footprint is partially off the
+        # image, index_P is needed to define the subset of pixels in
+        # the PSF footprint that are on the full image. After
+        # remapping of the ref image, these indices also apply to the
+        # ref image.
+        index, index_P = get_P_indices (x, y, xsize, ysize, psf_size)
 
 
         # if coordinates off the image, the function [get_P_indices]
@@ -6439,8 +7023,10 @@ def get_psfoptflux_loop (
         if index is None:
             log.warning ('index return from [get_P_indices] is None for object '
                          'at x,y: {:.2f},{:.2f}; returning zero flux and fluxerr'
-                         .format(xcoords[i], ycoords[i]))
+                         .format(x, y))
+            #if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
             continue
+
 
 
         # if [data_psf_ref] is provided, the new image [psf_ima]
@@ -6451,7 +7037,7 @@ def get_psfoptflux_loop (
             # same for reference image; includes rotation to the
             # orientation of the new image
             psf_ima_ref, __ = get_psf_ima (
-                data_psf_ref, xcoords_ref[i], ycoords_ref[i], psf_size,
+                data_psf_ref, xpos_ref[i], ypos_ref[i], psf_size,
                 psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
                 polscal2_ref, poldeg_ref, imtype='ref',
                 psf_clean_factor=psf_clean_factor,
@@ -6529,6 +7115,7 @@ def get_psfoptflux_loop (
 
 
 
+
         # extract index_P
         P_shift = psf_ima[index_P]
 
@@ -6566,12 +7153,77 @@ def get_psfoptflux_loop (
 
 
         # define central mask of object using the PSF
-        mask_central = (P_shift >= 0.01 * np.amax(P_shift))
+        mask_central = (P_shift >= inner_psflim * np.amax(P_shift))
 
         # if flags_mask_central is specified, calculate the combined
         # flags_mask of the central object area
         if get_flags_mask_central:
             flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
+
+
+
+        # before continuing with measuring the flux from the image in
+        # case that the PSF is being removed by multiple processes:
+        # need to check if any other process is working on an object
+        # nearby, and if so, put a lock so that the current process
+        # waits until none of the other processes are updating
+        # D_shared in the vicinity of the current object at x,y
+        #
+        # now that different threads work on different image sections
+        # separated in x-coordinates, where the borders are defined by
+        # input parameter x_borders, this check only needs to be done
+        # if x is close to one of the x_borders
+
+        if (remove_psf and nthreads > 1 and
+            np.any(np.abs(x-x_borders)<=dpix_neighbour)):
+
+            #log.info ('{} {} {} {}'.format(p_name, idx[i], x, y))
+
+            # start loop to keep checking x,y coordinates
+            # of other processes
+            #t_lock = time.time()
+
+            while True:
+
+                # acquire lock
+                lock.acquire()
+
+                # if none of the coordinates are set yet, such as when
+                # no process has started yet, break immediately
+                if not np.any(xy_shared):
+                    break
+
+                # any of the other processes working on nearby
+                # neighbour? Check x and y separately to ensure
+                # that none of the pixels are overlapping
+                dx = np.abs(xy_shared[0]-x)
+                if np.sum(dx <= dpix_neighbour) == 0:
+                    break
+
+                dy = np.abs(xy_shared[1]-y)
+                if np.sum(dy <= dpix_neighbour) == 0:
+                    break
+
+
+                # another process is apparently working on a nearby
+                # neighbour; release lock so that other processes can
+                # check if they can continue
+                lock.release()
+
+
+
+            # process has broken out of while loop and is free to work
+            # on D_shared; add current coordinates to xy_shared, so
+            # that other processes cannot work on nearby objects
+            xy_shared[:,p_idx] = x, y
+
+            # release the lock, so that other processes can be checked
+            lock.release()
+
+            #log.info ('{} working on (x,y)=({:.1f},{:.1f}) waited for '
+            #          '{:.5f}s to pass through lock'
+            #          .format(p_name, x, y, time.time()-t_lock))
+
 
 
 
@@ -6617,8 +7269,8 @@ def get_psfoptflux_loop (
                 log.warning ('mask_use.shape: {} not equal to '
                              'mask_central.shape: {} for object at x,y: '
                              '{:.2f},{:.2f}; returning zero flux and fluxerr'
-                             .format(mask_use.shape, mask_central.shape,
-                                     xcoords[i], ycoords[i]))
+                             .format(mask_use.shape, mask_central.shape, x, y))
+                if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                 continue
 
             else:
@@ -6637,15 +7289,15 @@ def get_psfoptflux_loop (
                 if frac_tmp < source_minpixfrac:
                     # do not warn about objects near the CCD edge
                     dpix_edge = 5
-                    if (dpix_edge < xcoords[i] < xsize-dpix_edge and
-                        dpix_edge < ycoords[i] < ysize-dpix_edge):
+                    if (dpix_edge < x < xsize-dpix_edge and
+                        dpix_edge < y < ysize-dpix_edge):
                         log.warning (
                             'fraction of useable pixels around source at x,y: '
                             '{:.0f},{:.0f}: {:.3f} is less than limit set by '
                             'set_zogy.source_minpixfrac: {}; returning zero '
-                            'flux and flux error'
-                            .format(xcoords[i], ycoords[i], frac_tmp,
-                                    source_minpixfrac))
+                            'flux and flux error'.format(x, y, frac_tmp,
+                                                         source_minpixfrac))
+                    if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
 
 
@@ -6657,32 +7309,32 @@ def get_psfoptflux_loop (
                 if False:
 
                     # show optimal fit of particular object(s)
-                    dist_tmp = np.sqrt((xcoords[i]-2500)**2 +
-                                       (ycoords[i]-9450)**2)
+                    dist_tmp = np.sqrt((x-2500)**2 +
+                                       (y-9450)**2)
                     if dist_tmp < 50:
                         show=True
-                        log.info ('xcoords[i]: {}, ycoords[i]: {}'
-                                  .format(xcoords[i], ycoords[i]))
+                        log.info ('x: {}, y: {}'.format(x, y))
 
                 # pass input parameter [local_bkg] for this object to
                 # [flux_optimal] if it is defined
                 if local_bkg is not None:
-                    sky_bkg = local_bkg[i]
+                    sky_bkg = local_sky_bkg[i]
                 else:
                     sky_bkg = 0
 
 
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
                     P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fwhm=fwhm_use, sky_bkg=sky_bkg, show=show, tel=tel)
+                    fwhm=fwhm_use, sky_bkg=sky_bkg, inner_psflim=inner_psflim,
+                    show=show, tel=tel)
 
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
                 log.exception('problem running [flux_optimal] on object at pixel '
                               'coordinates: x={}, y={}; returning zero flux '
-                              'and fluxerr'.format(xcoords[i], ycoords[i]))
-
+                              'and fluxerr'.format(x, y))
+                if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                 continue
 
 
@@ -6703,14 +7355,16 @@ def get_psfoptflux_loop (
                         flux_psf[i], fluxerr_psf[i], chi2_psf[i] = (
                             flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
                                          mask_use=mask_use, fwhm=fwhm_fit_init,
-                                         show=show, max_nfev=200, diff=diff))
+                                         show=show, max_nfev=200, diff=diff,
+                                         inner_psflim=inner_psflim))
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
                     log.exception('problem running [flux_psffit] on object at '
                                   'pixel coordinates: {}, {}; returning zero '
                                   'flux, fluxerr, (x,y) shifts and chi2'
-                                  .format(xcoords[i], ycoords[i]))
+                                  .format(x, y))
+                    if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
 
 
@@ -6730,16 +7384,18 @@ def get_psfoptflux_loop (
                             fit_moffat_single (
                                 D_sub, D_sub_err, mask_use=mask_use,
                                 fit_gauss=gauss, fwhm=fwhm_fit_init,
-                                P_shift=P_shift, show=show, max_nfev=200)
+                                P_shift=P_shift, show=show, max_nfev=200,
+                                inner_psflim=inner_psflim)
 
                     x_moffat[i] += index[1].start
                     y_moffat[i] += index[0].start
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
-                    log.exception('problem running [fit_moffat_single] on object '
-                                  'at pixel coordinates: {}, {}; returning zeros'
-                                  .format(xcoords[i], ycoords[i]))
+                    log.exception('problem running [fit_moffat_single] on '
+                                  'object at pixel coordinates: {:.0f}, '
+                                  '{:.0f}; returning zeros'.format(x, y))
+                    if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
 
 
@@ -6747,10 +7403,8 @@ def get_psfoptflux_loop (
             if replace_sat_psf:
 
                 if False:
-                    if np.sqrt((xcoords[i]-2500)**2 +
-                               (ycoords[i]-9450)**2) < 100:
-                        log.info('xcoords[i]: {}, ycoords[i]: {}'
-                                 .format(xcoords[i], ycoords[i]))
+                    if np.sqrt((x-2500)**2 + (y-9450)**2) < 100:
+                        log.info('x: {}, y: {}'.format(x, y))
 
                 # determine pixels to be replaced; avoid including
                 # saturated pixels from other objects within the
@@ -6774,10 +7428,9 @@ def get_psfoptflux_loop (
                     mask_region = (regions==ir+1)
                     nsat = np.sum(mask_sat_sub & mask_region)
 
-                    if np.sqrt((xcoords[i]-2500)**2 +
-                               (ycoords[i]-9450)**2) < 100:
-                        log.info('xcoords[i]: {}, ycoords[i]: {}'
-                                 .format(xcoords[i], ycoords[i]))
+                    if np.sqrt((x-2500)**2 +
+                               (y-9450)**2) < 100:
+                        log.info('x: {}, y: {}'.format(x, y))
                         log.info('nsat: {}, np.sum(mask_central & mask_region): {}'
                                  .format(nsat, np.sum(mask_central & mask_region)))
 
@@ -6795,8 +7448,8 @@ def get_psfoptflux_loop (
 
                         if False:
                             D_sub_orig = np.copy(D_sub)
-                            if np.sqrt((xcoords[i]-2500)**2 +
-                                       (ycoords[i]-9450)**2) < 100:
+                            if np.sqrt((x-2500)**2 +
+                                       (y-9450)**2) < 100:
                                 D_sub_psf = P_shift * flux_opt[i] + sky_bkg
                                 ds9_arrays (D_sub_orig=D_sub_orig, D_sub=D_sub,
                                             D_mask_sub=D_mask_sub.astype(int))
@@ -6804,20 +7457,43 @@ def get_psfoptflux_loop (
 
                     else:
                         log.warning ('saturated+connected pixels not replaced '
-                                     'for object at x,y={},{}; '
-                                     'np.sum(mask_central & mask_region): {}, '
-                                     'nsat: {}'
-                                     .format(int(xcoords[i]), int(ycoords[i]),
-                                             np.sum(mask_central & mask_region),
-                                             nsat))
+                                     'for object at x,y={:.0f},{:.0f}; nsat: '
+                                     '{}, np.sum(mask_central & mask_region): {}'
+                                     .format(x, y, nsat, np.sum(mask_central &
+                                                                mask_region)))
 
 
 
-        if remove_psf:
-            if psffit:
-                D_sub -= P_shift * flux_psf[i]
-            else:
-                D_sub -= P_shift * flux_opt[i]
+            if remove_psf:
+
+                # update image; D_sub should refer to D_shared
+                if psffit:
+                    flux_tmp = flux_psf[i]
+                else:
+                    flux_tmp = flux_opt[i]
+
+                # avoid subtracting a negative source
+                if flux_tmp > 0:
+                    # lock needed??
+                    # lock.acquire()
+                    D_sub -= P_shift * flux_tmp
+                    # lock.release()
+
+
+                if nthreads > 1:
+
+                    # for objects with neighbours, add their PSFs to
+                    # tmp_shared; avoid adding negative sources
+                    if not neighbourless and flux_tmp > 0:
+                        tmp_shared[index] += P_shift * flux_tmp
+
+
+                    # set shared coordinates of this thread to zero,
+                    # so that other processes can start working on
+                    # nearby objects
+                    xy_shared[:,p_idx] = (0,0)
+
+
 
 
         if False:
@@ -6832,16 +7508,11 @@ def get_psfoptflux_loop (
 
 
 
-    # CHECK!!! - temporarily record D
-    #if remove_psf:
-    #    fits_tmp = 'test_image_psf_removed.fits'
-    #    fits.writeto (fits_tmp, D, overwrite=True)
-
 
     # PSF fit arrays to return
     if psffit:
-        x_psf = (xcoords + xshift_psf).astype('float32')
-        y_psf = (ycoords + yshift_psf).astype('float32')
+        x_psf = (xpos + xshift_psf).astype('float32')
+        y_psf = (ypos + yshift_psf).astype('float32')
         list2return = [x_psf, xerr_psf, y_psf, yerr_psf,
                        flux_psf, fluxerr_psf, chi2_psf]
 
@@ -6864,6 +7535,15 @@ def get_psfoptflux_loop (
 
     if get_psf_footprint:
         list2return = [mask_psf_footprint]
+
+
+    if remove_psf and nthreads > 1:
+        # close the shared memory
+        shm_D.close()
+        shm_xy.close()
+        if not neighbourless:
+            shm_tmp.close()
+
 
 
     return list2return
@@ -7109,7 +7789,8 @@ def get_psf_config (data, xcoord, ycoord, psf_oddsized, ysize, xsize,
 ################################################################################
 
 def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
-                 fwhm=3, diff=True, fit_bkg=True, fit_inner=False):
+                 fwhm=3, diff=True, fit_bkg=True, fit_inner=False,
+                 inner_psflim=0.01):
 
 
     # define objective function: returns the array to be minimized
@@ -7152,9 +7833,9 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
 
 
 
-    # create mask with pixel values above 1 percent of the peak of the
-    # PSF used to determine the chi-square of this region
-    mask_inner = (P >= 0.01 * np.amax(P))
+    # create mask with pixel values above [inner_psflim] of the peak
+    # of the PSF used to determine the chi-square of this region
+    mask_inner = (P >= inner_psflim * np.amax(P))
 
 
     # estimate background value and STD from pixels outside of inner
@@ -7334,9 +8015,10 @@ def get_s2n_ZO (P, D, V):
 
 ################################################################################
 
-def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=10,
-                  epsilon=0.1, mask_use=None, add_V_ast=False, fwhm=None,
-                  sky_bkg=None, dx2=0, dy2=0, dxy=0, show=False, tel=None):
+def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5,
+                  max_iters=10, epsilon=0.1, mask_use=None, add_V_ast=False,
+                  fwhm=None, sky_bkg=None, dx2=0, dy2=0, dxy=0,
+                  inner_psflim=0.01, show=False, tel=None):
 
 
     """Function that calculates optimal flux and corresponding error based
@@ -7374,12 +8056,11 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5, max_iters=
             bkg_var = bkg_var + sky_bkg
 
 
-    # [mask_inner] - the central pixels within about 1xFWHM
-    # (assuming a Gaussian shape) of the object center (where P values
-    # are higher than 0.01 times the central P value);
-    # [mask_outer] is the region outside of that
-    P_max = np.amax(P)
-    mask_inner = (P >= 0.01*P_max)
+    # [mask_inner] - the central pixels within about 1xFWHM (assuming
+    # a Gaussian shape) of the object center (where P values are
+    # higher than [set_zogy.inner_psflim] times the central P
+    # value); [mask_outer] is the region outside of that
+    mask_inner = (P >= inner_psflim * np.amax(P))
     mask_outer = ~mask_inner
     # intialize mask array to keep track of rejected pixels in loop below
     mask_temp = np.ones(D.shape, dtype=bool)
@@ -8419,11 +9100,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
     # add estimate of saturation magnitude to the header
-    satmag = get_satmag (table_cat)
-    header['MAG-SAT'] = (satmag, '[mag] magnitude brightest non-saturated '
-                         'source')
-    log.info('magnitude of brightest non-saturated source: {:.3f}'
-             .format(satmag))
+    infer_satmag (table_cat, header)
 
 
     # update header of input fits image with keywords added by
@@ -8538,7 +9215,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 ################################################################################
 
-def get_satmag (table_cat):
+def infer_satmag (table_cat, header):
 
     colnames = table_cat.colnames
 
@@ -8557,10 +9234,24 @@ def get_satmag (table_cat):
     if 'MAG_OPT' not in table_cat.colnames:
         table_cat['MAG_OPT'] = fnu2mag(table_cat['FNU_OPT'].value)
 
-    satmag = np.sort(table_cat[~mask_sat]['MAG_OPT'])[0]
+    # also exclude mag=99 values
+    mask_sat |= (table_cat['MAG_OPT'] >= 99)
+
+    # magnitude of brightest remaining star, making sure
+    # at least 1 entry is left
+    if np.sum(~mask_sat) > 0:
+        satmag = np.sort(table_cat[~mask_sat]['MAG_OPT'])[0]
+    else:
+        # if no entries left, return 99
+        satmag = 99.0
 
 
-    return satmag
+    header['MAG-SAT'] = (satmag, '[mag] magnitude brightest non-saturated '
+                         'source')
+    log.info('magnitude of brightest non-saturated source: {:.3f}'
+             .format(satmag))
+
+    return
 
 
 ################################################################################
@@ -8955,7 +9646,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                 fnuerrtot_tmp = apply_zp(table_cat[col_flux], zp, airmass_sex,
                                          exptime, ext_coeff,
                                          fluxerr=table_cat[col_fluxerr],
-                                         # CHECK!!! - use zp_std or zp_err??
+                                         #return_fnu=True, zp_err=zp_err)
                                          return_fnu=True, zp_err=zp_std)
 
 
@@ -9583,7 +10274,7 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
         table_gaia_image.sort('mag_G')
 
 
-    log.info ('selected {} Gaia stars within the image {}\nwith central ra,dec: '
+    log.info ('selected {} Gaia stars within the image {} with central ra,dec: '
               '{:.4f},{:.4f}, field-of-view: {:.3f} degrees and DATE-OBS: {}'
               .format(len(table_gaia_image), fits_in, ra_center, dec_center,
                       2*fov_half_deg, obsdate))
@@ -9609,9 +10300,6 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
 
     # remove PSF after measuring?
     remove_psf = get_par(set_zogy.remove_psf,tel)
-    if remove_psf:
-        log.warning ('PSF of object is removed from image using flux '
-                     'measurement')
 
 
     # epoch to use for proper motion correction
@@ -10470,6 +11158,11 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, dx, dy, array_shape,
         # number of stars available
         zps_nstars[nsub] = np.sum(mask_sub)
 
+        chan_tmp = coords2chan (np.array([index_x[nsub]+1]),
+                                np.array([index_y[nsub]+1]))[0]
+        log.info ('nsub: {}, nstars: {}, channel: {}'
+                  .format(nsub, zps_nstars[nsub], chan_tmp))
+
 
         # only determine zeropoint if sufficient number of values
         # [ncal_min] are available; otherwise leave it at zero
@@ -10479,11 +11172,25 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, dx, dy, array_shape,
             ma_clipped = sigma_clip(zps[mask_sub], sigma=nsigma)
             mask_use = ~ma_clipped.mask
 
+
             # weighted mean
             zps_use = zps[mask_sub][mask_use]
             zpserr_use = zpserr[mask_sub][mask_use]
+
+            if False:
+                # test selecting only brightest 10 selected by
+                # assuming the brightest ones have the lowest zpserr
+                idx_sort = np.argsort(zpserr_use)
+                zps_use = zps_use[idx_sort][0:10]
+                zpserr_use = zpserr_use[idx_sort][0:10]
+                log.info ('{}/{} zps_use: {}'.format(nsub, nsubs, zps_use))
+                log.info ('{}/{} zpserr_use: {}'.format(nsub, nsubs, zpserr_use))
+
+
             zps_wmean[nsub], zps_wstd[nsub], zps_wmeanerr[nsub] = \
                 weighted_mean (zps_use, zpserr_use)
+
+
 
             # number of stars used in the zeropoint determination
             zps_nused[nsub] = len(zps_use)
@@ -10514,7 +11221,8 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
        (zeropoints.find_sigma) to correct for the fact that the flux
        errors are likely underestimated, by finding a single constant
        error to all magnitude errors such that the reduced chi2 of the
-       distribution of values will become unity
+       distribution of values will become unity. This is only applied
+       when calculating the error on the weighted mean.
 
     """
 
@@ -10527,8 +11235,9 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
     try:
         res = mag - np.median(mag)
         sigma = find_sigma (res, magerr)
-        log.info ('inferred additional sigma in weighted_mean: {:.4f}'
-                  .format(sigma))
+        #log.info ('inferred additional sigma in weighted_mean: {:.4f}'
+        #          .format(sigma))
+
     except Exception as e:
         # in case of an exception in find_sigma, set sigma to zero
         log.warning ('following exception occurred in zogy.find_sigma, '
@@ -10536,79 +11245,45 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
         sigma = 0
 
 
-    # total magnitude error
-    magerrtot = np.sqrt(magerr**2 + sigma**2)
-    # make sure it is not smaller than the input magerr_wlim
-    magerrtot = np.maximum(magerrtot, magerr_wlim)
 
+    # make sure magerr is not smaller than the input magerr_wlim
+    magerr = np.maximum(magerr, magerr_wlim)
 
     # Pogson constant
     pogson = 2.5/np.log(10)
 
 
-    use_flux = False
-    if use_flux:
+    # simply use magnitudes; this is not strictly correct, but
+    # close to the true values because magnitude errors of
+    # calibration stars are typically small
 
-        # convert mag and magerrtot to flux
-        flux = 10**(-0.4*mag)
-        fluxerrtot = flux * magerrtot / pogson
+    # set usual weights
+    weights = 1/magerr**2
 
-        # set usual weights
-        weights = 1/fluxerrtot**2
+    # weighted mean magnitude
+    mag_wmean = np.average(mag, weights=weights)
 
-        # weighted mean flux and magnitude
-        flux_wmean = np.average(flux, weights=weights)
-        mag_wmean = -2.5*np.log10(flux_wmean)
+    # weighted sample standard deviation
+    mag_wstd = np.sqrt(np.sum(weights * (mag - mag_wmean)**2) /
+                       np.sum(weights))
 
-        # weighted sample standard deviation
-        flux_wstd = np.sqrt(np.sum(weights * (flux - flux_wmean)**2) /
-                            np.sum(weights))
-        mag_wstd = pogson * flux_wstd / flux_wmean
+    # simple STD
+    mag_std = np.std(mag)
 
-        # simple STD
-        flux_std = np.std(flux)
-        mag_std = pogson * flux_std / flux_wmean
-
-        # MAD STD
-        flux_mad_std = mad_std(flux)
-        mag_mad_std = pogson * flux_mad_std / flux_wmean
-
-        # error in the weighted mean
-        flux_wmeanerr = np.sqrt(1/np.sum(weights))
-        mag_wmeanerr = pogson * flux_wmeanerr / flux_wmean
+    # MAD STD
+    mag_mad_std = mad_std(mag)
 
 
-    else:
-
-        # simply use magnitudes; this is not strictly correct, but
-        # close to the true values because magnitude errors of
-        # calibration stars are typically small
-
-        # set usual weights
-        weights = 1/magerrtot**2
-
-        # weighted mean magnitude
-        mag_wmean = np.average(mag, weights=weights)
-
-        # weighted sample standard deviation
-        mag_wstd = np.sqrt(np.sum(weights * (mag - mag_wmean)**2) /
-                           np.sum(weights))
-
-        # simple STD
-        mag_std = np.std(mag)
-
-        # MAD STD
-        mag_mad_std = mad_std(mag)
-
-        # error in the weighted mean
-        mag_wmeanerr = np.sqrt(1/np.sum(weights))
-
-
+    # for the error in the weighted mean, add sigma, otherwise it will
+    # be severely underestimated
+    weights = 1/(magerr**2 + sigma**2)
+    mag_wmeanerr = np.sqrt(1/np.sum(weights))
 
 
     log.info ('mag_wmean: {:.4f}, mag_std: {:.4f}, mag_mad_std: {:.4f}, '
-              'mag_wstd: {:.4f}, mag_wmeanerr: {:.4f}'
-              .format(mag_wmean, mag_std, mag_mad_std, mag_wstd, mag_wmeanerr))
+              'mag_wstd: {:.4f}, mag_wmeanerr: {:.4f}, add_sigma: {:.4f}'
+              .format(mag_wmean, mag_std, mag_mad_std, mag_wstd, mag_wmeanerr,
+                      sigma))
 
 
     return mag_wmean, mag_wstd, mag_wmeanerr
@@ -10617,13 +11292,6 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
 ################################################################################
 
 def find_sigma (res, err, axis=None, maxiter=15, epsilon=1e-2):
-
-
-    # CHECK!!! - for debugging purposes
-    #log.info ('res: {}'.format(res))
-    #log.info ('np.shape(res): {}'.format(np.shape(res)))
-    #log.info ('err: {}'.format(err))
-    #log.info ('np.shape(err): {}'.format(np.shape(err)))
 
 
     # with too few valid values in case axis is None, return zero
@@ -13484,7 +14152,7 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, fit_gauss=False)
 
 def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
                        P_shift=None, fwhm=6, max_nfev=100, show=False,
-                       fit_bkg=True, fit_inner=False):
+                       fit_bkg=True, fit_inner=False, inner_psflim=0.01):
 
 
     # make 2D x,y grid of pixel coordinates corresponding to PSF data
@@ -13495,17 +14163,18 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
     xx, yy = np.meshgrid(x, y, indexing='xy')
 
 
-    # estimate x- and ycenter (pixel coordinates) in
-    # D_sub from maximum in P_shift; for objects near
-    # image edge, this will not be the central pixel
+    # estimate x- and y-center (pixel coordinates) in D_sub from
+    # maximum in P_shift; for objects near image edge, this will not
+    # be the central pixel
     if P_shift is not None:
         yc_indx, xc_indx = np.unravel_index(np.argmax(P_shift),
                                             P_shift.shape)
         ycenter = yc_indx + 1
         xcenter = xc_indx + 1
-        # create mask with pixel values above 1 percent of the peak of
-        # the PSF used to determine the chi-square of this region
-        mask_inner = (P_shift >= 0.01 * np.amax(P_shift))
+        # create mask with pixel values above
+        # [set_zogy.inner_psflim] of the peak of the PSF used to
+        # determine the chi-square of this region
+        mask_inner = (P_shift >= inner_psflim * np.amax(P_shift))
     else:
         ycenter = (imsize_y-1)/2 + 1
         xcenter = (imsize_x-1)/2 + 1
@@ -14147,14 +14816,22 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             sigma = find_sigma (res, fratio_err)
             log.info ('inferred additional sigma in get_mean_fratio: {:.3f}'
                       .format(sigma))
-            fratio_vartot = fratio_err**2 + sigma**2
+            #fratio_vartot = fratio_err**2 + sigma**2
 
-            # corresponding weights
-            m_nz = (fratio_vartot != 0)
-            weights = 1/fratio_vartot[m_nz]
+            # weights
+            m_nz = (fratio_err != 0)
+            weights = 1/fratio_err[m_nz]**2
 
-            # weighted mean and its error
+            # weighted mean
             fratio_mean = np.average(fratio[m_nz], weights=weights)
+
+            # weighted sample standard deviation
+            fratio_wstd = np.sqrt(np.sum(weights * (fratio[m_nz] - fratio_mean)**2) /
+                                  np.sum(weights))
+
+            # weighted error; add sigma to avoid underestimating the
+            # error
+            weights = 1/(fratio_err[m_nz]**2 + sigma**2)
             fratio_werr = np.sqrt(1/np.sum(weights))
 
         else:
@@ -14164,7 +14841,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
             fratio_werr = fratio_std / np.sqrt(len(fratio))
 
 
-        return fratio_mean, fratio_med, fratio_std, fratio_werr
+        return fratio_mean, fratio_med, fratio_wstd, fratio_werr
 
     #---------------------------------------------------------------------------
 
@@ -15999,7 +16676,7 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
 
 
 
-    # CHECK!!! - keep tmp copy
+    # keep tmp copy
     #if get_par(set_zogy.keep_tmp,tel):
     #    shutil.copy2 (cat_out, cat_out.replace('.fits', '_init2.fits'))
 

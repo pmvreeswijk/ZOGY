@@ -172,7 +172,7 @@ fwhm_frac = 0.33         # fraction of objects, sorted in brightness
 #===============================================================================
 # PSF parameters
 #===============================================================================
-psf_poldeg = 2           # polynomial degree PSF across image (0=constant PSF)
+psf_poldeg = 3           # polynomial degree PSF across image (0=constant PSF)
 psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
@@ -303,17 +303,21 @@ bkg_limfrac = 0.5
 apphot_fzoom = 5
 
 
-source_nsigma = 5             # signal-to-noise ratio used in calculating
-                              # limiting magnitudes and - only in case
-                              # [force_phot_gaia] is False - for source to be
-                              # included in output catalog
-source_minpixfrac = 0.67      # required fraction of good pixels in footprint
-                              # for source to be included in output catalog
+source_nsigma = 5         # signal-to-noise ratio used in calculating
+                          # limiting magnitudes and - only in case
+                          # [force_phot_gaia] is False - for source to be
+                          # included in output catalog
+source_minpixfrac = 0.67  # required fraction of good pixels in inner/central
+                          # footprint for source to have non-zero flux
+                          # in output catalog
+inner_psflim = 0.01       # PSF profile pixels with values above this limit
+                          # times the peak value are considered part of the
+                          # central/inner PSF profile
 
 
 # PSF fitting
-psffit = False                # perform PSF fitting using own function
-psffit_sex = False            # perform PSF fitting using SExtractor
+psffit = False            # perform PSF fitting using own function
+psffit_sex = False        # perform PSF fitting using SExtractor
 
 
 # Photometric calibration
