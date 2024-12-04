@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.4.0'
+__version__ = '1.4.1'
 
 
 ################################################################################
@@ -1356,7 +1356,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             table_new = Table.read(cat_new)
 
             # add the zeropoint error to the fnu errors
-            add_zp_err (table_new, header_new, imtype='new', tel=tel)
+            fn_zps = '{}_zps.npy'.format(base_new)
+            add_zp_err (table_new, header_new, imtype='new', tel=tel,
+                        fn_zps=fn_zps, image_shape=(ysize_new, xsize_new))
 
             # add magnitude columns??
             add_magcols (table_new, overwrite=False)
@@ -1493,7 +1495,8 @@ def add_refkeys (header_trans, header_ref):
 
 ################################################################################
 
-def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None):
+def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None,
+                fn_zps=None, image_shape=None):
 
     """add photometric zeropoint error (taken from the header keyword
        PC-ZPERR or PC-ZPSTD) to all flux measurement error columns of
@@ -1574,11 +1577,23 @@ def add_zp_err (table_in, header, header_ref=None, imtype='trans', tel=None):
                     table_in['CHANNEL'] = channels
 
 
-                # extract channel-dependent zp, zp_std and zp_err from
-                # header
-                zp, zp_std, zp_err = get_zp_header (header,
-                                                    set_zogy=set_zogy,
-                                                    channels=True)
+                # get full-image zeropoints from header
+                zp_single, zp_std_single, zp_err_single = get_zp_header (
+                    header, set_zogy=set_zogy)
+
+
+                # read subimage zeropoints from numpy file
+                zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(fn_zps)
+
+
+                # use get_zp_coords() to convert subimage zeropoints, zp_std
+                # and zp_err to coordinate-specific zeropoints, i.e. zp,
+                # zp_std and zp_err will have same length as number of
+                # coordinates
+                zp, zp_std, zp_err = get_zp_coords (
+                    xcoords, ycoords, zp_subs, zp, zp_std_subs, zp_std,
+                    zp_err_subs, zp_err, image_shape, zp_subs.shape)
+
 
 
 
@@ -4648,30 +4663,44 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
               .format(zp, zp_std, zp_err))
 
 
-    # for ML/BG: if set_zogy.MLBG_phot_apply_chanzp is True, replace
-    # [zp] with array of zeropoints, one for each object; same for
+    # if set_zogy.zp_nsubs_shape_new is not (1,1), replace [zp] with
+    # array of zeropoints, one for each object; same for [zp_std] and
     # [zp_err]
-    if (tel[0:2] in ['ML','BG']
-        and get_par(set_zogy.MLBG_phot_apply_chanzp,tel)):
+    zp_nsubs_shape = get_par(set_zogy.zp_nsubs_shape_new,tel)
+    if zp_nsubs_shape != (1,1):
 
-        log.info ('inferring channel-dependent zp, zp_std and zp_err')
-        zp_chan, zp_std_chan, zp_err_chan = get_zp_header (header_new,
-                                                           set_zogy=set_zogy,
-                                                           channels=True)
-        log.info ('zp_chan: {}'.format(zp_chan))
-        log.info ('zp_std_chan: {}'.format(zp_std_chan))
-        log.info ('zp_err_chan: {}'.format(zp_err_chan))
+        # obsolete
+        if False:
+            log.info ('inferring channel-dependent zp, zp_std and zp_err')
+            #CHECK!!!
+            zp_chan, zp_std_chan, zp_err_chan = get_zp_header (header_new,
+                                                               set_zogy=set_zogy,
+                                                               channels=True)
+            log.info ('zp_chan: {}'.format(zp_chan))
+            log.info ('zp_std_chan: {}'.format(zp_std_chan))
+            log.info ('zp_err_chan: {}'.format(zp_err_chan))
 
 
-        # use get_zp_coords() to convert channel zeropoints, zp_std
-        # and zp_err to coordinate-specific zeropoints, i.e. zp will
-        # have same length as number of coordinates
+
+        # read subimage zeropoints from numpy file
+        fn_zps = '{}_zps.npy'.format(base)
+        zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(fn_zps)
+
+        log.info ('zp_subs: {}'.format(zp_subs))
+        log.info ('zp_std_subs: {}'.format(zp_std_subs))
+        log.info ('zp_err_subs: {}'.format(zp_err_subs))
+
+
+        # use get_zp_coords() to convert subimage zeropoints, zp_std
+        # and zp_err to coordinate-specific zeropoints, i.e. zp,
+        # zp_std and zp_err will have same length as number of
+        # coordinates
         xcoords = table_trans['X_PEAK'].value
         ycoords = table_trans['Y_PEAK'].value
-        zp = get_zp_coords (xcoords, ycoords, zp_chan, zp)
-        zp_std = get_zp_coords (xcoords, ycoords, zp_std_chan, zp_std)
-        zp_err = get_zp_coords (xcoords, ycoords, zp_err_chan, zp_err)
-
+        zp, zp_std, zp_err = get_zp_coords (xcoords, ycoords, zp_subs, zp,
+                                            zp_std_subs, zp_std,
+                                            zp_err_subs, zp_err,
+                                            (ysize, xsize), zp_nsubs_shape)
 
 
     # get airmass from [header_new]
@@ -4781,8 +4810,10 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         if False:
 
             # add the zeropoint error to the fnu errors in transient table
+            fn_zps = '{}_zps.npy'.format(base)
             add_zp_err (table_trans, header_new, header_ref=header_ref_cat,
-                        imtype='trans', tel=tel)
+                        imtype='trans', tel=tel,
+                        fn_zps=fn_zps, image_shape=(ysize, xsize))
 
             # add magnitudes corresponding to fnu and error columns in
             # transient catalog
@@ -5118,624 +5149,6 @@ def get_shape_parameters (x2, y2, xy, errx2, erry2, errxy):
         cxy = -2*errxy / denominator
 
     return a, b, theta, erra, errb, errtheta
-
-
-################################################################################
-
-def get_psfoptflux (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
-                    psffit=False, moffat=False, gauss=False, get_limflux=False,
-                    limflux_nsigma=5., psfex_bintable_ref=None,
-                    data_new_bkg_std=None, data_ref_bkg_std=None,
-                    header_new=None, header_ref=None, header_trans=None,
-                    imtype=None, Scorr_peak=None, inject_fake=False,
-                    nsigma_fake=10, remove_psf=False,
-                    replace_sat_psf=False, replace_sat_nmax=100,
-                    set_zogy=None, tel=None, fwhm=None, diff=True,
-                    get_flags_mask_central=False, local_bkg=None,
-                    nthreads=1):
-
-
-    """Function that returns the optimal flux and its error (using the
-       function [flux_optimal] of a source at pixel positions [xcoords],
-       [ycoords] given the inputs: .psf file produced by PSFex
-       [psfex_bintable], background-subtracted data [D] and background
-       variance [bkg_var]. [D] and bkg_var are assumed to be in e-.
-
-       [D] is a 2D array meant to be the full image; [bkg_var] can be a 2D
-       array with the same shape as [D] or a scalar. [xcoords] and
-       [ycoords] are arrays, and the output flux and its error will be
-       arrays as well.
-
-       If [replace_sat_psf]=True, the function will update [D] where
-       any saturated values in the PSF footprint of the
-       [xcoords],[ycoords] coordinates that are being processed is
-       replaced by the expected flux according to the PSF. If the
-       object contains more than [replace_sat_nmax] saturated pixels,
-       the replacement is skipped for that object.
-
-       If [get_limflux]=True, the function will return the limiting
-       flux (at significance [limflux_nsigma]) at the input
-       coordinates using the function [flux_optimal_s2n] in
-       [flux_opt]; [fluxerr_opt] will contain zeros in that case, and
-       PSF fitting is not performed even if [psffit]=True.
-
-       If [inject_fake]=True, fake stars at the input [xcoords],
-       [ycoords] will be added to the image.
-
-    """
-
-    log.info('executing get_psfoptflux ...')
-    if get_par(set_zogy.timing,tel): t = time.time()
-
-
-    if remove_psf:
-        log.warning ('object PSFs are removed from image using flux measurement')
-
-
-    # initialize output arrays
-    ncoords = len(xcoords)
-    flux_opt = np.zeros(ncoords, dtype='float32')
-    fluxerr_opt = np.zeros_like(flux_opt)
-
-    if get_flags_mask_central:
-        flags_mask_central = np.zeros(ncoords, dtype='uint8')
-
-    if psffit:
-        flux_psf = np.zeros_like(flux_opt)
-        fluxerr_psf = np.zeros_like(flux_opt)
-        xshift_psf = np.zeros_like(flux_opt)
-        yshift_psf = np.zeros_like(flux_opt)
-        chi2_psf = np.zeros_like(flux_opt)
-        xerr_psf = np.zeros_like(flux_opt)
-        yerr_psf = np.zeros_like(flux_opt)
-
-    if moffat or gauss:
-        x_moffat = np.zeros(ncoords)
-        xerr_moffat = np.zeros_like(flux_opt)
-        y_moffat = np.zeros(ncoords)
-        yerr_moffat = np.zeros_like(flux_opt)
-        fwhm_moffat = np.zeros_like(flux_opt)
-        elong_moffat = np.zeros_like(flux_opt)
-        chi2_moffat = np.zeros_like(flux_opt)
-
-    if inject_fake and np.isscalar(nsigma_fake):
-        # convert to array
-        nsigma_fake = (nsigma_fake * np.ones(ncoords)).astype('float32')
-
-
-    # get dimensions of D
-    ysize, xsize = np.shape(D)
-
-    # read in PSF output binary table from psfex, containing the
-    # polynomial coefficient images, and various PSF parameters using
-    # the function [extract_psf_datapars]
-    verbose = get_par(set_zogy.verbose,tel)
-    results = extract_psf_datapars (psfex_bintable, verbose=verbose)
-    (data_psf, header_psf, psf_fwhm, psf_samp, psf_size_config, psf_chi2,
-     psf_nstars, polzero1, polscal1, polzero2, polscal2, poldeg) = results
-
-    # same for reference image
-    if psfex_bintable_ref is not None:
-
-        results_ref = extract_psf_datapars (psfex_bintable_ref, verbose=verbose)
-        (data_psf_ref, header_psf_ref, psf_fwhm_ref, psf_samp_ref,
-         psf_size_config_ref, psf_chi2_ref, psf_nstars_ref, polzero1_ref,
-         polscal1_ref, polzero2_ref, polscal2_ref, poldeg_ref) = results_ref
-
-
-    # [psf_size] is the PSF size in image pixels, which determines the
-    # size of [psf_ima] and [psf_ima_ref] below. For the photometry
-    # measurements, [psf_size] should be defined by
-    # 2*psf_rad_phot*fwhm_new or fwhm_ref; for the PSF fit to the
-    # difference image, in which case the input imtype will be None,
-    # the psf_size should be defined using the maximum of fwhm_new and
-    # fwhm_ref.
-    if imtype=='new':
-        if fwhm is not None:
-            fwhm_use = fwhm
-        else:
-            fwhm_use = fwhm_new
-
-        # initial fwhm used for flux limits and Moffat/Gauss fits below
-        fwhm_fit_init = fwhm_use
-
-    elif imtype=='ref':
-        if fwhm is not None:
-            fwhm_use = fwhm
-        else:
-            fwhm_use = fwhm_ref
-
-        fwhm_fit_init = fwhm_use
-
-    elif imtype is None:
-        fwhm_use = max(fwhm_new, fwhm_ref*(pixscale_ref/pixscale_new))
-        fwhm_fit_init = (fwhm_new + fwhm_ref) / 2.
-
-
-    psf_size = 2 * get_par(set_zogy.psf_rad_phot,tel) * fwhm_use
-    # make sure [psf_size] is not larger than [psf_size_config] *
-    # [psf_samp], which will happen if FWHM is very large
-    psf_size = int(min(psf_size, psf_size_config * psf_samp))
-    # it should also not be larger than the vignet size; for the PSF
-    # fits to the D image, that would lead to an exception because the
-    # psf_imas used to build the P_D below would not have the same
-    # size
-    size_vignet = get_par(set_zogy.size_vignet,tel)
-    psf_size = int(min(psf_size, size_vignet))
-
-    # force it to be odd
-    if psf_size % 2 == 0:
-        psf_size -= 1
-
-
-    # bad pixel mask values used inside loop
-    mask_value = get_par(set_zogy.mask_value,tel)
-    value_sat = mask_value['saturated']
-    value_satcon = mask_value['saturated-connected']
-
-    # limit of peak PSF value to define central PSF mask
-    inner_psflim = get_par(set_zogy.inner_psflim,tel)
-
-
-    log.info ('psf_size used in [get_psfoptflux]: {} pix for imtype: {}'
-              .format(psf_size, imtype))
-
-
-    # if reference image PSF is involved, infer ref image pixel
-    # coordinates corresponding to the new image xcoords, ycoords
-    if psfex_bintable_ref is not None:
-
-        # convert xycoords to ra, dec in the new image
-        wcs_new = WCS(header_new)
-        ra_new, dec_new = wcs_new.all_pix2world(xcoords, ycoords, 1)
-
-        # convert these to pixel positions in the ref image
-        wcs_ref = WCS(header_ref)
-        xcoords_ref, ycoords_ref = wcs_ref.all_world2pix(ra_new, dec_new, 1)
-
-
-
-    # loop coordinates
-    for i in range(ncoords):
-
-        t_tmp = time.time()
-
-        # using function [get_psf_ima], construct the PSF image with
-        # shape (psf_size, psf_size) at xcoords[i], ycoords[i]; this
-        # image is at the original pixel scale
-        psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
-        psf_ima, __ = get_psf_ima (
-            data_psf, xcoords[i], ycoords[i], psf_size,
-            psf_samp, polzero1, polscal1, polzero2, polscal2, poldeg,
-            imtype=imtype, psf_clean_factor=psf_clean_factor, tel=tel)
-
-
-        if i % 10000 == 0:
-            t_new = time.time()-t_tmp
-
-
-        # determine indices of PSF square footprint (with size:
-        # [psf_size]) in an image with shape (ysize, xsize) at pixel
-        # coordinates xcoords[i], ycoords[i]; if the footprint is
-        # partially off the image, index_P is needed to define the
-        # subset of pixels in the PSF footprint that are on the full
-        # image. After remapping of the ref image, these indices also
-        # apply to the ref image.
-        index, index_P = get_P_indices (
-            xcoords[i], ycoords[i], xsize, ysize, psf_size)
-
-        # if coordinates off the image, the function [get_P_indices]
-        # returns None and the rest can be skipped; continue with next
-        # source
-        if index is None:
-            log.warning ('index return from [get_P_indices] is None for object '
-                         'at x,y: {:.2f},{:.2f}; returning zero flux and fluxerr'
-                         .format(xcoords[i], ycoords[i]))
-            continue
-
-        # if [psfex_bintable_ref] is provided, the new image [psf_ima]
-        # will be convolved with the ref image [psf_ima_ref], and
-        # replaced with the resulting combined PSF image
-        if psfex_bintable_ref is not None:
-
-            # same for reference image; includes rotation to the
-            # orientation of the new image
-            psf_ima_ref, __ = get_psf_ima (
-                data_psf_ref, xcoords_ref[i], ycoords_ref[i], psf_size,
-                psf_samp_ref, polzero1_ref, polscal1_ref, polzero2_ref,
-                polscal2_ref, poldeg_ref, imtype='ref',
-                remap=True, header=header_ref, header_new=header_new,
-                psf_clean_factor=psf_clean_factor, tel=tel)
-
-
-            # [psf_ima_ref] needs to be rotated to the orientation of
-            # the new image
-            psf_ima_ref = orient_data (psf_ima_ref, header_ref,
-                                       header_out=header_new, tel=tel)
-
-
-            # setting image standard deviations and flux ratios to
-            # unity; if values present in headers, use those instead
-            sn, sr, fn, fr = 1, 1, 1, 1
-
-            if data_new_bkg_std is not None and data_ref_bkg_std is not None:
-                sn = np.median(data_new_bkg_std[index])
-                sr = np.median(data_ref_bkg_std[index])
-            elif header_new is not None:
-                if 'S-BKGSTD' in header_new:
-                    sn = header_new['S-BKGSTD']
-                if 'S-BKGSTD' in header_ref:
-                    sr = header_new['S-BKGSTD']
-
-            if header_trans is not None:
-                if 'Z-FNR' in header_trans:
-                    fr = fn / header_new['Z-FNR']
-
-
-            # could save some time in rest of the loop below by saving
-            # P_D for each subimage when it is created in [run_zogy],
-            # and reading them in this function; they would need to be
-            # fftshifted back and extracted as the center as they are
-            # defined for the entire subimage. Downside: single PSF is
-            # used for the entire subimage - not so unreasonable.
-
-            # now combine [psf_ima] and [psf_ima_ref]
-            # into single psf image using FFT, first performing FFT shift
-            Pn_fftshift = fft.fftshift(psf_ima)
-            Pr_fftshift = fft.fftshift(psf_ima_ref)
-            # fourier transforms
-            Pn_hat = fft.fft2(Pn_fftshift)
-            Pr_hat = fft.fft2(Pr_fftshift)
-            Pn_hat2_abs = np.abs(Pn_hat**2)
-            Pr_hat2_abs = np.abs(Pr_hat**2)
-
-            # following definitions as in zogy core function
-            sn2 = sn**2
-            sr2 = sr**2
-            fn2 = fn**2
-            fr2 = fr**2
-            fD = (fr*fn) / np.sqrt(sn2*fr2+sr2*fn2)
-            denominator = (sn2*fr2)*Pr_hat2_abs + (sr2*fn2)*Pn_hat2_abs
-            P_D_hat = (fr*fn/fD) * (Pr_hat*Pn_hat) / np.sqrt(denominator)
-
-            # multiply, inverse FFT and shift
-            P_D = fft.ifftshift(np.real(fft.ifft2(P_D_hat)))
-            # needs shift of 1,1 pixel because above operations
-            # are on a odd-sized image
-            psf_ima = ndimage.shift(P_D, (1,1), order=2)
-            # normalize
-            psf_ima /= np.sum(psf_ima)
-
-            # this provides the same result (apart from the sn, sr,
-            # fn, fr ratios), but is ~10 times slower:
-            #psf_ima_config = ndimage.convolve(psf_ima_config, psf_ima_config_ref)
-            #psf_ima_config /= np.sum(psf_ima_config)
-
-
-
-        # extract index_P
-        P_shift = psf_ima[index_P]
-
-        # extract subsection from D, D_mask
-        D_sub = D[index]
-        D_mask_sub = D_mask[index]
-
-
-        # if bkg_var is a scalar, convert to an image
-        if np.isscalar(bkg_var):
-            bkg_var_sub = bkg_var * np.ones(D_sub.shape)
-
-        # if bkg_var is a 2D array with the same shape as the input
-        # data image (D), extract the subimage part
-        elif np.shape(bkg_var) == np.shape(D):
-            bkg_var_sub = bkg_var[index]
-
-        # if input background variance is a string
-        # 'calc_from_data', calculate it from the input subimage
-        # (can be used when background standard deviation was not
-        # calculated already, e.g. for the zogy difference (D)
-        # image when transients are being fit using this function
-        elif bkg_var == 'calc_from_data':
-            D_sub_masked = np.ma.masked_array(D_sub, mask=D_mask_sub)
-            D_sub_mean, D_sub_median, D_sub_std = sigma_clipped_stats (
-                D_sub_masked.astype(float), mask_value=0)
-            bkg_var_sub = D_sub_std**2
-
-        else:
-            # if none of the above, write error message to log
-            log.error('input parameter {} with value {} in function {} '
-                      'not understood'
-                      .format('bkg_var', bkg_var, 'get_psfoptflux'))
-
-
-        # define central mask of object using the PSF
-        mask_central = (P_shift >= inner_psflim * np.amax(P_shift))
-
-        # if flags_mask_central is specified, calculate the combined
-        # flags_mask of the central object area
-        if get_flags_mask_central:
-            flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
-
-
-        # determine optimal or psf or limiting flux
-        if get_limflux:
-            # determine limiting flux at this position using
-            # flux_optimal_s2n; if Poisson noise of objects should be
-            # taken into account, then add background-subtracted image
-            # to the background variance: bkg_var_sub + D_sub
-            flux_opt[i] = flux_optimal_s2n (P_shift, bkg_var_sub,
-                                            limflux_nsigma, fwhm=fwhm_fit_init)
-
-        elif inject_fake:
-
-            # add star to input image with following flux; here the
-            # Poisson noise of objects is added to the background
-            # variance
-            flux_opt[i] = flux_optimal_s2n (P_shift, bkg_var_sub + D_sub,
-                                            nsigma_fake[i], fwhm=fwhm_fit_init)
-            D_sub += flux_opt[i] * psf_ima
-
-
-        else:
-
-            # use only those pixels that are not affected by any bad
-            # pixels, cosmic rays, saturation, edge pixels, etc.
-            mask_use = (D_mask_sub==0)
-
-            if mask_use.shape != mask_central.shape:
-                log.warning ('mask_use.shape: {} not equal to '
-                             'mask_central.shape: {} for object at x,y: '
-                             '{:.2f},{:.2f}; returning zero flux and fluxerr'
-                             .format(mask_use.shape, mask_central.shape,
-                                     xcoords[i], ycoords[i]))
-                continue
-
-            else:
-                if np.sum(mask_central) != 0:
-                    frac_tmp = (np.sum(mask_use & mask_central) /
-                                np.sum(mask_central))
-                else:
-                    frac_tmp = 0
-
-                # if the fraction of good pixels around the source is less
-                # than set_zogy.source_minpixfrac, then continue with next
-                # source; optimal flux will be zero and source will not be
-                # included in output catalog - may result in very
-                # saturated stars not ending up in output catalog
-                if frac_tmp < get_par(set_zogy.source_minpixfrac,tel):
-                    # too many bad pixel objects to warn about
-                    #log.warning ('fraction of useable pixels around source '
-                    #             'at x,y: {:.0f},{:.0f}: {} is less than limit '
-                    #             'set by set_zogy.source_minpixfrac: {}; '
-                    #             'returning zero flux and flux error'
-                    #             .format(xcoords[i], ycoords[i], frac_tmp,
-                    #                     get_par(set_zogy.source_minpixfrac,tel)))
-                    continue
-
-
-            # perform optimal photometry measurements
-            try:
-
-                show=False
-
-                if False:
-
-                    # show optimal fit of particular object(s)
-                    dist_tmp = np.sqrt((xcoords[i]-2500)**2 +
-                                       (ycoords[i]-9450)**2)
-                    if dist_tmp < 50:
-                        show=True
-                        log.info ('xcoords[i]: {}, ycoords[i]: {}'
-                                  .format(xcoords[i], ycoords[i]))
-
-
-                # pass input parameter [local_bkg] for this object to
-                # [flux_optimal] if it is defined
-                if local_bkg is not None:
-                    sky_bkg = local_bkg[i]
-                else:
-                    sky_bkg = 0
-
-
-                flux_opt[i], fluxerr_opt[i] = flux_optimal (
-                    P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fwhm=fwhm_use, sky_bkg=sky_bkg, inner_psflim=inner_psflim,
-                    show=show, tel=tel)
-
-
-            except Exception as e:
-                #log.exception(traceback.format_exc())
-                log.exception('problem running [flux_optimal] on object at '
-                              'pixel coordinates: x={}, y={}; returning zero '
-                              'flux and fluxerr'.format(xcoords[i], ycoords[i]))
-
-                continue
-
-
-            # infer error image used in psffit and gauss/moffat fits below
-            D_sub_err = np.sqrt(np.abs(bkg_var_sub))
-
-
-            # if psffit=True, perform PSF fitting
-            if psffit:
-
-                if i==0:
-                    show=True
-                else:
-                    show=False
-
-                try:
-                    xshift_psf[i], xerr_psf[i], yshift_psf[i], yerr_psf[i], \
-                        flux_psf[i], fluxerr_psf[i], chi2_psf[i] = (
-                            flux_psffit (P_shift, D_sub, D_sub_err, flux_opt[i],
-                                         mask_use=mask_use, fwhm=fwhm_fit_init,
-                                         show=show, max_nfev=200, diff=diff,
-                                         inner_psflim=inner_psflim))
-
-                except Exception as e:
-                    #log.exception(traceback.format_exc())
-                    log.exception('problem running [flux_psffit] on object at '
-                                  'pixel coordinates: {}, {}; returning zero '
-                                  'flux, fluxerr, (x,y) shifts and chi2'
-                                  .format(xcoords[i], ycoords[i]))
-                    continue
-
-
-            # if moffat=True, perform Moffat fit
-            if moffat or gauss:
-
-                if i==0:
-                    show=True
-                else:
-                    show=False
-
-                try:
-
-                    # fit 2D gauss
-                    x_moffat[i], xerr_moffat[i], y_moffat[i], yerr_moffat[i], \
-                        fwhm_moffat[i], elong_moffat[i], chi2_moffat[i] = \
-                            fit_moffat_single (
-                                D_sub, D_sub_err, mask_use=mask_use,
-                                fit_gauss=gauss, fwhm=fwhm_fit_init,
-                                P_shift=P_shift, show=show, max_nfev=200,
-                                inner_psflim=inner_psflim)
-
-                    x_moffat[i] += index[1].start
-                    y_moffat[i] += index[0].start
-
-                except Exception as e:
-                    #log.exception(traceback.format_exc())
-                    log.exception('problem running [fit_moffat_single] on object '
-                                  'at pixel coordinates: {}, {}; returning zeros'
-                                  .format(xcoords[i], ycoords[i]))
-                    continue
-
-
-            # replace saturated+connected pixels with PSF profile
-            if replace_sat_psf:
-
-                if False:
-                    if np.sqrt((xcoords[i]-2500)**2 +
-                               (ycoords[i]-9450)**2) < 100:
-                        log.info('xcoords[i]: {}, ycoords[i]: {}'
-                                 .format(xcoords[i], ycoords[i]))
-
-                # determine pixels to be replaced; avoid including
-                # saturated pixels from other objects within the
-                # footprint
-
-                # mask of saturated+connected pixels in subimage:
-                mask_sat_sub = (D_mask_sub & value_sat == value_sat)
-                mask_satcon_sub = (mask_sat_sub |
-                                   (D_mask_sub & value_satcon == value_satcon))
-
-                # label saturated+connected pixels; also
-                # diagonally-connected pixels are included in a region
-                struct = np.ones((3,3), dtype=bool)
-                regions, nregions = ndimage.label(mask_satcon_sub,
-                                                  structure=struct)
-
-
-                # loop regions
-                for ir in range(nregions):
-
-                    mask_region = (regions==ir+1)
-                    nsat = np.sum(mask_sat_sub & mask_region)
-
-                    if np.sqrt((xcoords[i]-2500)**2 +
-                               (ycoords[i]-9450)**2) < 100:
-                        log.info('xcoords[i]: {}, ycoords[i]: {}'
-                                 .format(xcoords[i], ycoords[i]))
-                        log.info('nsat: {}, sum(mask_central & mask_region): {}'
-                                 .format(nsat, np.sum(mask_central &
-                                                      mask_region)))
-
-                    # check if there is overlap with central PSF region
-                    if (np.sum(mask_central & mask_region) > 0 and
-                        nsat > 0 and nsat <= replace_sat_nmax):
-
-                        mask_satcon_use = (mask_satcon_sub & mask_region)
-
-
-                        # replace these by the estimate of flux_opt * PSF + 2d
-                        # fit to the sky background, determined in function
-                        # [flux_optimal]
-                        D_sub[mask_satcon_use] = (
-                            P_shift[mask_satcon_use] * flux_opt[i] + sky_bkg)
-
-
-                        if False:
-                            D_sub_orig = np.copy(D_sub)
-                            if np.sqrt((xcoords[i]-2500)**2 +
-                                       (ycoords[i]-9450)**2) < 100:
-                                D_sub_psf = P_shift * flux_opt[i] + sky_bkg
-                                ds9_arrays (D_sub_orig=D_sub_orig, D_sub=D_sub,
-                                            D_mask_sub=D_mask_sub.astype(int))
-
-
-                    else:
-                        log.warning ('saturated+connected pixels not replaced '
-                                     'for object at x,y={},{}; '
-                                     'np.sum(mask_central & mask_region): {}, '
-                                     'nsat: {}'
-                                     .format(int(xcoords[i]), int(ycoords[i]),
-                                             np.sum(mask_central & mask_region),
-                                             nsat))
-
-
-
-        if remove_psf:
-            if psffit:
-                D_sub -= P_shift * flux_psf[i]
-            else:
-                D_sub -= P_shift * flux_opt[i]
-
-
-        if False:
-            if i % 10000 == 0:
-                t_loop = time.time()-t_tmp
-                log.info ('t_loop = {:.3f}s'.format(t_loop))
-                log.info ('t_new = {:.3f}s; fraction: {:.3f}'
-                          .format(t_new, t_new/t_loop))
-                if psfex_bintable_ref is not None:
-                    log.info ('t_ref = {:.3f}s; fraction: {:.3f}'
-                              .format(t_ref, t_ref/t_loop))
-
-
-
-
-
-    if get_par(set_zogy.timing,tel):
-        log_timing_memory (t0=t, label='in get_psfoptflux')
-
-
-    # return optimal flux, which can refer to a limiting flux
-    # or flux of an artificial/fake object that was added
-    list2return = [flux_opt, fluxerr_opt]
-
-
-    # PSF fit arrays to return
-    if psffit:
-        x_psf = xcoords + xshift_psf
-        y_psf = ycoords + yshift_psf
-        list2return = [x_psf, xerr_psf, y_psf, yerr_psf,
-                       flux_psf, fluxerr_psf, chi2_psf]
-
-    # Moffat/Gauss arrays to return
-    if moffat or gauss:
-        list2return = [x_moffat, xerr_moffat, y_moffat, yerr_moffat,
-                       fwhm_moffat, elong_moffat, chi2_moffat]
-
-
-    # if specified, add combined flags_mask of central PSF area
-    if get_flags_mask_central:
-        list2return += [flags_mask_central]
-
-
-    #list2return = [elem for sublist in list2return for elem in sublist]
-    #list2return = list(itertools.chain.from_iterable(list2return))
-
-    return list2return
 
 
 ################################################################################
@@ -6356,7 +5769,7 @@ def prep_indices (xcoords, nthreads, mask=None, x_sort=False):
 
 def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        psffit=False, moffat=False, gauss=False, get_limflux=False,
-                       limflux_nsigma=5., psfex_bintable_ref=None,
+                       limflux_nsigma=5, psfex_bintable_ref=None,
                        data_new_bkg_std=None, data_ref_bkg_std=None,
                        header_new=None, header_ref=None, header_trans=None,
                        imtype=None, Scorr_peak=None, inject_fake=False,
@@ -6479,6 +5892,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # multiprocessing breaking down
     psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
     source_minpixfrac = get_par(set_zogy.source_minpixfrac,tel)
+    source_maxsatpix = get_par(set_zogy.source_maxsatpix,tel)
     inner_psflim = get_par(set_zogy.inner_psflim,tel)
     mask_value = get_par(set_zogy.mask_value,tel)
 
@@ -6566,10 +5980,10 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             inject_fake, nsigma_fake,
             replace_sat_psf, replace_sat_nmax, remove_psf,
             fwhm_use, diff, get_flags_mask_central,
-            psf_clean_factor, source_minpixfrac, inner_psflim,
-            mask_value, local_bkg, get_psf_footprint,
-            lock, pid_list, n_fainter_neighbours, x_borders,
-            tel, nthreads]
+            psf_clean_factor, source_minpixfrac, source_maxsatpix,
+            inner_psflim, mask_value, local_bkg,
+            get_psf_footprint, lock, pid_list,
+            n_fainter_neighbours, x_borders, tel, nthreads]
 
 
 
@@ -6848,10 +6262,10 @@ def get_psfoptflux_loop (
         inject_fake=False, nsigma_fake=10,
         replace_sat_psf=False, replace_sat_nmax=100, remove_psf=False,
         fwhm_use=None, diff=True, get_flags_mask_central=False,
-        psf_clean_factor=None, source_minpixfrac=None, inner_psflim=None,
-        mask_value=None, local_bkg=None, get_psf_footprint=False,
-        lock=None, pid_list=None, n_fainter_neighbours=None, x_borders=None,
-        tel=None, nthreads=None):
+        psf_clean_factor=None, source_minpixfrac=None, source_maxsatpix=None,
+        inner_psflim=None, mask_value=None, local_bkg=None,
+        get_psf_footprint=False, lock=None, pid_list=None,
+        n_fainter_neighbours=None, x_borders=None, tel=None, nthreads=None):
 
 
 
@@ -7264,6 +6678,7 @@ def get_psfoptflux_loop (
             # use only those pixels that are not affected by any bad
             # pixels, cosmic rays, saturation, edge pixels, etc.
             mask_use = (D_mask_sub==0)
+            mask_sat = (D_mask_sub & value_sat == value_sat)
 
             if mask_use.shape != mask_central.shape:
                 log.warning ('mask_use.shape: {} not equal to '
@@ -7280,6 +6695,11 @@ def get_psfoptflux_loop (
                 else:
                     frac_tmp = 0
 
+
+                # number of saturated pixels in mask_central
+                npix_sat = np.sum(mask_sat & mask_central)
+
+
                 # if the fraction of good pixels around the source is less
                 # than set_zogy.source_minpixfrac, then continue with next
                 # source; optimal flux will be zero and source will not be
@@ -7292,13 +6712,26 @@ def get_psfoptflux_loop (
                     if (dpix_edge < x < xsize-dpix_edge and
                         dpix_edge < y < ysize-dpix_edge):
                         log.warning (
-                            'fraction of useable pixels around source at x,y: '
-                            '{:.0f},{:.0f}: {:.3f} is less than limit set by '
-                            'set_zogy.source_minpixfrac: {}; returning zero '
-                            'flux and flux error'.format(x, y, frac_tmp,
-                                                         source_minpixfrac))
+                            'fraction of useable pixels in inner profile of '
+                            'source at x,y: {:.0f},{:.0f}: {:.3f} is less than '
+                            'limit set by set_zogy.source_minpixfrac: {}; '
+                            'returning zero flux and flux error'
+                            .format(x, y, frac_tmp, source_minpixfrac))
+
                     if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
+
+
+                if npix_sat > source_maxsatpix:
+                    log.warning (
+                        'number of saturated pixels in inner profile of source '
+                        'at x,y: {:.0f},{:.0f}: {:.3f} is greater than '
+                        'set_zogy.source_maxsatpix: {}; returning zero flux and '
+                        'flux error'.format(x, y, npix_sat, source_maxsatpix))
+
+                    if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
+                    continue
+
 
 
             # perform optimal photometry measurements
@@ -8643,7 +8076,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # use function [get_psfoptflux] to add the stars
         psfex_bintable = '{}_psf.fits'.format(base)
-        fakestar_flux_in, __ = get_psfoptflux (
+        fakestar_flux_in, __ = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xcoords_fake,
             ycoords_fake, inject_fake=True, nsigma_fake=nsigma_fake_in,
             imtype=imtype, set_zogy=set_zogy, nthreads=1, tel=tel)
@@ -8774,6 +8207,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             (get_par(set_zogy.redo_ref,tel) and imtype=='ref'))
 
 
+    # infer number of subimages for ZP refinement, used in
+    # phot_calibrate and infer_optimal_fluxmag below
+    if imtype=='new':
+        zp_nsubs_shape = get_par(set_zogy.zp_nsubs_shape_new,tel)
+    elif imtype=='ref':
+        zp_nsubs_shape = get_par(set_zogy.zp_nsubs_shape_ref,tel)
+
+
     # only execute this phot_calibrate/limiting magnitude image block
     # if the photometric calibration was not already performed
     # successfully, or redo is switched on
@@ -8800,7 +8241,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             zp, zp_std, zp_err, ncal_used, airmass_cal = phot_calibrate (
                 fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
-                imtype, objmask, fwhm, nthreads, rot=rot)
+                imtype, objmask, fwhm, zp_nsubs_shape, nthreads, rot=rot)
 
             if zp is None or ncal_used==0:
                 pc_ok = False
@@ -8841,6 +8282,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # went fine
             header['PC-AIRM'] = (np.median(airmass_cal),
                                  'median airmass of calibration stars')
+
+
+        header['PC-ZPSHP'] = (str(zp_nsubs_shape).replace(' ',''),
+                              'no. of subimages (ny,nx) for ZP refinement')
+        phot_ncal_min = get_par(set_zogy.phot_ncal_min,tel)
+        header['PC-NCMIN'] = (phot_ncal_min, 'required min. no. of photcal '
+                              'stars to infer ZP')
 
 
         # determine airmass at image center
@@ -8908,7 +8356,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # execute [get_psfoptflux]
         nsigma = get_par(set_zogy.source_nsigma,tel)
         psfex_bintable = '{}_psf.fits'.format(base)
-        limflux_array, __ = get_psfoptflux (
+        limflux_array, __ = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
             ylim, get_limflux=True, limflux_nsigma=nsigma,
             imtype=imtype, set_zogy=set_zogy, nthreads=1, tel=tel)
@@ -9056,7 +8504,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             table_cat = infer_optimal_fluxmag (
                 table_cat, header, exptime, filt, obsdate, base, data_wcs,
                 data_bkg_std, data_mask, objmask, imtype, zp, zp_std, zp_err,
-                fwhm, nthreads)
+                zp_nsubs_shape, fwhm, nthreads)
 
 
             # merge fake stars and catalog
@@ -9073,28 +8521,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # add number of Gaia objects on the image
             header['NGAIA'] = ('None', 'number of Gaia sources within image '
                                'footprint')
-
-
-
-        # number of brightest channel stars used; this used to be only
-        # relevant for Gaia forced photometry, but since Oct 2024 it
-        # is also applied inside [infer_optimal_fluxmag]
-        if tel[0:2] in ['ML','BG']:
-
-            if imtype=='ref':
-                # for the reference image, the image-average zeropoint
-                # is used
-                apply_chanzp = False
-            else:
-                apply_chanzp = get_par(set_zogy.MLBG_phot_apply_chanzp,tel)
-
-
-            header['PC-ZPCHN'] = (apply_chanzp, 'applied channel ZPs instead of '
-                                  'image-average?')
-
-            ncal_min_chan = get_par(set_zogy.MLBG_phot_ncal_min_chan,tel)
-            header['PC-NCMIN'] = (ncal_min_chan, 'required minimum number of '
-                                  'chan. photcal stars')
 
 
 
@@ -9414,7 +8840,7 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
 def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                            data_wcs, data_bkg_std, data_mask, objmask, imtype,
-                           zp, zp_std, zp_err, fwhm, nthreads):
+                           zp, zp_std, zp_err, zp_nsubs_shape, fwhm, nthreads):
 
 
     if get_par(set_zogy.timing,tel): t1 = time.time()
@@ -9603,23 +9029,23 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
 
 
-    # for ML/BG, if set_zogy.MLBG_phot_apply_chanzp is True, replace
-    # [zp] with array of zeropoints, one for each object; same for
-    # [zp_err]
-    if (tel[0:2] in ['ML','BG'] and imptype=='new'
-        and get_par(set_zogy.MLBG_phot_apply_chanzp,tel)):
+    # if input zp_nsubs_shape is not (1,1), replace [zp] with array of
+    # zeropoints, one for each object; same for [zp_std] and [zp_err]
+    if zp_nsubs_shape != (1,1):
 
-        log.info ('inferring channel-dependent zp, zp_std and zp_err')
-        zp_chan, zp_std_chan, zp_err_chan = get_zp_header (header,
-                                                           set_zogy=set_zogy,
-                                                           channels=True)
+        # read subimage zeropoints from numpy file
+        fn_zps = '{}_zps.npy'.format(base)
+        zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(fn_zps)
 
-        # use get_zp_coords() to convert channel zeropoints, zp_std
-        # and zp_err to coordinate-specific zeropoints, i.e. zp will
-        # have same length as number of coordinates
-        zp = get_zp_coords (xwin, ywin, zp_chan, zp)
-        zp_std = get_zp_coords (xwin, ywin, zp_std_chan, zp_std)
-        zp_err = get_zp_coords (xwin, ywin, zp_err_chan, zp_err)
+
+        # use get_zp_coords() to convert subimage zeropoints, zp_std
+        # and zp_err to coordinate-specific zeropoints, i.e. zp,
+        # zp_std and zp_err will have same length as number of
+        # coordinates
+        zp, zp_std, zp_err = get_zp_coords (xwin, ywin, zp_subs, zp,
+                                            zp_std_subs, zp_std,
+                                            zp_err_subs, zp_err,
+                                            (ysize, xsize), zp_nsubs_shape)
 
 
 
@@ -9775,7 +9201,7 @@ def limit_cal (table_cal, filt):
                                axis=0)
         # if less than [set_zogy.phot_ncal_min] stars left,
         # drop filter requirements and hope for the best!
-        phot_ncal_min = 10
+        phot_ncal_min = get_par(set_zogy.phot_ncal_min,tel)
         if np.sum(mask_cal_filt) >= phot_ncal_min:
             table_cal = table_cal[mask_cal_filt]
         else:
@@ -9795,7 +9221,7 @@ def limit_cal (table_cal, filt):
 
 def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                     dec_center, fov_half_deg, data_wcs, data_bkg_std, data_mask,
-                    imtype, objmask, fwhm, nthreads, rot=0):
+                    imtype, objmask, fwhm, zp_nsubs_shape, nthreads, rot=0):
 
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -9946,12 +9372,78 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
         # determine single zeropoint for entire image
         zp, zp_std, zp_err, ncal_used = calc_zp (
-            x_array, y_array, zp_array, zp_err_array, filt, imtype,
-            data_wcs.shape, zp_type='single')
-
+            x_array, y_array, zp_array, zp_err_array, data_wcs.shape, (1,1), tel)
 
         header['PC-NCAL'] = (ncal_used,
-                             'number of photcal stars used (S/N>=10,flags=0)')
+                             'no. of photcal stars with S/N>=10, FLAGS_MASK=0')
+
+
+        # if input zp_nsubs_shape is different from (1,1), also infer
+        # zeropoints with corresponding shape and save them to number
+        # file
+        if zp_nsubs_shape != (1,1):
+
+            zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs = calc_zp (
+                x_array, y_array, zp_array, zp_err_array, data_wcs.shape,
+                zp_nsubs_shape, tel)
+
+            fn_zps = '{}_zps.npy'.format(base)
+            np.save(fn_zps, [zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs])
+
+
+            # if keeping intermediate/temporary files, save
+            # these 2D zeropoint images
+            nsubs = zp_subs.size
+            if get_par(set_zogy.keep_tmp,tel):
+                fits.writeto('{}_zp_subs_{}.fits'.format(base, nsubs),
+                             zp_subs, overwrite=True)
+                fits.writeto('{}_zp_std_subs_{}.fits'.format(base, nsubs),
+                             zp_std_subs, overwrite=True)
+                fits.writeto('{}_zp_err_subs_{}.fits'.format(base, nsubs),
+                             zp_err_subs, overwrite=True)
+                fits.writeto('{}_zp_ncal_subs_{}.fits'.format(base, nsubs),
+                             ncal_used_subs.astype('int16'), overwrite=True)
+
+
+
+            if tel[0:2] in ['ML', 'BG']:
+                # apply statistics below for ML/BG images on 8x8
+                # subimages for backward compatibility
+                zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs = calc_zp (
+                    x_array, y_array, zp_array, zp_err_array, data_wcs.shape,
+                    (8,8), tel)
+
+
+
+            # add statistics of these arrays to header
+            mask_use = ((zp_subs != 0) & (zp_std_subs != 0) & (zp_err_subs != 0))
+            n_zps = np.sum(mask_use)
+            if n_zps >= 4:
+                # discard the highest and lowest value in stats
+                arr_sort = np.sort(zp_subs[mask_use])
+                max_diff = np.abs(arr_sort[-2] - arr_sort[1])
+                arr_sort = np.sort(zp_std_subs[mask_use])
+                max_std = arr_sort[-2]
+                arr_sort = np.sort(zp_err_subs[mask_use])
+                max_err = arr_sort[-2]
+            else:
+                log.warning ('too few subimages (<4) available to '
+                             'determine maximum ZP difference, STD and ERR')
+                max_diff = 'None'
+                max_std = 'None'
+                max_err = 'None'
+
+
+            header['PC-TNSUB'] = (nsubs, 'total number of subimages available')
+            header['PC-NSUB'] = (n_zps, 'number of subimages used for ZP '
+                                 'statistics')
+            header['PC-MZPD'] = (max_diff, '[mag] max. ZP difference between '
+                                 'subimages')
+            header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma (STD) of '
+                                 'subimages')
+            header['PC-MZPE'] = (max_err, '[mag] max. ZP error of subimages')
+
+
 
 
         # after sorting in brightness and masking table_cal with
@@ -9997,13 +9489,17 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         # for MeerLICHT and BlackGEM only
         if tel[0:2] in ['ML','BG']:
 
-            # calculate zeropoint for each channel - not
-            # restricted anymore to brightest maximum number
-            # defined by get_par(set_zogy.phot_ncal_use,tel)
-            # which is used in the single-value ZP above
+            # calculate zeropoint for each channel
             zp_chan, zp_std_chan, zp_err_chan, ncal_chan = calc_zp (
-                x_array, y_array, zp_array, zp_err_array, filt, imtype,
-                zp_type='channels')
+                x_array, y_array, zp_array, zp_err_array, data_wcs.shape, (2,8),
+                tel)
+
+
+            # convert to 1-dimensional arrays
+            zp_chan = zp_chan.ravel()
+            zp_std_chan = zp_std_chan.ravel()
+            zp_err_chan = zp_err_chan.ravel()
+            ncal_chan = ncal_chan.ravel()
 
 
             # replace channels points that have zero values (due to
@@ -10098,57 +9594,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 plt.close()
 
 
-            # determine median zeropoints on subimages to
-            # check if they are constant across the image
-            subsize = get_par(set_zogy.subimage_size,tel)
-            zp_mini, zp_std_mini, zp_err_mini, ncal_mini = calc_zp (
-                x_array, y_array, zp_array, zp_err_array, filt, imtype,
-                data_shape=data_wcs.shape, zp_type='background',
-                boxsize=subsize)
 
-
-            # if keeping intermediate/temporary files, save
-            # these mini images
-            if get_par(set_zogy.keep_tmp,tel):
-
-                fits.writeto('{}_zp_subs.fits'.format(base),
-                             zp_mini, overwrite=True)
-                fits.writeto('{}_zp_std_subs.fits'.format(base),
-                             zp_std_mini, overwrite=True)
-                fits.writeto('{}_zp_err_subs.fits'.format(base),
-                             zp_err_mini, overwrite=True)
-                fits.writeto('{}_zp_ncal_subs.fits'.format(base),
-                             ncal_mini.astype('int16'), overwrite=True)
-
-
-            # add statistics of these arrays to header
-            mask_use = ((zp_mini != 0) & (zp_std_mini != 0) & (zp_err_mini != 0))
-            n_zps = np.sum(mask_use)
-            if n_zps >= 4:
-                # discard the highest and lowest value in stats
-                arr_sort = np.sort(zp_mini[mask_use])
-                max_diff = np.abs(arr_sort[-2] - arr_sort[1])
-                arr_sort = np.sort(zp_std_mini[mask_use])
-                max_std = arr_sort[-2]
-                arr_sort = np.sort(zp_err_mini[mask_use])
-                max_err = arr_sort[-2]
-            else:
-                log.warning ('too few subimages (<4) available to '
-                             'determine maximum ZP difference, STD and ERR')
-                max_diff = 'None'
-                max_std = 'None'
-                max_err = 'None'
-
-
-            header['PC-TNSUB'] = (int(ysize/subsize)**2, 'total number of '
-                                  'subimages available')
-            header['PC-NSUB'] = (n_zps, 'number of subimages used for ZP '
-                                 'statistics')
-            header['PC-MZPD'] = (max_diff, '[mag] max. ZP difference between '
-                                 'subimages')
-            header['PC-MZPS'] = (max_std, '[mag] max. ZP sigma (STD) of '
-                                 'subimages')
-            header['PC-MZPE'] = (max_err, '[mag] max. ZP error of subimages')
 
 
 
@@ -10958,25 +10404,150 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
 
 ################################################################################
 
-def calc_zp (x_array, y_array, zp_array, zp_err_array, filt, imtype,
-             data_shape=None, zp_type='single', boxsize=None, nsigma=2.5):
+def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
+             zp_nsubs_shape, tel, nsigma=2.5, fzoom=(2,2)):
+
 
     if get_par(set_zogy.timing,tel): t = time.time()
     log.info('executing calc_zp ...')
 
 
+    # minimum required number of calibration stars
+    ncal_min = get_par(set_zogy.phot_ncal_min,tel)
+
+
+    for i in range(20):
+
+        if i==0:
+            # start with input nsubimages shape
+            ny, nx = zp_nsubs_shape
+        else:
+            # decrease with factor 2, until 1 is reached
+            ny //= fzoom[0]
+            nx //= fzoom[1]
+            ny, nx = np.maximum((1,1), (ny,nx))
+
+
+            # for ML/BG, do not cross the channel boundaries
+            if tel[0:2] in ['ML', 'BG']:
+                if ny > 1:
+                    log.warning ('forcing nx >= 8 for telescope {}'.format(tel))
+                    nx = np.max(nx,8)
+                else:
+                    # unless ny has become 1, then consider the
+                    # zeropoints across the entire image
+                    nx = 1
+
+
+        # determine zeropoints
+        _zp, _zp_std, _zp_err, _nstars, _nused = zps_weighted_mean (
+            x_array, y_array, zp_array, zp_err_array, image_shape,
+            (ny,nx), ncal_min=ncal_min, nsigma=nsigma)
+
+
+        if zp_nsubs_shape == (1,1):
+
+            if _nused >= ncal_min:
+                zp, zp_std, zp_err, nused = _zp, _zp_std, _zp_err, _nused
+            else:
+                zp, zp_std, zp_err, nused = (0, 0, 0, 0)
+                log.warning ('could not determine zeropoints weighted mean for '
+                             'lack of calibration stars (<{}); returning zeros'
+                             .format(ncal_min))
+
+            # done
+            break
+
+
+        else:
+
+            if i==0:
+                # in the first iteration, record zeropoints for next iteration
+                zp, zp_std, zp_err, nused = _zp, _zp_std, _zp_err, _nused
+
+            else:
+
+                # grow freshly computed arrays to zp_nsubs_shape
+                for ax in [0,1]:
+                    _zp = np.repeat(_zp, fzoom[ax], axis=ax)
+                    _zp_std = np.repeat(_zp_std, fzoom[ax], axis=ax)
+                    _zp_err = np.repeat(_zp_err, fzoom[ax], axis=ax)
+                    _nused = np.repeat(_nused, fzoom[ax], axis=ax)
+
+
+                # replace zero-valued entries with values from
+                # lower-resolution array
+                zp[mask_zero] = _zp[mask_zero]
+                zp_std[mask_zero] = _zp_std[mask_zero]
+                zp_err[mask_zero] = _zp_err[mask_zero]
+                nused[mask_zero] = _nused[mask_zero]
+
+
+
+            nsubs = zp.size
+            fits.writeto('zp_subs_{}_it{}.fits'.format(nsubs, i), zp, overwrite=True)
+            fits.writeto('zp_std_subs_{}_it{}.fits'.format(nsubs, i), zp_std, overwrite=True)
+            fits.writeto('zp_err_subs_{}_it{}.fits'.format(nsubs, i), zp_err, overwrite=True)
+            fits.writeto('nused_subs_{}_it{}.fits'.format(nsubs, i), nused, overwrite=True)
+
+
+
+            # check if any subimage zeropoint is zero
+            mask_zero = (zp==0)
+            if np.sum(mask_zero) == 0 or (ny,nx)==(1,1):
+
+                # done
+                break
+
+
+
+
+    if False and get_par(set_zogy.verbose,tel):
+        log.info('zp_nsubs_shape: {}, zp:     {}'.format(zp_nsubs_shape, zp))
+        log.info('zp_nsubs_shape: {}, zp_std: {}'.format(zp_nsubs_shape, zp_std))
+        log.info('zp_nsubs_shape: {}, zp_err: {}'.format(zp_nsubs_shape, zp_err))
+        log.info('zp_nsubs_shape: {}, nused:  {}'.format(zp_nsubs_shape, nused))
+
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='in calc_zp')
+
+
+    return zp, zp_std, zp_err, nused
+
+
+################################################################################
+
+def calc_zp_old (x_array, y_array, zp_array, zp_err_array, filt, imtype,
+                 data_shape=None, zp_type='single', boxsize=None, nsigma=2.5):
+
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info('executing calc_zp ...')
+
+
+    # minimum required number of calibration stars
+    ncal_min = get_par(set_zogy.phot_ncal_min,tel)
+
+
     if zp_type == 'single':
 
-        # determine weighted mean zeropoint, requiring at least 5
-        # non-zero values in zp_array
-        if np.sum(zp_array != 0) >= 5:
-
+        # sigma-clip zp_array
+        if np.sum(zp_array != 0) > 0:
             # clip outliers
             ma_clipped = sigma_clip(zp_array, sigma=nsigma)
             mask_use = ~ma_clipped.mask
+        else:
+            # should zp_array not have any nonzero values, return [False] mask
+            mask_use = np.array([False])
+
+
+        # determine weighted mean zeropoint, requiring at least
+        # ncal_min non-zero values in zp_array, after sigma clipping
+        nused = np.sum(mask_use)
+        if nused >= ncal_min:
             zp, zp_std, zp_err = weighted_mean (zp_array[mask_use],
                                                 zp_err_array[mask_use])
-            nused = np.sum(mask_use)
 
 
             # make histrogram plot if needed
@@ -10995,7 +10566,8 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, filt, imtype,
 
         else:
             log.warning ('could not determine zeropoints weighted mean for lack '
-                         'of calibration stars (<5); returning zeros')
+                         'of calibration stars (<{}); returning zeros'
+                         .format(ncal_min))
             zp, zp_std, zp_err, nused = (0, 0, 0, 0)
 
 
@@ -11003,11 +10575,9 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, filt, imtype,
 
         # determine zeropoints of the 16 channels of the
         # MeerLICHT/BlackGEM CCD
-
-        ncal_min_chan = get_par(set_zogy.MLBG_phot_ncal_min_chan,tel)
         zp, zp_std, zp_err, __, nused = zps_weighted_mean (
             x_array, y_array, zp_array, zp_err_array, 1320, 5280,
-            (2,8), ncal_min=ncal_min_chan, nsigma=nsigma)
+            (2,8), ncal_min=ncal_min, nsigma=nsigma)
 
         # arrays need to be flattened to get 1D array with index = nchan-1
         zp = zp.ravel()
@@ -11028,7 +10598,7 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, filt, imtype,
         nxsubs = int(xsize / boxsize)
         zp, zp_std, zp_err, __, nused = zps_weighted_mean (
             x_array, y_array, zp_array, zp_err_array, boxsize, boxsize,
-            (nysubs, nxsubs), ncal_min=5, nsigma=nsigma)
+            (nysubs, nxsubs), ncal_min=ncal_min, nsigma=nsigma)
 
 
         if False:
@@ -11112,97 +10682,92 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_use):
 
 ################################################################################
 
-def zps_weighted_mean (xcoords, ycoords, zps, zpserr, dx, dy, array_shape,
-                       ncal_min=15, nsigma=2.5):
+def zps_weighted_mean (xcoords, ycoords, zps, zpserr, image_shape,
+                       zp_nsubs_shape, ncal_min=15, nsigma=2.5):
 
-    """Function that returns 5 arrays, each with shape [array_shape],
-    with the clipped weighted mean zeropoint, the corresponding
-    standard deviation, the error in the weighted mean, the number of
-    calibration stars available and the number of stars that were used
-    in the zeropoint determination, over rectangles with size [dx] x
-    [dy] and shape [array_shape]. This is used to calculate the
-    weighted zeropoints over the MeerLICHT/BlackGEM channels, or to
-    create a "mini" image with the weighted zeropoints over some box
-    size, similar to the mini background and standard deviation
-    images.
+    """Function that returns 5 arrays, each with shape
+    [zp_nsubs_shape], with the clipped weighted mean zeropoint, the
+    corresponding standard deviation, the error in the weighted mean,
+    the number of calibration stars available and the number of stars
+    that were used in the zeropoint determination, for each of the
+    subimages defined by [image_shape] and [zp_nsubs_shape].  This is
+    used to calculate the weighted zeropoints over the
+    MeerLICHT/BlackGEM channels, or to create a "mini" image with the
+    weighted zeropoints over some box size, similar to the mini
+    background and standard deviation images.
 
     """
 
     # initialize output arrays
-    zps_wmean = np.zeros(array_shape).ravel().astype('float32')
-    zps_wstd = np.zeros(array_shape).ravel().astype('float32')
-    zps_wmeanerr = np.zeros(array_shape).ravel().astype('float32')
-    zps_nstars = np.zeros(array_shape).ravel().astype(int)
-    zps_nused = np.zeros(array_shape).ravel().astype(int)
+    zps_wmean = np.zeros(zp_nsubs_shape).astype('float32')
+    zps_wstd = np.zeros(zp_nsubs_shape).astype('float32')
+    zps_wmeanerr = np.zeros(zp_nsubs_shape).astype('float32')
+    zps_nstars = np.zeros(zp_nsubs_shape).astype(int)
+    zps_nused = np.zeros(zp_nsubs_shape).astype(int)
 
 
-    # determine the indices of the origins of the subimages
-    nsubs = zps_wmean.size
-    ny, nx = array_shape
-    index_x = np.tile(np.arange(nx) * dx, ny)
-    index_y = np.repeat(np.arange(ny) * dy, nx)
-
-
-    # indices corresponding to xcoords and ycoords
-    x = (xcoords-0.5).astype(int)
-    y = (ycoords-0.5).astype(int)
+    # use function coords2subs to infer subimage index for input
+    # coordinates
+    y_idx, x_idx = coords2subs (xcoords, ycoords, image_shape, zp_nsubs_shape)
 
 
     # loop subimages and determine clipped weighted zeropoint
-    for nsub in range(nsubs):
+    for i_y in range(zp_nsubs_shape[0]):
+        for i_x in range(zp_nsubs_shape[1]):
 
-        # mask that identifies coordinates in current subimage
-        mask_sub = ((x >= index_x[nsub]) &  (x < index_x[nsub]+dx) &
-                    (y >= index_y[nsub]) &  (y < index_y[nsub]+dy))
-
-        # number of stars available
-        zps_nstars[nsub] = np.sum(mask_sub)
-
-        chan_tmp = coords2chan (np.array([index_x[nsub]+1]),
-                                np.array([index_y[nsub]+1]))[0]
-        log.info ('nsub: {}, nstars: {}, channel: {}'
-                  .format(nsub, zps_nstars[nsub], chan_tmp))
+            # select relevant indices of stars
+            mask_sub = ((y_idx==i_y) & (x_idx==i_x))
 
 
-        # only determine zeropoint if sufficient number of values
-        # [ncal_min] are available; otherwise leave it at zero
-        if np.sum(mask_sub) >= ncal_min:
-
-            # clip subimage outliers
-            ma_clipped = sigma_clip(zps[mask_sub], sigma=nsigma)
-            mask_use = ~ma_clipped.mask
+            # number of stars available
+            zps_nstars[i_y,i_x] = np.sum(mask_sub)
 
 
-            # weighted mean
-            zps_use = zps[mask_sub][mask_use]
-            zpserr_use = zpserr[mask_sub][mask_use]
+            # only determine zeropoint if sufficient number of values
+            # [ncal_min] are available; otherwise leave it at zero
+            if np.sum(mask_sub) >= ncal_min:
 
-            if False:
-                # test selecting only brightest 10 selected by
-                # assuming the brightest ones have the lowest zpserr
-                idx_sort = np.argsort(zpserr_use)
-                zps_use = zps_use[idx_sort][0:10]
-                zpserr_use = zpserr_use[idx_sort][0:10]
-                log.info ('{}/{} zps_use: {}'.format(nsub, nsubs, zps_use))
-                log.info ('{}/{} zpserr_use: {}'.format(nsub, nsubs, zpserr_use))
+                # clip subimage outliers
+                ma_clipped = sigma_clip(zps[mask_sub], sigma=nsigma)
+                mask_use = ~ma_clipped.mask
 
 
-            zps_wmean[nsub], zps_wstd[nsub], zps_wmeanerr[nsub] = \
-                weighted_mean (zps_use, zpserr_use)
+                # apply required minimum number of calibration stars also
+                # to the actual stars that can be used, i.e. after
+                # sigma-clipping
+                if np.sum(mask_use) < ncal_min:
+                    continue
+
+
+                # weighted mean
+                zps_use = zps[mask_sub][mask_use]
+                zpserr_use = zpserr[mask_sub][mask_use]
+
+                if False:
+                    # test selecting only brightest 10 selected by
+                    # assuming the brightest ones have the lowest zpserr
+                    idx_sort = np.argsort(zpserr_use)
+                    zps_use = zps_use[idx_sort][0:10]
+                    zpserr_use = zpserr_use[idx_sort][0:10]
+
+
+                zps_wmean[i_y,i_x], zps_wstd[i_y,i_x], zps_wmeanerr[i_y,i_x] = \
+                    weighted_mean (zps_use, zpserr_use)
+
+
+                # number of stars used in the zeropoint determination
+                zps_nused[i_y,i_x] = len(zps_use)
 
 
 
-            # number of stars used in the zeropoint determination
-            zps_nused[nsub] = len(zps_use)
+    # return arrays
+    if zp_nsubs_shape == (1,1):
+        # if arrays contain single element, return scalars
+        return zps_wmean[0,0], zps_wstd[0,0], zps_wmeanerr[0,0], \
+            zps_nstars[0,0], zps_nused[0,0]
+    else:
+        return zps_wmean, zps_wstd, zps_wmeanerr, zps_nstars, zps_nused
 
-
-
-    # return median values with shape [array_shape]
-    return (zps_wmean.reshape(array_shape),
-            zps_wstd.reshape(array_shape),
-            zps_wmeanerr.reshape(array_shape),
-            zps_nstars.reshape(array_shape),
-            zps_nused.reshape(array_shape))
 
 
 ################################################################################
@@ -11210,19 +10775,19 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, dx, dy, array_shape,
 def weighted_mean (mag, magerr, magerr_wlim=0):
 
     """calculate weighted mean of sample provided by the arrays [mag]
-       and [magerr], where the weighting is performed in flux
-       units. The maximum weight is defined by [magerr_wlim], so that
-       the brightest stars are not too dominant. The following three
-       scalars are returned: weighted mean, the weighted standard
-       deviation and the error on the weighted mean, in units of
-       magnitudes.
+       and [magerr]. The maximum weight is defined by
+       1/[magerr_wlim]**2, so that the brightest stars are not too
+       dominant. The following three scalars are returned: weighted
+       mean, the weighted standard deviation and the error on the
+       weighted mean, in units of magnitudes.
 
        (June 2024): added method from dreamreduce
        (zeropoints.find_sigma) to correct for the fact that the flux
        errors are likely underestimated, by finding a single constant
-       error to all magnitude errors such that the reduced chi2 of the
-       distribution of values will become unity. This is only applied
-       when calculating the error on the weighted mean.
+       error to be added to all magnitude errors such that the reduced
+       chi-square of the distribution of values will become
+       unity. This is only applied when calculating the error on the
+       weighted mean.
 
     """
 
@@ -11638,7 +11203,92 @@ def fnu2mag (fnu, fnuerr=None, fnuerrtot=None):
 
 ################################################################################
 
-def get_zp_coords (xcoords, ycoords, zp_chan, zp):
+def get_zp_coords (xcoords, ycoords, zp_subs, zp_single, zp_std_subs,
+                   zp_std_single, zp_err_subs, zp_err_single, image_shape,
+                   nsubimages_shape):
+
+    """function to return array of zeropoints and corresponding
+    standard deviations and erros for each object at array of pixel
+    coordinates (xcoords, ycoords) based on the subimage zeropoints
+    [zp_subimages]. For coordinates off the image, the full-image
+    zeropoint [zp_single], STD [zp_std_single] and error
+    [zp_err_single] are returned.
+
+    """
+
+    # initialize output array
+    ncoords = len(xcoords)
+    zps = np.zeros(ncoords)
+    zps_std = np.zeros(ncoords)
+    zps_err = np.zeros(ncoords)
+
+
+    # use function coords2subs to infer subimage index for input
+    # coordinates
+    y_idx, x_idx = coords2subs (xcoords, ycoords, image_shape, nsubimages_shape)
+
+
+    # assign zeropoints to coordinates on the image
+    mask_on = (y_idx >= 0)
+    zps[mask_on] = np.array(zp_subs)[y_idx[mask_on], x_idx[mask_on]]
+    zps_std[mask_on] = np.array(zp_std_subs)[y_idx[mask_on], x_idx[mask_on]]
+    zps_err[mask_on] = np.array(zp_err_subs)[y_idx[mask_on], x_idx[mask_on]]
+
+
+    # assign image zp to coordinates off the image
+    zps[~mask_on] = zp_single
+    zps_std[~mask_on] = zp_std_single
+    zps_err[~mask_on] = zp_err_single
+
+
+    return zps, zps_std, zps_err
+
+
+################################################################################
+
+def coords2subs (xcoords, ycoords, image_shape, nsubimages_shape):
+
+    """Function to convert pixel coordinates (arrays) to subimage 2D
+    indices, which are returned as two separate integer arrays.
+
+    The center of the bottom left pixel has xcoord,ycoord=1,1,
+    i.e. xcoords and ycoords are not indices. The output indices are
+    as usual with the (0,0) index referring to the subimage in the
+    lower left corner when viewing an image (before any WCS rotation
+    is applied) with e.g. ds9.
+
+    Should the coordinates be off the image, i.e. lower than 0.5 or
+    greater than or equal to 10560.5, an indices of -1 are returned.
+
+    """
+
+    # determine y- and x-size of subimages from shape of full image
+    # and number of subimages shape
+    ysize, xsize = image_shape
+    ny, nx = nsubimages_shape
+    dx = xsize // nx
+    dy = ysize // ny
+
+
+    # get subimage indices
+    y_idx = ((ycoords-0.5) // dy).astype(int)
+    x_idx = ((xcoords-0.5) // dx).astype(int)
+
+
+    # what to return for coordinates off the image??
+    mask_off = ((xcoords < 0.5) | (xcoords >= xsize+0.5) |
+                (ycoords < 0.5) | (ycoords >= ysize+0.5))
+    y_idx[mask_off] = -1
+    x_idx[mask_off] = -1
+
+
+    return y_idx, x_idx
+
+
+################################################################################
+
+def get_chan_zp_coords (xcoords, ycoords, zp_chan, zp, zp_std_chan, zp_std,
+                        zp_err_chan, zp_err):
 
     """function to return array of zeropoints for each object at array
     of pixel coordinates (xcoords, ycoords) based on the channel
@@ -11653,23 +11303,29 @@ def get_zp_coords (xcoords, ycoords, zp_chan, zp):
     # initialize output array
     ncoords = len(xcoords)
     zps = np.zeros(ncoords)
+    zps_std = np.zeros(ncoords)
+    zps_err = np.zeros(ncoords)
 
-    # make sure zp_chan is a numpy array
-    zp_chan = np.array(zp_chan)
 
-    # use function coords2chan to infer channel number for input
+    # use function coords2chan to infer channel indices for input
     # coordinates
-    chan_number = coords2chan(xcoords, ycoords)
+    chan_idx = coords2chan(xcoords, ycoords) - 1
+
 
     # assign channel zeropoint to coordinates on the image
     mask_on = (chan_number != 0)
-    zps[mask_on] = zp_chan[chan_number[mask_on] - 1]
+    zps[mask_on] = np.array(zp_chan)[chan_idx[mask_on]]
+    zps_std[mask_on] = np.array(zp_std_chan)[chan_idx[mask_on]]
+    zps_err[mask_on] = np.array(zp_err_chan)[chan_idx[mask_on]]
+
 
     # assign image zp to coordinates off the image
     zps[~mask_on] = zp
+    zps_std[~mask_on] = zp_std
+    zps_err[~mask_on] = zp_err
 
 
-    return zps
+    return zps, zps_std, zps_err
 
 
 ################################################################################
