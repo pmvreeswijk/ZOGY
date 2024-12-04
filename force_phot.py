@@ -2,6 +2,7 @@ import os
 import argparse
 import re
 import traceback
+import subprocess
 
 
 #import multiprocessing as mp
@@ -35,10 +36,12 @@ set_zogy.verbose=False
 
 import fitsio
 
+from google.cloud import storage
+
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.1'
+__version__ = '1.2.2'
 
 
 ################################################################################
@@ -613,8 +616,11 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
         #header = fitsio.FITS(hdrfile2read)[-1].read_header()
         # astropy
         #header = zogy.read_hdulist (hdrfile2read, get_data=False, get_header=True)
+        t0 = time.time()
         with fits.open(hdrfile2read) as hdulist:
             header = hdulist[-1].header
+
+        log.info ('read {} in {:.3f}s'.format(hdrfile2read, time.time()-t0))
 
     except:
         log.exception ('trouble reading header of {}; skipping its extraction'
@@ -1024,22 +1030,60 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         header, table['RA_IN'], table['DEC_IN'], tel)
 
 
-    # if set_zogy.MLBG_phot_apply_chanzp is True, replace [zp] with
-    # array of zeropoints, one for each object; same for [zp_err]
-    if new and zogy.get_par(set_zogy.MLBG_phot_apply_chanzp,tel):
-
-        log.info ('inferring channel-dependent zp, zp_std and zp_err')
-        zp_chan, zp_std_chan, zp_err_chan = zogy.get_zp_header (
-            header, set_zogy=set_zogy, channels=True)
+    # infer zeropoint nsubimages shape for either ref or new/trans
+    if ref:
+        zp_nsubs_shape = zogy.get_par(set_zogy.zp_nsubs_shape_ref,tel)
+    else:
+        zp_nsubs_shape = zogy.get_par(set_zogy.zp_nsubs_shape_new,tel)
 
 
-        # use get_zp_coords() to convert channel zeropoints
-        # to coordinate-specific zeropoints, i.e. zp will
-        # have same length as number of coordinates
-        zp = zogy.get_zp_coords (xcoords, ycoords, zp_chan, zp)
-        zp_std = zogy.get_zp_coords (xcoords, ycoords, zp_std_chan, zp_std)
-        zp_err = zogy.get_zp_coords (xcoords, ycoords, zp_err_chan, zp_err)
+    # in case zp_nsubs_shape is different from (1,1), replace [zp]
+    # with array of zeropoints, one for each object; same for [zp_err]
+    if zp_nsubs_shape != (1,1):
 
+        # name of zeropoints numpy file
+        fn_zps = '{}_zps.npy'.format(basename)
+
+        # check if numpy file with zeropoint arrays exists
+        if not zogy.isfile(fn_zps):
+
+            # if not, revert to the old channel zeropoints
+            log.warning ('{} not found; using channel zeropoints instead'
+                         .format(fn_zps))
+            zp_chan, zp_std_chan, zp_err_chan = zogy.get_zp_header (
+                header, set_zogy=set_zogy, channels=True)
+
+            # use get_zp_coords() to convert channel zeropoints, zp_std
+            # and zp_err to coordinate-specific zeropoints
+            zp, zp_std, zp_err = zogy.get_chan_zp_coords(
+                xcoords, ycoords, zp_chan, zp, zp_std_chan, zp_std,
+                zp_err_chan, zp_err)
+
+        else:
+
+            if google_cloud:
+
+                # read numpy file from GCP
+                bucket_name, bucket_file = get_bucket_name (fn_zps)
+                bucket = storage.Client().bucket(bucket_name)
+                blob = bucket.blob(bucket_file)
+                with blob.open('rb') as f:
+                    zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(f)
+
+            else:
+
+                # read numpy file
+                zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(fn_zps)
+
+
+            # use get_zp_coords() to convert subimage zeropoints, zp_std
+            # and zp_err to coordinate-specific zeropoints, i.e. zp,
+            # zp_std and zp_err will have same length as number of
+            # coordinates
+            zp, zp_std, zp_err = zogy.get_zp_coords (xcoords, ycoords, zp_subs, zp,
+                                                     zp_std_subs, zp_std,
+                                                     zp_err_subs, zp_err,
+                                                     (ysize, xsize), zp_nsubs_shape)
 
 
 
@@ -1073,7 +1117,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
         # read reduced image; need to use astropy method, as otherwise
-        # this will lead to an exception in [zogy.get_psfoptflux] as
+        # this will lead to an exception in [zogy.get_psfoptflux_mp] as
         # (probably) the shape attribute is not available when data is
         # read through fitsio.FITS
         #data = zogy.read_hdulist (fits_red, dtype='float32')
@@ -1240,7 +1284,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
         try:
             # determine optimal fluxes at pixel coordinates
-            # !!! CHECK !!! _mp or not
             if ncpus is None:
                 # submit to [get_psfoptflux_mp] with single thread, as
                 # the multiprocessing is done at the image level,
@@ -1259,15 +1302,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # [force_phot] function only provides ncpus to
                 # [get_rows] and [infer_mags] in case of a single
                 # image.
-
-                # force single thread when stars are being actively
-                # removed from image after the measurement
-                if remove_psf:
-                    # CHECK!!! - works ok with multiple processors?
-                    #ncpus = 1
-                    pass
-
-
                 flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm,
@@ -1607,7 +1641,7 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
                                  x_indices[i]:x_indices[i]+1][0][0]
 
 
-    log.info ('wall-time spent in get_pixel_values: {:.1f}s'
+    log.info ('wall-time spent in get_pixel_values: {:.3f}s'
               .format(time.time()-t1))
 
 
