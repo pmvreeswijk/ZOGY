@@ -221,7 +221,7 @@ pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
 #           .format(os.environ['ZOGYHOME']))
 #cal_epoch = 2015.5
 # new catalog based on DR3
-cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine11.fits'
+cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12.fits'
            .format(cal_dir))
 cal_epoch = 2016.0
 
@@ -229,7 +229,6 @@ ast_nbright = 1500       # brightest no. of objects in the field to
                          # use for astrometric solution and crosscheck
                          # of positions obtained against calibration
                          # catalog
-ast_filter = 'r'         # magnitude column to sort in brightness
 
 
 #===============================================================================
@@ -310,6 +309,9 @@ source_nsigma = 5         # signal-to-noise ratio used in calculating
 source_minpixfrac = 0.67  # required fraction of good pixels in inner/central
                           # footprint for source to have non-zero flux
                           # in output catalog
+source_maxsatpix = 5      # maximum number of saturated pixels in inner/central
+                          # footprint for source to have non-zero flux
+                          # in output catalog
 inner_psflim = 0.01       # PSF profile pixels with values above this limit
                           # times the peak value are considered part of the
                           # central/inner PSF profile
@@ -348,13 +350,20 @@ ext_coeff = {'ML1': {'u':0.52, 'g':0.23, 'q':0.15, 'r':0.12, 'i':0.08, 'z':0.06}
 zp_default = {'ML1': {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4},
               'BG':  {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4}}
 
-# for ML/BG only:
-# apply calibration per channel separately
-MLBG_phot_apply_chanzp = {'ML1': False, 'BG': True}
-# minimum number of non-saturated stars required per channel; if less
-# stars are available (irrespective of their brightness), the channel
-# is calibrated using the image average zeropoint
-MLBG_phot_ncal_min_chan = 15
+
+# number of subimages, along the Y- and X-axis, that determines the
+# scale at which the zeropoints are determined and applied; (1,1)
+# means the full-image zeropoint is used, whereas e.g. (2,4) for an
+# image with shape (1024,2048), the zeropoints are determined on
+# subimages with shape (512,512); the zeropoint subimage sizes should
+# fit integer times into the full image
+#zp_nsubs_shape = (2,8)
+zp_nsubs_shape_new = {'ML1': (1,1), 'BG': (16,16)}
+zp_nsubs_shape_ref = {'ML1': (1,1), 'BG': (1,1)}
+
+# minimum number of non-saturated stars required (after sigma
+# clipping) to determine zeropoint(s) at any resolution
+phot_ncal_min = 10
 
 
 #===============================================================================
