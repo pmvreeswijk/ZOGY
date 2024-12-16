@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.4.1'
+__version__ = '1.4.2'
 
 
 ################################################################################
@@ -4448,7 +4448,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     #     and Fpsferr, which should be possible as the PSF is
     #     better sampled than the image pixels
 
-    def help_psffit_D (psffit, moffat, gauss, get_flags_mask_central=False):
+    def help_psffit_D (psffit, moffat, gauss, get_flags_mask_inner=False):
 
         # use [get_psfoptflux] to perform a PSF fit to D
         results = get_psfoptflux_mp (
@@ -4458,7 +4458,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
             header_new=header_new, header_ref=header_ref,
             Scorr_peak=table_trans['SNR_ZOGY'], set_zogy=set_zogy,
-            get_flags_mask_central=get_flags_mask_central,
+            get_flags_mask_inner=get_flags_mask_inner,
             nthreads=nthreads, tel=tel)
 
         return results
@@ -4469,7 +4469,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     colnames = ['X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                 'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D', 'FLAGS_CENTRAL']
     table_trans.add_columns(
-        help_psffit_D (True, False, False, get_flags_mask_central=True),
+        help_psffit_D (True, False, False, get_flags_mask_inner=True),
         names=colnames)
 
     log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
@@ -5776,7 +5776,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        nsigma_fake=10, remove_psf=False,
                        replace_sat_psf=False, replace_sat_nmax=100,
                        set_zogy=None, tel=None, fwhm=None, diff=True,
-                       get_flags_mask_central=False, local_bkg=None,
+                       get_flags_mask_inner=False, local_bkg=None,
                        get_psf_footprint=False, nthreads=1):
 
 
@@ -5892,7 +5892,6 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
     # multiprocessing breaking down
     psf_clean_factor = get_par(set_zogy.psf_clean_factor,tel)
     source_minpixfrac = get_par(set_zogy.source_minpixfrac,tel)
-    source_maxsatpix = get_par(set_zogy.source_maxsatpix,tel)
     inner_psflim = get_par(set_zogy.inner_psflim,tel)
     mask_value = get_par(set_zogy.mask_value,tel)
 
@@ -5979,8 +5978,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             get_limflux, limflux_nsigma, fwhm_fit_init,
             inject_fake, nsigma_fake,
             replace_sat_psf, replace_sat_nmax, remove_psf,
-            fwhm_use, diff, get_flags_mask_central,
-            psf_clean_factor, source_minpixfrac, source_maxsatpix,
+            fwhm_use, diff, get_flags_mask_inner,
+            psf_clean_factor, source_minpixfrac,
             inner_psflim, mask_value, local_bkg,
             get_psf_footprint, lock, pid_list,
             n_fainter_neighbours, x_borders, tel, nthreads]
@@ -6212,18 +6211,27 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
     if False and remove_psf:
 
-        # temporarily record D and coordinates
-        basename = psfex_bintable.split('/')[-1].split('_psf.fits')[0]
-        fits_tmp = '{}_test_image_psf_removed.fits'.format(basename)
+        # record D with PSFs removed
+        if False:
+            # in regular output folder with other products
+            basename = psfex_bintable.split('_psf.fits')[0]
+        else:
+            # in local folder where zogy is run
+            basename = psfex_bintable.split('_psf.fits')[0].split('/')[-1]
+
+        fits_psf_removed = '{}_psf_removed.fits'.format(basename)
+        log.info ('writing {}'.format(fits_psf_removed))
 
         if 'D_shared' in locals():
-            fits.writeto (fits_tmp, D_shared, overwrite=True)
+            fits.writeto (fits_psf_removed, D_shared, overwrite=True)
         else:
-            fits.writeto (fits_tmp, D, overwrite=True)
+            fits.writeto (fits_psf_removed, D, overwrite=True)
 
-        # and save xcoords, ycoords in numpy file
-        npy_tmp = '{}_test_xycoords.npy'.format(basename)
-        np.save(npy_tmp, np.array([xcoords,ycoords]))
+
+        if False:
+            # save xcoords, ycoords in numpy file
+            npy_tmp = '{}_test_xycoords.npy'.format(basename)
+            np.save(npy_tmp, np.array([xcoords,ycoords]))
 
 
 
@@ -6261,8 +6269,8 @@ def get_psfoptflux_loop (
         get_limflux=False, limflux_nsigma=5, fwhm_fit_init=None,
         inject_fake=False, nsigma_fake=10,
         replace_sat_psf=False, replace_sat_nmax=100, remove_psf=False,
-        fwhm_use=None, diff=True, get_flags_mask_central=False,
-        psf_clean_factor=None, source_minpixfrac=None, source_maxsatpix=None,
+        fwhm_use=None, diff=True, get_flags_mask_inner=False,
+        psf_clean_factor=None, source_minpixfrac=None,
         inner_psflim=None, mask_value=None, local_bkg=None,
         get_psf_footprint=False, lock=None, pid_list=None,
         n_fainter_neighbours=None, x_borders=None, tel=None, nthreads=None):
@@ -6290,8 +6298,8 @@ def get_psfoptflux_loop (
     flux_opt = np.zeros(ncoords, dtype='float32')
     fluxerr_opt = np.zeros_like(flux_opt)
 
-    if get_flags_mask_central:
-        flags_mask_central = np.zeros(ncoords, dtype='uint8')
+    if get_flags_mask_inner:
+        flags_mask_inner = np.zeros(ncoords, dtype='uint8')
 
     if psffit:
         flux_psf = np.zeros_like(flux_opt)
@@ -6323,6 +6331,7 @@ def get_psfoptflux_loop (
     # bad pixel mask values for inside loop
     value_sat = mask_value['saturated']
     value_satcon = mask_value['saturated-connected']
+    value_crosstalk = mask_value['crosstalk']
 
 
     # if reference image PSF is involved, infer ref image pixel
@@ -6567,12 +6576,12 @@ def get_psfoptflux_loop (
 
 
         # define central mask of object using the PSF
-        mask_central = (P_shift >= inner_psflim * np.amax(P_shift))
+        mask_inner = (P_shift >= inner_psflim * np.amax(P_shift))
 
-        # if flags_mask_central is specified, calculate the combined
+        # if flags_mask_inner is specified, calculate the combined
         # flags_mask of the central object area
-        if get_flags_mask_central:
-            flags_mask_central[i] = np.sum(np.unique(D_mask_sub[mask_central]))
+        if get_flags_mask_inner:
+            flags_mask_inner[i] = np.sum(np.unique(D_mask_sub[mask_inner]))
 
 
 
@@ -6641,13 +6650,6 @@ def get_psfoptflux_loop (
 
 
 
-        # for saturated stars, increase mask_central; on second
-        # thought, don't bother with this, because PSF fits to the
-        # saturated stars appear pretty poorly, with very negative
-        # values
-        #if flag_mask_central & value_sat == value_sat:
-        #    mask_central = (P_shift != 0)
-
 
         if get_psf_footprint:
             mask_footprint = (P_shift >= 0.001 * np.amax(P_shift))
@@ -6676,28 +6678,31 @@ def get_psfoptflux_loop (
         else:
 
             # use only those pixels that are not affected by any bad
-            # pixels, cosmic rays, saturation, edge pixels, etc.
-            mask_use = (D_mask_sub==0)
+            # pixels, cosmic rays, saturation, edge pixels, but leave
+            # the crosstalk pixels in
+            mask_use = ((D_mask_sub==0) | (D_mask_sub==value_crosstalk))
             mask_sat = (D_mask_sub & value_sat == value_sat)
 
-            if mask_use.shape != mask_central.shape:
+            if mask_use.shape != mask_inner.shape:
                 log.warning ('mask_use.shape: {} not equal to '
-                             'mask_central.shape: {} for object at x,y: '
+                             'mask_inner.shape: {} for object at x,y: '
                              '{:.2f},{:.2f}; returning zero flux and fluxerr'
-                             .format(mask_use.shape, mask_central.shape, x, y))
+                             .format(mask_use.shape, mask_inner.shape, x, y))
                 if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                 continue
 
             else:
-                if np.sum(mask_central) != 0:
-                    frac_tmp = (np.sum(mask_use & mask_central) /
-                                np.sum(mask_central))
+                npix_inner = np.sum(mask_inner)
+                #log.info ('npix_inner: {}'.format(npix_inner))
+                if npix_inner != 0:
+                    frac_tmp = np.sum(mask_use & mask_inner) / npix_inner
                 else:
                     frac_tmp = 0
 
 
-                # number of saturated pixels in mask_central
-                npix_sat = np.sum(mask_sat & mask_central)
+                # number of saturated pixels in mask_inner
+                npix_sat_inner = np.sum(mask_sat & mask_inner)
+                npix_sat_outer = np.sum(mask_sat & ~mask_inner)
 
 
                 # if the fraction of good pixels around the source is less
@@ -6722,31 +6727,20 @@ def get_psfoptflux_loop (
                     continue
 
 
-                if npix_sat > source_maxsatpix:
-                    log.warning (
-                        'number of saturated pixels in inner profile of source '
-                        'at x,y: {:.0f},{:.0f}: {:.3f} is greater than '
-                        'set_zogy.source_maxsatpix: {}; returning zero flux and '
-                        'flux error'.format(x, y, npix_sat, source_maxsatpix))
-
-                    if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
-                    continue
-
 
 
             # perform optimal photometry measurements
             try:
 
                 show=False
-
                 if False:
-
                     # show optimal fit of particular object(s)
-                    dist_tmp = np.sqrt((x-2500)**2 +
-                                       (y-9450)**2)
-                    if dist_tmp < 50:
+                    dist_tmp = np.sqrt((x-8027)**2 + (y-6098)**2)
+                    if dist_tmp < 20:
                         show=True
-                        log.info ('x: {}, y: {}'.format(x, y))
+                        log.info ('showing object at x,y={:.0f},{:.0f}'
+                                  .format(x,y))
+
 
                 # pass input parameter [local_bkg] for this object to
                 # [flux_optimal] if it is defined
@@ -6756,17 +6750,23 @@ def get_psfoptflux_loop (
                     sky_bkg = 0
 
 
+                # fit sky inside flux_optimal() if sky_bkg is zero
+                fit_sky = (sky_bkg==0)
+
+
+                # extract optimal flux
                 flux_opt[i], fluxerr_opt[i] = flux_optimal (
-                    P_shift, D_sub, bkg_var_sub, mask_use=mask_use,
-                    fwhm=fwhm_use, sky_bkg=sky_bkg, inner_psflim=inner_psflim,
-                    show=show, tel=tel)
+                    P_shift, D_sub, bkg_var_sub, mask_use, sky_bkg=sky_bkg,
+                    fit_sky=fit_sky, mask_inner=mask_inner, show=show, tel=tel,
+                    x=x, y=y)
+
 
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
-                log.exception('problem running [flux_optimal] on object at pixel '
-                              'coordinates: x={}, y={}; returning zero flux '
-                              'and fluxerr'.format(x, y))
+                log.exception('exception in [flux_optimal] for object at pixel '
+                              'coordinates: {:.0f}, {:.0f}; returning zero '
+                              'flux_opt and fluxerr_opt'.format(x,y))
                 if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                 continue
 
@@ -6793,10 +6793,10 @@ def get_psfoptflux_loop (
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
-                    log.exception('problem running [flux_psffit] on object at '
-                                  'pixel coordinates: {}, {}; returning zero '
-                                  'flux, fluxerr, (x,y) shifts and chi2'
-                                  .format(x, y))
+                    log.exception('exception in [flux_psffit] for object at '
+                                  'pixel coordinates: {:.0f}, {:.0f}; returning '
+                                  'zero (x,y) shifts and errors, flux_psf, '
+                                  'fluxerr_psf and chi2'.format(x,y))
                     if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
 
@@ -6825,7 +6825,7 @@ def get_psfoptflux_loop (
 
                 except Exception as e:
                     #log.exception(traceback.format_exc())
-                    log.exception('problem running [fit_moffat_single] on '
+                    log.exception('exception in [fit_moffat_single] for '
                                   'object at pixel coordinates: {:.0f}, '
                                   '{:.0f}; returning zeros'.format(x, y))
                     if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
@@ -6864,11 +6864,11 @@ def get_psfoptflux_loop (
                     if np.sqrt((x-2500)**2 +
                                (y-9450)**2) < 100:
                         log.info('x: {}, y: {}'.format(x, y))
-                        log.info('nsat: {}, np.sum(mask_central & mask_region): {}'
-                                 .format(nsat, np.sum(mask_central & mask_region)))
+                        log.info('nsat: {}, np.sum(mask_inner & mask_region): {}'
+                                 .format(nsat, np.sum(mask_inner & mask_region)))
 
                     # check if there is overlap with central PSF region
-                    if (np.sum(mask_central & mask_region) > 0 and
+                    if (np.sum(mask_inner & mask_region) > 0 and
                         nsat > 0 and nsat <= replace_sat_nmax):
 
                         mask_satcon_use = (mask_satcon_sub & mask_region)
@@ -6891,8 +6891,8 @@ def get_psfoptflux_loop (
                     else:
                         log.warning ('saturated+connected pixels not replaced '
                                      'for object at x,y={:.0f},{:.0f}; nsat: '
-                                     '{}, np.sum(mask_central & mask_region): {}'
-                                     .format(x, y, nsat, np.sum(mask_central &
+                                     '{}, np.sum(mask_inner & mask_region): {}'
+                                     .format(x, y, nsat, np.sum(mask_inner &
                                                                 mask_region)))
 
 
@@ -6962,8 +6962,8 @@ def get_psfoptflux_loop (
 
 
     # if specified, add combined flags_mask of central PSF area
-    if get_flags_mask_central:
-        list2return += [flags_mask_central]
+    if get_flags_mask_inner:
+        list2return += [flags_mask_inner]
 
 
     if get_psf_footprint:
@@ -7260,7 +7260,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
 
         # return raveled (flattened) array
         if mask_use is not None:
-            return resid[mask_use].ravel()
+            return resid[mask_use]
         else:
             return resid.ravel()
 
@@ -7299,7 +7299,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
 
     # do leastsq model fit using minimize
     result = minimize(fcn2min, params, method='leastsq',
-                      args=(P, D, D_err, mask_use, diff), max_nfev=max_nfev)
+                      args=(P, D, D_err, mask_use, diff,), max_nfev=max_nfev)
 
 
     xshift = result.params['xshift'].value
@@ -7448,10 +7448,10 @@ def get_s2n_ZO (P, D, V):
 
 ################################################################################
 
-def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5,
-                  max_iters=10, epsilon=0.1, mask_use=None, add_V_ast=False,
-                  fwhm=None, sky_bkg=None, dx2=0, dy2=0, dxy=0,
-                  inner_psflim=0.01, show=False, tel=None):
+def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=10, nsigma_outer=5,
+                  max_iters=10, epsilon=0.1, add_V_ast=False, sky_bkg=None,
+                  fit_sky=False, dx2=0, dy2=0, dxy=0, mask_inner=None,
+                  show=False, tel=None, x=None, y=None):
 
 
     """Function that calculates optimal flux and corresponding error based
@@ -7466,37 +7466,251 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5,
         dDdy = D - np.roll(D,1,axis=0)
         dDdx = D - np.roll(D,1,axis=1)
         dDdxy = D - np.roll(D,1,axis=(0,1))
-        V_ast = np.abs(dx2) * dDdx**2 + np.abs(dy2) * dDdy**2 + np.abs(dxy) * dDdxy**2
-
-
-    if mask_use is None:
-        # if input mask [mask_use] was not provided, create it with same
-        # shape as D with all elements set to True.
-        mask_use = np.ones(D.shape, dtype=bool)
+        V_ast = (np.abs(dx2) * dDdx**2 + np.abs(dy2) * dDdy**2 +
+                 np.abs(dxy) * dDdxy**2)
     else:
-        # make copy as otherwise [mask_use] is affected also outside
-        # this function
-        mask_use = np.copy(mask_use)
+        V_ast = 0
 
 
-    # in case input [sky_bkg] is available
-    if sky_bkg is not None and sky_bkg != 0:
 
-        D = D - sky_bkg
-
-        # add Poisson noise of sky background level
-        if sky_bkg > 0:
-            bkg_var = bkg_var + sky_bkg
+    # iteratively determine optimal flux
+    flux_opt, fluxerr_opt = flux_optimal_iter (
+        P, D-sky_bkg, bkg_var+max(sky_bkg,0), mask_use, nsigma_inner,
+        nsigma_outer, max_iters, epsilon, V_ast, mask_inner, False)
 
 
-    # [mask_inner] - the central pixels within about 1xFWHM (assuming
-    # a Gaussian shape) of the object center (where P values are
-    # higher than [set_zogy.inner_psflim] times the central P
-    # value); [mask_outer] is the region outside of that
-    mask_inner = (P >= inner_psflim * np.amax(P))
-    mask_outer = ~mask_inner
+    # if input parameter fit_sky is True, find constant offset that
+    # minimizes (D - S - flux_opt * P) / np.sqrt(V) over the valid
+    # pixels (m_u) of the entire footprint
+    if fit_sky:
+
+        log.info ('fitting sky for source at x,y={:.0f},{:.0f}'.format(x,y))
+
+        # fit parameters
+        params = Parameters()
+        #params.add('sky', value=2*sky_bkg, vary=True)
+        params.add('flux_opt', value=0.5*np.abs(flux_opt), min=0, vary=True)
+
+
+        # determine coefficients to fit
+        poldeg = 1
+        fit_higher_Xterms = False
+        if not fit_higher_Xterms:
+            xy = np.arange(poldeg+1)
+            xx, yy = np.meshgrid(xy, xy)
+            mask_coeff_fit = (xx+yy <= poldeg).ravel()
+        else:
+            mask_coeff_fit = np.ones((poldeg+1)**2, dtype=bool)
+
+
+        # add coeffients to parameters
+        coeffs = np.zeros((poldeg+1,poldeg+1))
+        for i in range(coeffs.size):
+            if i==0:
+                mask_outer = ~mask_inner
+                value = np.median(D[mask_outer & mask_use])
+            else:
+                value = 0
+
+            params.add('c{}'.format(i), value=value, vary=mask_coeff_fit[i])
+
+
+        # create mesh to fit sky
+        ysize, xsize = P.shape
+        # normalization factor for polynomial fit
+        f_norm = max(ysize, xsize)
+        # normalized x,y arrays
+        x_norm = np.arange(xsize) / f_norm
+        y_norm = np.arange(ysize) / f_norm
+
+
+        # fit
+        result = minimize (sky2min, params, method='leastsq', args=(
+            P, D, bkg_var, x_norm, y_norm, poldeg, mask_use, mask_inner,
+            nsigma_inner, nsigma_outer,), max_nfev=200)
+
+
+        par = result.params
+        flux_opt = par['flux_opt'].value
+        fluxerr_opt = par['flux_opt'].stderr
+
+
+        #flux_opt_fit = par['flux_opt'].value
+        #fluxerr_opt_fit = par['flux_opt'].stderr
+        #chi2red = result.redchi
+        #log.info ('flux_opt: {}, fluxerr_opt: {}, flux_opt_fit: {}, '
+        #          'fluxerr_opt_fit: {}, chi2red: {:.4f}'
+        #          .format(flux_opt, fluxerr_opt, flux_opt_fit, fluxerr_opt_fit,
+        #                  chi2red))
+        #log.info (fit_report(result))
+
+
+        if show:
+            # execute sky2min with best-fit values, setting fit=False,
+            # in which case it returns various arrays
+            sky, V, resid = sky2min(
+                par, P, D, bkg_var, x_norm, y_norm, poldeg, mask_use,
+                mask_inner, nsigma_inner, nsigma_outer, fit=False)
+
+            label = '_{:.0f}_{:.0f}'.format(x, y)
+            ds9_arrays(P=P, D=D, bkg_var=bkg_var, sky=sky, V=V,
+                       resid=resid, mask_use=mask_use.astype(int),
+                       label=label)
+
+
+        if False:
+            # re-determine optimal flux and error with updated sky
+            flux_opt, fluxerr_opt = flux_optimal_iter (
+                P, D-sky, bkg_var+max(sky,0), mask_use, nsigma_inner, nsigma_outer,
+                max_iters, epsilon, V_ast, mask_inner, show)
+            #log.info ('final flux_opt: {}, fluxerr_opt: {}'
+            #          .format(flux_opt, fluxerr_opt))
+
+        #else:
+        #    # adopt fit values
+        #    if fluxerr_opt is not None:
+        #        flux_opt = flux_opt_fit
+        #        fluxerr_opt = fluxerr_opt_fit
+
+
+
+    return flux_opt, fluxerr_opt
+
+
+################################################################################
+
+def sky2min (params, P, D, bkg_var, x_norm, y_norm, poldeg, mask_use,
+             mask_inn, nsigma_inn, nsigma_out, frac_max_rej=0.33,
+             fit=True):
+
+    # fit parameter values
+    par = params.valuesdict()
+    flux_opt = par['flux_opt']
+
+
+    # polynomial coefficients determining the sky background
+    coeffs = [par['c{}'.format(i)] for i in range((poldeg+1)**2)]
+    coeffs = np.array(coeffs).reshape(poldeg+1,poldeg+1)
+
+
+    # determine sky at normalized x,y with coefficients
+    sky = polygrid2d(x_norm, y_norm, coeffs).T
+
+
+    # variance
+    V = bkg_var + np.abs(flux_opt) * P + sky
+
+    # residuals
+    resid = (D - sky - flux_opt * P)
+    m_nz = (V > 0)
+    resid[m_nz] /= np.sqrt(V[m_nz])
+    resid[~m_nz] = 0
+    resid[~mask_use] = 0
+
+    # reduced chi-square
+    #chi2red = np.sum(resid**2) / (P.size - len(par))
+
+
+    if True:
+        # reject pixels by setting the corresponding resid to zero
+        # (size of output array is not allowed to change between
+        # function calls in lmfit), but at most [frac_max_rej] for
+        # each of inner and outer regions, using [nsigma_inn] and
+        # [sigma_out]
+        mask_out = ~mask_inn
+        sky2min_resid0 (mask_use, mask_inn, resid, nsigma_inn, frac_max_rej)
+        sky2min_resid0 (mask_use, mask_out, resid, nsigma_out, frac_max_rej)
+
+
+
+    if fit:
+        return resid[mask_use]
+    else:
+        return sky, V, resid
+
+
+################################################################################
+
+def sky2min_resid0 (mask_use, mask_innout, resid, nsigma, frac_max_rej):
+
+    # mask with shape of mask_use of useable pixels with sigmas above
+    # threshold in inner or outer mask
+    mask_use_rej = (mask_use & mask_innout & (np.abs(resid) > nsigma))
+
+    if np.sum(mask_use_rej) > 0:
+
+        # sort selected pixels in resid, with highest value first
+        idx_subset_rej = np.argsort(np.abs(resid)[mask_use_rej])[::-1]
+        #log.info ('resid[mask_use_rej][idx_subset_rej]: {}'
+        #          .format(resid[mask_use_rej][idx_subset_rej]))
+
+        # limit number of pixels to reject to no more than fraction
+        # [frac_max_rej] of useable pixels in inner/outer mask
+        npix = np.sum(mask_use & mask_innout)
+        nmax = int(np.ceil(frac_max_rej * npix))
+        idx_subset_rej = idx_subset_rej[:nmax]
+
+        # 2d indices of mask_use corresponding to True elements of
+        # mask_use_rej
+        idx_use_rej = np.nonzero(mask_use_rej)
+        idx_use_rej = (idx_use_rej[0][idx_subset_rej],
+                       idx_use_rej[1][idx_subset_rej])
+
+        # set resid of these indices to zero
+        #log.info ('resid[idx_use_rej]: {}'.format(resid[idx_use_rej]))
+        resid[idx_use_rej] = 0
+
+        #log.info ('npix: {}, frac_max_rej: {}, nmax: {}, len(idx_subset_rej): {}'
+        #          .format(npix, frac_max_rej, nmax, len(idx_subset_rej)))
+
+
+    return
+
+
+################################################################################
+
+def sky2min_orig (params, P, D, bkg_var, mask_use=None):
+
+    # fit parameter values
+    par = params.valuesdict()
+    sky = par['sky']
+    flux_opt = par['flux_opt']
+
+    # variance
+    V = bkg_var + np.abs(flux_opt) * P + sky
+
+    # residuals
+    resid = (D - sky - flux_opt * P) / np.sqrt(V)
+
+    # reduced chi-square
+    #chi2red = np.sum(resid**2) / (P.size - len(par))
+
+    if mask_use is not None:
+        m = mask_use.copy()
+        # use [nsigma_inner] as the rejection criterium for the
+        # inner region defined by [mask_inner]; outside of that
+        # use [nsigma_outer]
+        resid2 = resid**2
+        m[mask_inner] &= (resid2[mask_inner] <= nsigma_inner**2)
+        m[mask_outer] &= (resid2[mask_outer] <= nsigma_outer**2)
+        return resid[m]
+    else:
+        return resid
+
+
+################################################################################
+
+def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
+                       max_iters, epsilon, V_ast, mask_inn, show):
+
+
+    mask_out = ~mask_inn
     # intialize mask array to keep track of rejected pixels in loop below
-    mask_temp = np.ones(D.shape, dtype=bool)
+    mask_tmp = np.ones(D.shape, dtype=bool)
+
+
+    # local copy of input mask of pixels to use
+    m_u = mask_use.copy()
 
 
     # loop
@@ -7505,56 +7719,62 @@ def flux_optimal (P, D, bkg_var, nsigma_inner=np.inf, nsigma_outer=5,
 
         if i==0:
             # initial variance estimate (see Eq. 12 from Horne 1986)
-            V = bkg_var + np.abs(D)
+            V = bkg_var + np.abs(D) + V_ast
 
         else:
             # improved variance (see Eq. 13 from Horne 1986)
-            V = bkg_var + np.abs(flux_opt) * P
+            V = bkg_var + np.abs(flux_opt) * P + V_ast
 
-
-        if add_V_ast:
-            V += V_ast
 
         # optimal flux
-        flux_opt, fluxerr_opt = get_optflux (P[mask_use],
-                                             D[mask_use],
-                                             V[mask_use])
+        flux_opt, fluxerr_opt = get_optflux (P[m_u], D[m_u], V[m_u])
 
         #print ('i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt,
         #       abs(flux_opt_old-flux_opt)/flux_opt,
         # abs(flux_opt_old-flux_opt)/fluxerr_opt)
 
         if fluxerr_opt==0:
+            log.warning ('fluxerr_opt = 0 in flux_optimal_iter()')
             break
 
-        # stopping criterium suggested by Steven:
+
+        # stop iterating if flux_opt estimate is not changing
+        # significantly anymore
         if abs(flux_opt_old-flux_opt)/np.abs(fluxerr_opt) < epsilon:
             break
 
-        flux_opt_old = flux_opt
 
-        # reject any discrepant values; use [nsigma_inner] as the
-        # rejection criterium for the inner region defined by
-        # [mask_inner]; outside of that use [nsigma_outer]
-        sigma2 = (D - flux_opt * P)**2
-        mask_pos = (V > 0)
-        sigma2[mask_pos] /= V[mask_pos]
+        # after initial iteration, discard discrepant pixels
+        if i>0:
 
-        mask_temp[mask_inner] = (sigma2[mask_inner] > nsigma_inner**2)
-        mask_temp[mask_outer] = (sigma2[mask_outer] > nsigma_outer**2)
-        mask_use[mask_temp] = False
+            # update flux_opt_old after first iteration, implying that
+            # at least 2 iterations will be performed
+            flux_opt_old = flux_opt
+
+            # use [nsigma_inn] as the rejection criterium for the
+            # inner region defined by [mask_inn]; outside of that
+            # use [nsigma_out]
+            sigma2 = (D - flux_opt * P)**2
+            mask_pos = (V > 0)
+            sigma2[mask_pos] /= V[mask_pos]
+
+            mask_tmp[mask_inn] = (sigma2[mask_inn] > nsigma_inn**2)
+            mask_tmp[mask_out] = (sigma2[mask_out] > nsigma_out**2)
+            m_u[mask_tmp] = False
+
 
 
     if show:
 
-        log.info('no. of rejected pixels: {}'.format(np.sum(~mask_use)))
-        log.info('np.amax((D - flux_opt * P)**2 / V): {}'.format(np.amax(sigma2)))
+        log.info('no. of rejected pixels: {}'.format(np.sum(~m_u)))
+        log.info('np.amax((D - flux_opt * P)**2 / V):{}'.format(np.amax(sigma2)))
         log.info('flux_opt: {:.1f} +- {:.1f}'.format(flux_opt, fluxerr_opt))
 
         ds9_arrays(data=D, psf=P, bkg_var=bkg_var, variance=V,
-                   fluxoptP = flux_opt*P, data_min_fluxoptP=(D - flux_opt * P),
+                   fluxoptP=flux_opt*P, data_min_fluxoptP=(D - flux_opt * P),
                    data_min_fluxoptP_squared_div_variance=sigma2,
-                   mask_use=mask_use.astype(int))
+                   m_u=m_u.astype(int))
+
 
 
     return flux_opt, fluxerr_opt
@@ -7891,12 +8111,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             fits_bkg_std_mini, get_header=True, dtype='float32')
 
         if 'BKG-SIZE' in header_mini:
-            bkg_size = header_mini['BKG-SIZE']
+            bkg_boxsize = header_mini['BKG-SIZE']
         else:
-            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+            bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
 
         data_bkg_std = mini2back (data_bkg_std_mini, data_wcs.shape,
-                                  order_interp=1, bkg_boxsize=bkg_size,
+                                  order_interp=1, bkg_boxsize=bkg_boxsize,
                                   interp_Xchan=interp_Xchan_std,
                                   timing=get_par(set_zogy.timing,tel))
         # and write to fits; needed below for SWarp
@@ -8462,6 +8682,98 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 input_fits, get_par(set_zogy.gaia_cat,tel), obsdate,
                 ra_center, dec_center, fov_half_deg, fits_mask, nthreads,
                 rot=rot)
+
+
+
+            # CHECK!!! - if PSFs were removed, redetermine the local sky
+            # background around each object
+            remove_psf = get_par(set_zogy.remove_psf,tel)
+            if False and remove_psf:
+
+                # read image with PSFs removed
+                fits_psf_removed = '{}_psf_removed.fits'.format(base)
+                data_psf_removed = read_hdulist (fits_psf_removed)
+
+
+                # construct background image from PSF-removed image
+                # using [get_back]
+                bkg_boxsize = 20
+                data_bkg_mini_alt, data_bkg_std_mini_alt = get_back (
+                    data_psf_removed, header, None, bkg_boxsize,
+                    fits_mask=fits_mask, tel=tel, set_zogy=set_zogy,
+                    imtype=imtype)
+
+
+                # write these filtered meshes to fits and update their
+                # headers with [set_zogy.bkg_boxsize]
+                fits_tmp = '{}_bkg_mini_alt.fits'.format(base)
+                fits.writeto(fits_tmp, data_bkg_mini_alt, overwrite=True)
+                txt_tmp = '[pix] background boxsize used to create this image'
+                fits.setval(fits_tmp, 'BKG-SIZE', value=bkg_boxsize,
+                            comment=txt_tmp)
+
+
+                # bkg STD
+                fits_tmp = '{}_bkg_std_mini_alt.fits'.format(base)
+                fits.writeto(fits_tmp, data_bkg_std_mini_alt, overwrite=True)
+                fits.setval(fits_tmp, 'BKG-SIZE', value=bkg_boxsize,
+                            comment=txt_tmp)
+
+
+                # now use function [mini2back] to turn filtered mesh of median
+                # and std of background regions into full background image and
+                # its standard deviation
+                data_bkg_alt = mini2back (
+                    data_bkg_mini_alt, data_psf_removed.shape, order_interp=2,
+                    bkg_boxsize=bkg_boxsize, interp_Xchan=interp_Xchan,
+                    timing=get_par(set_zogy.timing,tel))
+
+                data_bkg_std_alt = mini2back (
+                    data_bkg_std_mini_alt, data_psf_removed.shape, order_interp=1,
+                    bkg_boxsize=bkg_boxsize, interp_Xchan=interp_Xchan_std,
+                    timing=get_par(set_zogy.timing,tel))
+
+
+                # write the alternative background and standard deviation to fits
+                # overwriting the fits images produced by SExtractor
+                fits_bkg_alt = '{}_bkg_alt.fits'.format(base)
+                fits_bkg_std_alt = '{}_bkg_std_alt.fits'.format(base)
+                fits.writeto(fits_bkg_alt, data_bkg_alt, header, overwrite=True)
+                fits.writeto(fits_bkg_std_alt, data_bkg_std_alt, header,
+                             overwrite=True)
+
+
+                if False:
+
+                    # infer xcoords, ycoords
+                    xcoords = table_cat['X_POS'].value
+                    ycoords = table_cat['Y_POS'].value
+
+
+                    # parameters from set_zogy
+                    apphot_radii = get_par(set_zogy.apphot_radii,tel)
+                    bkg_radii = get_par(set_zogy.bkg_radii,tel)
+                    bkg_limfrac = get_par(set_zogy.bkg_limfrac,tel)
+
+
+                    __, __, local_bkg = get_apflux (
+                        xcoords, ycoords, data_psf_removed, data_mask, fwhm,
+                        objmask=None, apphot_radii=apphot_radii, bkg_radii=bkg_radii,
+                        bkg_limfrac=bkg_limfrac, set_zogy=set_zogy, tel=tel,
+                        nthreads=nthreads)
+
+
+                    # save new background in table
+                    table_cat['BACKGROUND_ALT'] = local_bkg.astype('float32')
+
+
+                    # write fits table to tmp file
+                    table_cat.write (fits_cat.replace('_cat', '_tmpcat'),
+                                     format='fits', overwrite=True)
+
+
+
+
 
 
             # make copy of source extractor catalog, before
@@ -9315,7 +9627,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     flux_opt, fluxerr_opt, flags_mask_opt = get_psfoptflux_mp (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xpos, ypos,
         imtype=imtype, local_bkg=local_bkg, set_zogy=set_zogy,
-        get_flags_mask_central=True, nthreads=1, tel=tel)
+        get_flags_mask_inner=True, nthreads=1, tel=tel)
 
 
     # calculate the zeropoint (for ML/BG also calculate it per channel
@@ -9759,6 +10071,7 @@ def run_force_phot (fits_in, fits_gaia, obsdate, ra_center, dec_center,
         bkg_global=bkg_global, bkg_radii=bkg_radii, bkg_objmask=bkg_objmask,
         bkg_limfrac=bkg_limfrac, pm_epoch=pm_epoch, remove_psf=remove_psf,
         tel=tel, ncpus=nthreads)
+
 
 
     # delete columns that are not needed
@@ -10431,8 +10744,10 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
             # for ML/BG, do not cross the channel boundaries
             if tel[0:2] in ['ML', 'BG']:
                 if ny > 1:
-                    log.warning ('forcing nx >= 8 for telescope {}'.format(tel))
-                    nx = np.max(nx,8)
+                    if nx < 8:
+                        log.warning ('forcing nx >= 8 for telescope {}'
+                                     .format(tel))
+                    nx = max(nx,8)
                 else:
                     # unless ny has become 1, then consider the
                     # zeropoints across the entire image
@@ -10484,11 +10799,16 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
 
 
 
-            nsubs = zp.size
-            fits.writeto('zp_subs_{}_it{}.fits'.format(nsubs, i), zp, overwrite=True)
-            fits.writeto('zp_std_subs_{}_it{}.fits'.format(nsubs, i), zp_std, overwrite=True)
-            fits.writeto('zp_err_subs_{}_it{}.fits'.format(nsubs, i), zp_err, overwrite=True)
-            fits.writeto('nused_subs_{}_it{}.fits'.format(nsubs, i), nused, overwrite=True)
+            if False:
+                nsubs = zp.size
+                fits.writeto('zp_subs_{}_it{}.fits'.format(nsubs, i), zp,
+                             overwrite=True)
+                fits.writeto('zp_std_subs_{}_it{}.fits'.format(nsubs, i), zp_std,
+                             overwrite=True)
+                fits.writeto('zp_err_subs_{}_it{}.fits'.format(nsubs, i), zp_err,
+                             overwrite=True)
+                fits.writeto('nused_subs_{}_it{}.fits'.format(nsubs, i), nused,
+                             overwrite=True)
 
 
 
@@ -10498,7 +10818,6 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
 
                 # done
                 break
-
 
 
 
@@ -10833,10 +11152,10 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
                        np.sum(weights))
 
     # simple STD
-    mag_std = np.std(mag)
+    #mag_std = np.std(mag)
 
     # MAD STD
-    mag_mad_std = mad_std(mag)
+    #mag_mad_std = mad_std(mag)
 
 
     # for the error in the weighted mean, add sigma, otherwise it will
@@ -10845,10 +11164,9 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
     mag_wmeanerr = np.sqrt(1/np.sum(weights))
 
 
-    log.info ('mag_wmean: {:.4f}, mag_std: {:.4f}, mag_mad_std: {:.4f}, '
-              'mag_wstd: {:.4f}, mag_wmeanerr: {:.4f}, add_sigma: {:.4f}'
-              .format(mag_wmean, mag_std, mag_mad_std, mag_wstd, mag_wmeanerr,
-                      sigma))
+    log.info ('mag_wmean: {:.4f}, mag_wstd: {:.4f}, mag_wmeanerr: {:.4f}, '
+              'add_sigma: {:.4f}'
+              .format(mag_wmean, mag_wstd, mag_wmeanerr, sigma))
 
 
     return mag_wmean, mag_wstd, mag_wmeanerr
@@ -11774,8 +12092,8 @@ def inter_pix (data, data_std, mask_2replace, dpix=7, k=3, along_row=True,
 
                 # do leastsq polynomial fit including z_err
                 yerr_fit = data_std_absc[mask_fit]
-                result = minimize (gauss2min, params, method='least_squares',
-                                   args=(x_fit, y_fit, yerr_fit), max_nfev=100)
+                result = minimize (gauss2min, params, method='leastsq',
+                                   args=(x_fit, y_fit, yerr_fit,), max_nfev=100)
 
                 p = list(result.params.valuesdict().values())
                 fit = lambda x: gauss1d(p, x)
@@ -12002,7 +12320,7 @@ def get_back_orig (data, header, objmask, imtype, clip=True, fits_mask=None):
 
 ################################################################################
 
-def get_back (data, header, fits_objmask, fits_mask=None,
+def get_back (data, header, fits_objmask, bkg_boxsize, fits_mask=None,
               tel=None, set_zogy=None, imtype=None):
 
 
@@ -12037,9 +12355,12 @@ def get_back (data, header, fits_objmask, fits_mask=None,
 
     # [objmask] is the mask indicating the zeros in the '-OBJECTS'
     # image (with True)
-    data_objmask = read_hdulist(fits_objmask, dtype='float32')
-    mask_reject = (np.abs(data_objmask)==0)
-    del data_objmask
+    if fits_objmask is not None:
+        data_objmask = read_hdulist(fits_objmask, dtype='float32')
+        mask_reject = (np.abs(data_objmask)==0)
+        del data_objmask
+    else:
+        mask_reject = np.zeros_like(data, dtype=bool)
 
 
     # also reject any masked pixel from input mask
@@ -12085,7 +12406,7 @@ def get_back (data, header, fits_objmask, fits_mask=None,
     # masked array to be able to discard pixels in the object mask
     # (note that masked arrays consider mask values of True to be
     # invalid, i.e. are not used)
-    bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
+    #bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
     if ysize % bkg_boxsize != 0 or xsize % bkg_boxsize != 0:
         log.warning ('[bkg_boxsize] does not fit integer times in image; '
                      'best to pick a boxsize that does')
@@ -12228,7 +12549,7 @@ def get_back (data, header, fits_objmask, fits_mask=None,
         # correction factors in place.
         order_max = 2
         bkg_corr, mini_bkg_2Dfit = bkg_corr_MLBG (
-            mini_bkg, mini_std, data, header,
+            mini_bkg, mini_std, data, header, bkg_boxsize,
             correct_data=get_par(set_zogy.MLBG_chancorr,tel),
             order_max=order_max, mask_reject=mask_mini_avoid, tel=tel,
             set_zogy=set_zogy, limfrac_reject_image=limfrac_reject_image)
@@ -12409,8 +12730,8 @@ def get_section_MLBG (data_shape):
 
 ################################################################################
 
-def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
-                   order_max=2, mask_reject=None, tel=None,
+def bkg_corr_MLBG (mini_median, mini_std, data, header, bkg_boxsize,
+                   correct_data=True, order_max=2, mask_reject=None, tel=None,
                    set_zogy=None, limfrac_reject_image=None):
 
 
@@ -12488,12 +12809,12 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
 
         log.info ('start coefficients: {}'.format(coeffs_init))
 
-        # do least_squares polynomial fit in several iterations to include
+        # do least-squares polynomial fit in several iterations to include
         # rejection of outliers in residual map
         mask_reject_temp = np.copy(mask_reject)
         npix_reject_old = np.sum(mask_reject_temp)
         for it in range(5):
-            result = minimize (mini2min, params, method='least_squares',
+            result = minimize (mini2min, params, method='leastsq',
                                args=(mini_median, mini_std, mini_sec, order,
                                      mask_reject_temp, f_norm,), max_nfev=100)
             params = result.params
@@ -12558,9 +12879,9 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
                        vary=mask_cfit[i_coeff])
 
         # fit
-        result = minimize (mini2min, params, method='least_squares',
+        result = minimize (mini2min, params, method='leastsq',
                            args=(mini_median, mini_std, mini_sec, order,
-                                 mask_reject_temp, f_norm), max_nfev=100)
+                                 mask_reject_temp, f_norm,), max_nfev=100)
         params = result.params
         chi2red = result.redchi
         log.info ('order: {}, chi2red: {}'.format(order, chi2red))
@@ -12658,7 +12979,7 @@ def bkg_corr_MLBG (mini_median, mini_std, data, header, correct_data=True,
     # (using [f_norm]) of the mini image, so coefficients should be
     # scaled accordingly if original image pixel indices are used to
     # infer the polynomial fit (most natural)
-    bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
+    #bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
     xy = np.arange(order_bf+1)
     coeff_power = np.sum(np.meshgrid(xy,xy), axis=0).ravel()
     coeff_scaled = coeff / (float(f_norm * bkg_boxsize)**coeff_power)
@@ -12723,7 +13044,7 @@ def mini2min (params, data, data_std, data_sec, order, mask_reject,
 
     # return flattened residuals
     if return_resid:
-        return resid[mask_fit].ravel()
+        return resid[mask_fit]
     else:
         return data_corr, data_std_corr, fit, resid
 
@@ -12788,8 +13109,8 @@ def polyfit2d (x, y, z, z_err=None, order=2, fit_higher_Xterms=False,
             params.add('c{}'.format(i), value=coeffs[i], vary=mask_fit[i])
 
         # do leastsq polynomial fit including z_err
-        result = minimize (polyfcn2d, params, method='least_squares',
-                           args=(x, y, z, z_err, order), max_nfev=100)
+        result = minimize (polyfcn2d, params, method='leastsq',
+                           args=(x, y, z, z_err, order,), max_nfev=100)
 
         p = result.params.valuesdict()
         coeffs = np.array([p['c{}'.format(i)] for i in range(nc)])
@@ -13679,8 +14000,8 @@ def fit_moffat (psf_ima, nx, ny, header, pixscale, base_output, fit_gauss=False)
 
 
         # do leastsq model fit
-        result = minimize(moffat2min, params, method='least_squares',
-                          args=(psf_ima[i], xx, yy, fit_gauss), max_nfev=100)
+        result = minimize(moffat2min, params, method='leastsq',
+                          args=(psf_ima[i], xx, yy, fit_gauss,), max_nfev=100)
         p = result.params.valuesdict()
         chi2red[i] = result.redchi
 
@@ -13879,8 +14200,8 @@ def fit_moffat_single (image, image_err, mask_use=None, fit_gauss=False,
 
 
     # do leastsq model fit
-    result = minimize(moffat2min, params, method='least_squares',
-                      args=(image, xx, yy, fit_gauss, image_err, mask_use),
+    result = minimize(moffat2min, params, method='leastsq',
+                      args=(image, xx, yy, fit_gauss, image_err, mask_use,),
                       max_nfev=max_nfev)
     p = result.params.valuesdict()
     chi2red = result.redchi
@@ -14100,7 +14421,7 @@ def moffat2min (params, image, xx, yy, fit_gauss, image_err=None, mask_use=None)
         resid = resid[mask_use]
 
     # return flattened array
-    return resid.flatten()
+    return resid.ravel()
 
 
 ################################################################################
@@ -14738,14 +15059,24 @@ def ds9_arrays(regions=None, **kwargs):
     if regions is not None:
         cmd += ['-regions', regions]
 
+    if 'label' in kwargs:
+        label = kwargs['label']
+    else:
+        label = ''
+
     for name, array in kwargs.items():
+        if name == 'label':
+            continue
+
         # write array to fits
-        fitsfile = 'ds9_{}.fits'.format(name)
+        fitsfile = 'ds9_{}{}.fits'.format(name, label)
         fits.writeto(fitsfile, np.array(array), overwrite=True)
         # append to command
         cmd.append(fitsfile)
 
-    result = subprocess.run(cmd)
+
+    # CHECK!!!
+    #result = subprocess.run(cmd)
 
 
 ################################################################################
@@ -16257,8 +16588,9 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
             # construct background image using [get_back]; for ML/BG:
             # if the global background was already subtracted,
             # [data_bkg_mini] will be zero
+            bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
             data_bkg_mini, data_bkg_std_mini = get_back (
-                data, header, fits_objmask, fits_mask=fits_mask,
+                data, header, fits_objmask, bkg_boxsize, fits_mask=fits_mask,
                 tel=tel, set_zogy=set_zogy, imtype=imtype)
 
 
@@ -16266,27 +16598,25 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
             # headers with [set_zogy.bkg_boxsize]
             fits_tmp = '{}_bkg_mini.fits'.format(base)
             fits.writeto(fits_tmp, data_bkg_mini, overwrite=True)
-            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
             txt_tmp = '[pix] background boxsize used to create this image'
-            fits.setval(fits_tmp, 'BKG-SIZE', value=bkg_size, comment=txt_tmp)
+            fits.setval(fits_tmp, 'BKG-SIZE', value=bkg_boxsize, comment=txt_tmp)
 
 
             # bkg STD
             fits_tmp = '{}_bkg_std_mini.fits'.format(base)
             fits.writeto(fits_tmp, data_bkg_std_mini, overwrite=True)
-            fits.setval(fits_tmp, 'BKG-SIZE', value=bkg_size, comment=txt_tmp)
+            fits.setval(fits_tmp, 'BKG-SIZE', value=bkg_boxsize, comment=txt_tmp)
 
 
             # now use function [mini2back] to turn filtered mesh of median
             # and std of background regions into full background image and
             # its standard deviation
-            bkg_size = get_par(set_zogy.bkg_boxsize,tel)
             data_bkg = mini2back (data_bkg_mini, data.shape, order_interp=2,
-                                  bkg_boxsize=bkg_size,
+                                  bkg_boxsize=bkg_boxsize,
                                   interp_Xchan=interp_Xchan,
                                   timing=get_par(set_zogy.timing,tel))
             data_bkg_std = mini2back (data_bkg_std_mini, data.shape,
-                                      order_interp=1, bkg_boxsize=bkg_size,
+                                      order_interp=1, bkg_boxsize=bkg_boxsize,
                                       interp_Xchan=interp_Xchan_std,
                                       timing=get_par(set_zogy.timing,tel))
 
@@ -16436,12 +16766,12 @@ def update_bkgcol (base, header, imtype):
             log.info ('reading background mini image')
 
             if 'BKG-SIZE' in header_mini:
-                bkg_size = header_mini['BKG-SIZE']
+                bkg_boxsize = header_mini['BKG-SIZE']
             else:
-                bkg_size = get_par(set_zogy.bkg_boxsize,tel)
+                bkg_boxsize = get_par(set_zogy.bkg_boxsize,tel)
 
             data_bkg = mini2back (data_bkg_mini, data_shape,
-                                  order_interp=2, bkg_boxsize=bkg_size,
+                                  order_interp=2, bkg_boxsize=bkg_boxsize,
                                   interp_Xchan=interp_Xchan,
                                   timing=get_par(set_zogy.timing,tel))
 
@@ -16931,7 +17261,6 @@ def clean_cut_norm_psf (psf_array, clean_factor, cut=True, cut_size=None):
 
     # psf_array is assumed to be square
     ysize, xsize = psf_array.shape
-    assert xsize == ysize
 
 
     # if clean_factor is nonzero, clean array from low values in
