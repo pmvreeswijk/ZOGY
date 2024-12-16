@@ -18,8 +18,8 @@ if cal_dir is None:
 # be performed on images with size [subimage_size]+2xsubimage_border,
 # where only the central [subimage_size] pixels will be used for the
 # full output image
-subimage_size = 1320     # size of subimages
-subimage_border = 40     # border around subimage to avoid edge effects
+subimage_size = 660      # size of subimages
+subimage_border = 30     # border around subimage to avoid edge effects
 #subimage_size = 960      # size of subimages
 #subimage_border = 32     # border around subimage to avoid edge effects
 shape_new = (10560, 10560) # shape new image, ref image can have any shape
@@ -307,9 +307,6 @@ source_nsigma = 5         # signal-to-noise ratio used in calculating
                           # [force_phot_gaia] is False - for source to be
                           # included in output catalog
 source_minpixfrac = 0.67  # required fraction of good pixels in inner/central
-                          # footprint for source to have non-zero flux
-                          # in output catalog
-source_maxsatpix = 5      # maximum number of saturated pixels in inner/central
                           # footprint for source to have non-zero flux
                           # in output catalog
 inner_psflim = 0.01       # PSF profile pixels with values above this limit
