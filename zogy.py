@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.4.2'
+__version__ = '1.4.3'
 
 
 ################################################################################
@@ -3563,7 +3563,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'FNU_APER':            ['E', 'uJy'      , 'Aperture flux within radius x FWHM'],
         'FNUERR_APER':         ['E', 'uJy'      , 'Aperture flux error within radius x FWHM'],
         'FNUERRTOT_APER':      ['E', 'uJy'      , 'Aperture flux total error (incl. ZP error) within radius x FWHM'],
-        'BACKGROUND':          ['E', 'e-'       , 'Sky background estimated from sky annulus'],
+        'BACKGROUND':          ['E', 'e-'       , 'Sky background from sky annulus (float) or local fit (2 decimals)'],
         #'E_FLUX_MAX':          ['E', 'e-/s'    ],
         'E_FLUX_AUTO':         ['E', 'e-/s'     , 'Electron flux within a Kron-like elliptical aperture'],
         'E_FLUXERR_AUTO':      ['E', 'e-/s'     , 'Electron flux error within a Kron-like elliptical aperture'],
@@ -3719,11 +3719,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         # in Fnu
         keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
                                'BACKGROUND', 'FNU_APER', 'FNUERR_APER',
-                               'FNU_OPT', 'FNUERR_OPT',
+                               'FNU_OPT', 'FNUERR_OPT', 'FNUERRTOT_OPT',
                                # CHECK!!! - following columns
                                # are just for testing and should be
                                # removed when going to production
-                               'FNUERRTOT_OPT',
                                'MAG_OPT', 'MAGERR_OPT', 'MAGERRTOT_OPT',
                                'SNR_OPT', 'LIMMAG_OPT']
 
@@ -4456,8 +4455,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             table_trans['X_PEAK'], table_trans['Y_PEAK'], psffit=psffit,
             moffat=moffat, gauss=gauss, psfex_bintable_ref=fits_ref_psf,
             data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
-            header_new=header_new, header_ref=header_ref,
-            Scorr_peak=table_trans['SNR_ZOGY'], set_zogy=set_zogy,
+            header_new=header_new, header_ref=header_ref, set_zogy=set_zogy,
             get_flags_mask_inner=get_flags_mask_inner,
             nthreads=nthreads, tel=tel)
 
@@ -5772,7 +5770,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        limflux_nsigma=5, psfex_bintable_ref=None,
                        data_new_bkg_std=None, data_ref_bkg_std=None,
                        header_new=None, header_ref=None, header_trans=None,
-                       imtype=None, Scorr_peak=None, inject_fake=False,
+                       imtype=None, inject_fake=False,
                        nsigma_fake=10, remove_psf=False,
                        replace_sat_psf=False, replace_sat_nmax=100,
                        set_zogy=None, tel=None, fwhm=None, diff=True,
@@ -6007,9 +6005,11 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
     else:
 
-        # initialize flux_opt and fluxerr_opt
+        # initialize flux_opt, fluxerr_opt and local background
         flux_opt = np.zeros(ncoords, dtype='float32')
         fluxerr_opt = np.zeros(ncoords, dtype='float32')
+        local_bkg_opt = np.zeros(ncoords, dtype='float32')
+
 
         npass = 0
         while True:
@@ -6169,7 +6169,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # idx will be an empty list
             idx = list(itertools.chain.from_iterable(idx_list))
             if len(idx) > 0:
-                flux_opt[idx], fluxerr_opt[idx] = list2return
+                flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx] = list2return
                 #log.info ('flux_opt: {}'.format(flux_opt))
                 #log.info ('fluxerr_opt: {}'.format(fluxerr_opt))
 
@@ -6204,12 +6204,13 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
         # now that all passes are done, update output list2return
-        list2return = (flux_opt, fluxerr_opt)
+        list2return = (flux_opt, fluxerr_opt, local_bkg_opt)
 
 
 
 
-    if False and remove_psf:
+    # CHECK!!!
+    if remove_psf:
 
         # record D with PSFs removed
         if False:
@@ -6285,16 +6286,24 @@ def get_psfoptflux_loop (
     # select relevant coordinates
     xpos = xcoords[idx]
     ypos = ycoords[idx]
+    ncoords = len(xpos)
 
 
     # take care to also select relevant indices of local_bkg!
     if local_bkg is not None:
-        local_sky_bkg = local_bkg[idx]
+        local_bkg_opt = local_bkg[idx]
+    else:
+        # create zero-valued array
+        local_bkg_opt = np.zeros(ncoords, dtype='float32')
+
+
+    # fit sky inside flux_optimal() if local_sky_bkg is zero; perhaps
+    # better to make this an input parameter?
+    fit_sky = (local_bkg_opt==0)
 
 
     # initialize output arrays, which will have the same length as the
     # input indices
-    ncoords = len(xpos)
     flux_opt = np.zeros(ncoords, dtype='float32')
     fluxerr_opt = np.zeros_like(flux_opt)
 
@@ -6742,22 +6751,10 @@ def get_psfoptflux_loop (
                                   .format(x,y))
 
 
-                # pass input parameter [local_bkg] for this object to
-                # [flux_optimal] if it is defined
-                if local_bkg is not None:
-                    sky_bkg = local_sky_bkg[i]
-                else:
-                    sky_bkg = 0
-
-
-                # fit sky inside flux_optimal() if sky_bkg is zero
-                fit_sky = (sky_bkg==0)
-
-
                 # extract optimal flux
-                flux_opt[i], fluxerr_opt[i] = flux_optimal (
-                    P_shift, D_sub, bkg_var_sub, mask_use, sky_bkg=sky_bkg,
-                    fit_sky=fit_sky, mask_inner=mask_inner, show=show, tel=tel,
+                flux_opt[i], fluxerr_opt[i], local_bkg_opt[i] = flux_optimal (
+                    P_shift, D_sub, bkg_var_sub, mask_use, sky_bkg=local_bkg_opt[i],
+                    fit_sky=fit_sky[i], mask_inner=mask_inner, show=show, tel=tel,
                     x=x, y=y)
 
 
@@ -6875,15 +6872,16 @@ def get_psfoptflux_loop (
 
                         # replace these by the estimate of flux_opt *
                         # PSF + sky background
-                        D_sub[mask_satcon_use] = (
-                            P_shift[mask_satcon_use] * flux_opt[i] + sky_bkg)
+                        D_sub[mask_satcon_use] = (P_shift[mask_satcon_use] *
+                                                  flux_opt[i] + local_bkg_opt[i])
 
 
                         if False:
                             D_sub_orig = np.copy(D_sub)
                             if np.sqrt((x-2500)**2 +
                                        (y-9450)**2) < 100:
-                                D_sub_psf = P_shift * flux_opt[i] + sky_bkg
+                                D_sub_psf = (P_shift * flux_opt[i] +
+                                             local_bkg_opt[i])
                                 ds9_arrays (D_sub_orig=D_sub_orig, D_sub=D_sub,
                                             D_mask_sub=D_mask_sub.astype(int))
 
@@ -6958,7 +6956,7 @@ def get_psfoptflux_loop (
         # otherwise, return optimal flux, which can refer to a
         # limiting flux or flux of an artificial/fake object that was
         # added
-        list2return = [flux_opt, fluxerr_opt]
+        list2return = [flux_opt, fluxerr_opt, local_bkg_opt]
 
 
     # if specified, add combined flags_mask of central PSF area
@@ -7484,7 +7482,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=10, nsigma_outer=5,
     # pixels (m_u) of the entire footprint
     if fit_sky:
 
-        log.info ('fitting sky for source at x,y={:.0f},{:.0f}'.format(x,y))
+        #log.info ('fitting sky for source at x,y={:.0f},{:.0f}'.format(x,y))
 
         # fit parameters
         params = Parameters()
@@ -7535,6 +7533,22 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=10, nsigma_outer=5,
         fluxerr_opt = par['flux_opt'].stderr
 
 
+        # update sky_bkg using P, 2D sky and V; to infer 2D sky,
+        # execute sky2min with best-fit values, setting fit=False, in
+        # which case it returns various arrays
+        sky_2d, V, resid = sky2min(
+            par, P, D, bkg_var, x_norm, y_norm, poldeg, mask_use,
+            mask_inner, nsigma_inner, nsigma_outer, fit=False)
+
+
+        # infer effective sky value
+        i_max = np.argmax(P[mask_inner])
+        sky_bkg = sky_2d[mask_inner][i_max]
+        # round off to 2 decimals to subtly indicate that the sky
+        # was fit for this particular source
+        sky_bkg = np.round(sky_bkg, decimals=2)
+
+
         #flux_opt_fit = par['flux_opt'].value
         #fluxerr_opt_fit = par['flux_opt'].stderr
         #chi2red = result.redchi
@@ -7546,14 +7560,8 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=10, nsigma_outer=5,
 
 
         if show:
-            # execute sky2min with best-fit values, setting fit=False,
-            # in which case it returns various arrays
-            sky, V, resid = sky2min(
-                par, P, D, bkg_var, x_norm, y_norm, poldeg, mask_use,
-                mask_inner, nsigma_inner, nsigma_outer, fit=False)
-
             label = '_{:.0f}_{:.0f}'.format(x, y)
-            ds9_arrays(P=P, D=D, bkg_var=bkg_var, sky=sky, V=V,
+            ds9_arrays(P=P, D=D, bkg_var=bkg_var, sky_2d=sky_2d, V=V,
                        resid=resid, mask_use=mask_use.astype(int),
                        label=label)
 
@@ -7561,7 +7569,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=10, nsigma_outer=5,
         if False:
             # re-determine optimal flux and error with updated sky
             flux_opt, fluxerr_opt = flux_optimal_iter (
-                P, D-sky, bkg_var+max(sky,0), mask_use, nsigma_inner, nsigma_outer,
+                P, D-sky_2d, bkg_var+max(sky,0), mask_use, nsigma_inner, nsigma_outer,
                 max_iters, epsilon, V_ast, mask_inner, show)
             #log.info ('final flux_opt: {}, fluxerr_opt: {}'
             #          .format(flux_opt, fluxerr_opt))
@@ -7574,7 +7582,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=10, nsigma_outer=5,
 
 
 
-    return flux_opt, fluxerr_opt
+    return flux_opt, fluxerr_opt, sky_bkg
 
 
 ################################################################################
@@ -8296,7 +8304,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # use function [get_psfoptflux] to add the stars
         psfex_bintable = '{}_psf.fits'.format(base)
-        fakestar_flux_in, __ = get_psfoptflux_mp (
+        fakestar_flux_in, __, __ = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xcoords_fake,
             ycoords_fake, inject_fake=True, nsigma_fake=nsigma_fake_in,
             imtype=imtype, set_zogy=set_zogy, nthreads=1, tel=tel)
@@ -8576,7 +8584,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # execute [get_psfoptflux]
         nsigma = get_par(set_zogy.source_nsigma,tel)
         psfex_bintable = '{}_psf.fits'.format(base)
-        limflux_array, __ = get_psfoptflux_mp (
+        limflux_array, __, __ = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim,
             ylim, get_limflux=True, limflux_nsigma=nsigma,
             imtype=imtype, set_zogy=set_zogy, nthreads=1, tel=tel)
@@ -9185,7 +9193,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
             # rectangular aperture without any discarding of potential
             # objects in the sky region; that background was also used
             # by the aperture measurements
-            local_bkg = table_cat['BACKGROUND']
+            local_bkg = table_cat['BACKGROUND'].value
 
         else:
             # alternatively, determine sky background using
@@ -9202,7 +9210,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
 
     psfex_bintable = '{}_psf.fits'.format(base)
-    flux_opt, fluxerr_opt = get_psfoptflux_mp (
+    flux_opt, fluxerr_opt, local_bkg_opt = get_psfoptflux_mp (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
         psffit=False, imtype=imtype, local_bkg=local_bkg, set_zogy=set_zogy,
         nthreads=nthreads, tel=tel)
@@ -9210,6 +9218,10 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     # add optimal flux columns to table
     table_cat['E_FLUX_OPT'] = flux_opt
     table_cat['E_FLUXERR_OPT'] = fluxerr_opt
+
+
+    # update background column
+    table_cat['BACKGROUND'] = local_bkg_opt
 
 
     # [mypsffit] determines if PSF-fitting part is also performed;
@@ -9624,7 +9636,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
     # infer their optimal fluxes
     psfex_bintable = '{}_psf.fits'.format(base)
-    flux_opt, fluxerr_opt, flags_mask_opt = get_psfoptflux_mp (
+    flux_opt, fluxerr_opt, __, flags_mask_opt = get_psfoptflux_mp (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xpos, ypos,
         imtype=imtype, local_bkg=local_bkg, set_zogy=set_zogy,
         get_flags_mask_inner=True, nthreads=1, tel=tel)
@@ -11091,7 +11103,7 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, image_shape,
 
 ################################################################################
 
-def weighted_mean (mag, magerr, magerr_wlim=0):
+def weighted_mean (mag, magerr, magerr_wlim=1e-3):
 
     """calculate weighted mean of sample provided by the arrays [mag]
        and [magerr]. The maximum weight is defined by
@@ -11148,14 +11160,20 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
     mag_wmean = np.average(mag, weights=weights)
 
     # weighted sample standard deviation
-    mag_wstd = np.sqrt(np.sum(weights * (mag - mag_wmean)**2) /
-                       np.sum(weights))
+    # frequency weights
+    #mag_wstd = np.sqrt(np.sum(weights * (mag - mag_wmean)**2) /
+    #                   np.sum(weights)-1)
+    # probability weights
+    v1 = np.sum(weights)
+    v2 = np.sum(weights**2)
+    mag_wstd = np.sqrt(np.sum(weights * (mag - mag_wmean)**2) / (v1-(v2/v1)))
+
 
     # simple STD
-    #mag_std = np.std(mag)
+    mag_std = np.std(mag)
 
     # MAD STD
-    #mag_mad_std = mad_std(mag)
+    mag_mad_std = mad_std(mag)
 
 
     # for the error in the weighted mean, add sigma, otherwise it will
@@ -11164,9 +11182,10 @@ def weighted_mean (mag, magerr, magerr_wlim=0):
     mag_wmeanerr = np.sqrt(1/np.sum(weights))
 
 
-    log.info ('mag_wmean: {:.4f}, mag_wstd: {:.4f}, mag_wmeanerr: {:.4f}, '
-              'add_sigma: {:.4f}'
-              .format(mag_wmean, mag_wstd, mag_wmeanerr, sigma))
+    log.info ('mag.size: {}, mag_wmean: {:.4f}, mag_wstd: {:.4f}, mag_wmeanerr: '
+              '{:.4f}, add_sigma: {:.4f}, std: {:.4f}, mad_std: {:.4f}'
+              .format(mag.size, mag_wmean, mag_wstd, mag_wmeanerr, sigma,
+                      mag_std, mag_mad_std))
 
 
     return mag_wmean, mag_wstd, mag_wmeanerr
