@@ -41,7 +41,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.2'
+__version__ = '1.2.3'
 
 
 ################################################################################
@@ -1241,7 +1241,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 mag_ap, magerr_ap, magerrtot_ap, \
                     fnu_ap, fnuerr_ap, fnuerrtot_ap = zogy.apply_zp (
                         flux_ap, zp, airmass, exptime, ext_coeff,
-                        # CHECK!!! - use zp_std or zp_err??
                         fluxerr=fluxerr_ap, return_fnu=True, zp_err=zp_std)
 
 
@@ -1288,7 +1287,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # submit to [get_psfoptflux_mp] with single thread, as
                 # the multiprocessing is done at the image level,
                 # i.e. each cpu is processing a different image
-                flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
+                flux_opt, fluxerr_opt, local_bkg_opt = zogy.get_psfoptflux_mp(
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm,
                     local_bkg=local_bkg, remove_psf=remove_psf,
@@ -1302,7 +1301,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # [force_phot] function only provides ncpus to
                 # [get_rows] and [infer_mags] in case of a single
                 # image.
-                flux_opt, fluxerr_opt = zogy.get_psfoptflux_mp (
+                flux_opt, fluxerr_opt, local_bkg_opt = zogy.get_psfoptflux_mp(
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                     ycoords, imtype=imtype, fwhm=fwhm,
                     local_bkg=local_bkg, remove_psf=remove_psf,
@@ -1337,7 +1336,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             mag_opt, magerr_opt, magerrtot_opt, fnu_opt, fnuerr_opt, \
                 fnuerrtot_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
                                                ext_coeff, fluxerr=fluxerr_opt,
-                                               # CHECK!!! - use zp_std or zp_err??
                                                return_fnu=True, zp_err=zp_std)
 
             mask_pos = (flux_opt > 0)
@@ -1369,6 +1367,11 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         table['MAGERRTOT_OPT{}'.format(s2add)] = magerrtot_opt.astype('float32')
         table['SNR_OPT{}'.format(s2add)] = snr_opt.astype('float32')
         table['LIMMAG_OPT{}'.format(s2add)] = (limmags.astype('float32'))
+
+
+        # sky background may have been updated when determining
+        # the optimal flux
+        table['BACKGROUND{}'.format(s2add)] = local_bkg_opt.astype('float32')
 
 
         # add fluxes
@@ -1428,7 +1431,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 fnuerrtot_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
                                                 exptime, ext_coeff,
                                                 fluxerr=Fpsferr,
-                                                # CHECK!!! - use zp_std or zp_err?
                                                 return_fnu=True, zp_err=zp_std)
 
             mask_zero = (Fpsf==0)
