@@ -6208,9 +6208,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
 
-
     # CHECK!!!
-    if remove_psf:
+    if False and remove_psf:
 
         # record D with PSFs removed
         if False:
