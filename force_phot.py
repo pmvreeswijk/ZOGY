@@ -2308,8 +2308,8 @@ if __name__ == "__main__":
                         'coordinates to be processed and feature in the output '
                         'table; default=1')
 
-    par_default = 'MJD-OBS,OBJECT,FILTER,EXPTIME,S-SEEING,AIRMASS,PC-ZP,' \
-        'PC-ZPSTD,PC-ZPERR,QC-FLAG'
+    par_default = ('MJD-OBS,OBJECT,FILTER,EXPTIME,S-SEEING,AIRMASS,PC-ZP,'
+                   'PC-ZPSTD,PC-ZPERR,QC-FLAG')
     parser.add_argument('--keys2add', type=str, default=par_default,
                         help='header keyword values to add to output '
                         'table; default={}'.format(par_default))
