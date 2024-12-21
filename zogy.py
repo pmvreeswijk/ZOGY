@@ -10756,16 +10756,19 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
             if tel[0:2] in ['ML', 'BG']:
                 if ny > 1:
                     if nx < 8:
+                        nx = max(nx,8)
                         log.warning ('forcing nx >= 8 for telescope {}'
                                      .format(tel))
-                    nx = max(nx,8)
                 else:
-                    # unless ny has become 1, then consider the
-                    # zeropoints across the entire image
+                    # if ny has become 1, then consider the zeropoints
+                    # across the entire image
                     nx = 1
 
 
+
         # determine zeropoints
+        log.info ('inferring zeropoints for (ny,nx)=({},{}) subimages'
+                  .format(ny, nx))
         _zp, _zp_std, _zp_err, _nstars, _nused = zps_weighted_mean (
             x_array, y_array, zp_array, zp_err_array, image_shape,
             (ny,nx), ncal_min=ncal_min, nsigma=nsigma)
@@ -10794,11 +10797,12 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
             else:
 
                 # grow freshly computed arrays to zp_nsubs_shape
+                fgrow = (zp_nsubs_shape[0]//ny, zp_nsubs_shape[1]//nx)
                 for ax in [0,1]:
-                    _zp = np.repeat(_zp, fzoom[ax], axis=ax)
-                    _zp_std = np.repeat(_zp_std, fzoom[ax], axis=ax)
-                    _zp_err = np.repeat(_zp_err, fzoom[ax], axis=ax)
-                    _nused = np.repeat(_nused, fzoom[ax], axis=ax)
+                    _zp = np.repeat(_zp, fgrow[ax], axis=ax)
+                    _zp_std = np.repeat(_zp_std, fgrow[ax], axis=ax)
+                    _zp_err = np.repeat(_zp_err, fgrow[ax], axis=ax)
+                    _nused = np.repeat(_nused, fgrow[ax], axis=ax)
 
 
                 # replace zero-valued entries with values from
@@ -11053,11 +11057,22 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, image_shape,
             zps_nstars[i_y,i_x] = np.sum(mask_sub)
 
 
+            # warning message
+            msg_warn = ('less than {} calibration stars available for '
+                        'subimage with (y,x) index ({},{}) of shape {};'
+                        ' zeropoint at lower resolution will be used'
+                        .format(ncal_min, i_y, i_x, zp_nsubs_shape))
+
+
             # only determine zeropoint if sufficient number of values
             # [ncal_min] are available; otherwise leave it at zero
-            if np.sum(mask_sub) >= ncal_min:
+            if np.sum(mask_sub) < ncal_min:
+                log.warning (msg_warn)
 
-                # clip subimage outliers
+            else:
+
+                # clip subimage outliers; this is done after ncal_min
+                # check, otherwise it will sometimes fail
                 ma_clipped = sigma_clip(zps[mask_sub], sigma=nsigma)
                 mask_use = ~ma_clipped.mask
 
@@ -11066,6 +11081,7 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, image_shape,
                 # to the actual stars that can be used, i.e. after
                 # sigma-clipping
                 if np.sum(mask_use) < ncal_min:
+                    log.warning (msg_warn)
                     continue
 
 
