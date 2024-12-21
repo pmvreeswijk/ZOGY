@@ -10777,7 +10777,9 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
         if zp_nsubs_shape == (1,1):
 
             if _nused >= ncal_min:
-                zp, zp_std, zp_err, nused = _zp, _zp_std, _zp_err, _nused
+                # return scalars instead of arrays with shape (1,1)
+                zp, zp_std, zp_err, nused = (_zp[0,0], _zp_std[0,0],
+                                             _zp_err[0,0], _nused[0,0])
             else:
                 zp, zp_std, zp_err, nused = (0, 0, 0, 0)
                 log.warning ('could not determine zeropoints weighted mean for '
@@ -11107,12 +11109,7 @@ def zps_weighted_mean (xcoords, ycoords, zps, zpserr, image_shape,
 
 
     # return arrays
-    if zp_nsubs_shape == (1,1):
-        # if arrays contain single element, return scalars
-        return zps_wmean[0,0], zps_wstd[0,0], zps_wmeanerr[0,0], \
-            zps_nstars[0,0], zps_nused[0,0]
-    else:
-        return zps_wmean, zps_wstd, zps_wmeanerr, zps_nstars, zps_nused
+    return zps_wmean, zps_wstd, zps_wmeanerr, zps_nstars, zps_nused
 
 
 
