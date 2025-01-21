@@ -11662,7 +11662,7 @@ def get_chan_zp_coords (xcoords, ycoords, zp_chan, zp, zp_std_chan, zp_std,
 
 
     # assign channel zeropoint to coordinates on the image
-    mask_on = (chan_number != 0)
+    mask_on = (chan_idx != 0)
     zps[mask_on] = np.array(zp_chan)[chan_idx[mask_on]]
     zps_std[mask_on] = np.array(zp_std_chan)[chan_idx[mask_on]]
     zps_err[mask_on] = np.array(zp_err_chan)[chan_idx[mask_on]]
