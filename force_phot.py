@@ -41,7 +41,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.3'
+__version__ = '1.2.4'
 
 
 ################################################################################
@@ -582,7 +582,7 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
     # read header
     basename = filename.split('.fits')[0]
-    fits_red = add_drop_fz ('{}.fits.fz'.format(basename))
+    fits_red = '{}.fits.fz'.format(basename)
     fits_cat = '{}_cat.fits'.format(basename)
     fits_trans = '{}_trans.fits'.format(basename)
     # try to read transient catalog header, as it is more complete
@@ -820,31 +820,31 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
     # define fits_red in any case
-    fits_red = add_drop_fz ('{}.fits.fz'.format(basename))
+    fits_red = '{}.fits.fz'.format(basename)
 
 
     if trans:
 
         # filenames relevant for magtypes 'trans'
-        fits_Fpsf = add_drop_fz ('{}_Fpsf.fits.fz'.format(basename))
+        fits_Fpsf = '{}_Fpsf.fits.fz'.format(basename)
         fits_trans = '{}_trans.fits'.format(basename)
-        fits_tlimmag = add_drop_fz ('{}_trans_limmag.fits.fz'.format(basename))
-        fits_Scorr = add_drop_fz ('{}_Scorr.fits.fz'.format(basename))
-        fits_D = add_drop_fz ('{}_D.fits.fz'.format(basename))
+        fits_tlimmag = '{}_trans_limmag.fits.fz'.format(basename)
+        fits_Scorr = '{}_Scorr.fits.fz'.format(basename)
+        fits_D = '{}_D.fits.fz'.format(basename)
 
         list2check = [fits_Fpsf, fits_trans, fits_tlimmag, fits_Scorr]
 
     else:
 
         # filenames relevant for magtype 'full-source' and 'reference'
-        fits_limmag = add_drop_fz ('{}_limmag.fits.fz'.format(basename))
+        fits_limmag = '{}_limmag.fits.fz'.format(basename)
         psfex_bintable = '{}_psf.fits'.format(basename)
-        fits_objmask = add_drop_fz ('{}_objmask.fits.fz'.format(basename))
+        fits_objmask = '{}_objmask.fits.fz'.format(basename)
+        fits_bkg_std_mini = '{}_bkg_std_mini.fits.fz'.format(basename)
 
+        list2check = [fits_red, psfex_bintable, fits_bkg_std_mini]
         if fits_mask is not None:
-            list2check = [fits_red, fits_mask, psfex_bintable]
-        else:
-            list2check = [fits_red, psfex_bintable]
+            list2check += [fits_mask]
 
 
 
@@ -861,7 +861,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # above check on each file separately is very slow
         # in Google cloud; instead get list of all files with
         # same basename
-        flist = zogy.list_files(basename)
+        flist = zogy.list_files(basename.split('_red')[0])
+        #log.info ('flist: {}'.format(flist))
 
         # check if required files are in this list
         for fn in list2check:
@@ -1691,58 +1692,39 @@ def get_keys (header, ra_in, dec_in, tel):
 
 def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
 
-    # background STD
-    fits_bkg_std = '{}_bkg_std.fits'.format(basename)
-    if zogy.isfile (fits_bkg_std):
-        #data_bkg_std = zogy.read_hdulist (fits_bkg_std, dtype='float32')
-        with fits.open(fits_bkg_std) as hdulist:
-            data_bkg_std = hdulist[-1].data.astype('float32')
+    # create background STD from mini image
+    fits_bkg_std_mini = '{}_bkg_std_mini.fits.fz'.format(basename)
+    with fits.open(fits_bkg_std_mini) as hdulist:
+        data_bkg_std_mini = hdulist[-1].data.astype('float32')
+        header_mini = hdulist[-1].header
 
-        # only little bit faster with fitsio.FITS
-        #data_bkg_std = fitsio.FITS(fits_bkg_std)[-1][:,:]
 
-    elif zogy.isfile ('{}.fz'.format(fits_bkg_std)):
-        #data_bkg_std = zogy.read_hdulist ('{}.fz'.format(fits_bkg_std),
-        #                                  dtype='float32')
-        with fits.open('{}.fz'.format(fits_bkg_std)) as hdulist:
-            data_bkg_std = hdulist[-1].data.astype('float32')
+    if 'BKG-SIZE' in header_mini:
+        bkg_size = header_mini['BKG-SIZE']
+    else:
+        bkg_size = zogy.get_par(set_zogy.bkg_boxsize,tel)
+
+
+    if len(xcoords) == 1:
+        # determine scalar bkg_std value from mini image at
+        # xcoord, ycoord
+        x_indices_mini = ((xcoords-0.5).astype(int)/bkg_size).astype(int)
+        y_indices_mini = ((ycoords-0.5).astype(int)/bkg_size).astype(int)
+        [data_bkg_std] = data_bkg_std_mini[y_indices_mini, x_indices_mini]
 
     else:
-        # if it does not exist, create it from the background mesh
-        fits_bkg_std_mini = '{}_bkg_std_mini.fits'.format(basename)
-        #data_bkg_std_mini, header_mini = zogy.read_hdulist (
-        #    fits_bkg_std_mini, get_header=True, dtype='float32')
-        with fits.open(fits_bkg_std_mini) as hdulist:
-            data_bkg_std_mini = hdulist[-1].data.astype('float32')
-            header_mini = hdulist[-1].header
+        # determine full bkg_std image from mini image
 
-
-        if 'BKG-SIZE' in header_mini:
-            bkg_size = header_mini['BKG-SIZE']
-        else:
-            bkg_size = zogy.get_par(set_zogy.bkg_boxsize,tel)
-
-
-        if len(xcoords) == 1:
-            # determine scalar bkg_std value from mini image at
-            # xcoord, ycoord
-            x_indices_mini = ((xcoords-0.5).astype(int)/bkg_size).astype(int)
-            y_indices_mini = ((ycoords-0.5).astype(int)/bkg_size).astype(int)
-            [data_bkg_std] = data_bkg_std_mini[y_indices_mini, x_indices_mini]
-
-        else:
-            # determine full bkg_std image from mini image
-
-            # determine whether interpolation is allowed across
-            # different channels in [zogy.mini2back] using function
-            # [zogy.get_Xchan_bool]
-            chancorr = zogy.get_par(set_zogy.MLBG_chancorr,tel)
-            interp_Xchan_std = zogy.get_Xchan_bool (tel, chancorr, imtype,
-                                                    std=True)
-            data_bkg_std = zogy.mini2back (
-                data_bkg_std_mini, data_shape, order_interp=1,
-                bkg_boxsize=bkg_size, interp_Xchan=interp_Xchan_std,
-                timing=zogy.get_par(set_zogy.timing,tel))
+        # determine whether interpolation is allowed across
+        # different channels in [zogy.mini2back] using function
+        # [zogy.get_Xchan_bool]
+        chancorr = zogy.get_par(set_zogy.MLBG_chancorr,tel)
+        interp_Xchan_std = zogy.get_Xchan_bool (tel, chancorr, imtype,
+                                                std=True)
+        data_bkg_std = zogy.mini2back (
+            data_bkg_std_mini, data_shape, order_interp=1,
+            bkg_boxsize=bkg_size, interp_Xchan=interp_Xchan_std,
+            timing=zogy.get_par(set_zogy.timing,tel))
 
 
     return data_bkg_std
