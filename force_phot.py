@@ -41,7 +41,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.4'
+__version__ = '1.2.5'
 
 
 ################################################################################
@@ -1039,8 +1039,18 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
     # in case zp_nsubs_shape is different from (1,1), replace [zp]
-    # with array of zeropoints, one for each object; same for [zp_err]
-    if zp_nsubs_shape != (1,1):
+    # with array of zeropoints, one for each object; same for [zp_std]
+    # and [zp_err]
+    if zp_nsubs_shape == (1,1):
+
+        # zp_coords are used further below to apply the zeropoints, so
+        # let them refer to the single zeropoints in case zeropoint
+        # shape is (1,1)
+        zp_coords = zp
+        zp_std_coords = zp_std
+        zp_err_coords = zp_err
+
+    else:
 
         # name of zeropoints numpy file
         fn_zps = '{}_zps.npy'.format(basename)
@@ -1056,7 +1066,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
             # use get_zp_coords() to convert channel zeropoints, zp_std
             # and zp_err to coordinate-specific zeropoints
-            zp, zp_std, zp_err = zogy.get_chan_zp_coords(
+            zp_coords, zp_std_coords, zp_err_coords = zogy.get_chan_zp_coords(
                 xcoords, ycoords, zp_chan, zp, zp_std_chan, zp_std,
                 zp_err_chan, zp_err)
 
@@ -1081,10 +1091,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             # and zp_err to coordinate-specific zeropoints, i.e. zp,
             # zp_std and zp_err will have same length as number of
             # coordinates
-            zp, zp_std, zp_err = zogy.get_zp_coords (xcoords, ycoords, zp_subs, zp,
-                                                     zp_std_subs, zp_std,
-                                                     zp_err_subs, zp_err,
-                                                     (ysize, xsize), zp_nsubs_shape)
+            zp_coords, zp_std_coords, zp_err_coords = zogy.get_zp_coords (
+                xcoords, ycoords, zp_subs, zp, zp_std_subs, zp_std,
+                zp_err_subs, zp_err, (ysize, xsize), zp_nsubs_shape)
+
 
 
 
@@ -1237,12 +1247,13 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
             # infer calibrated magnitudes using the zeropoint
-            if zp is not None:
+            if zp_coords is not None:
 
                 mag_ap, magerr_ap, magerrtot_ap, \
                     fnu_ap, fnuerr_ap, fnuerrtot_ap = zogy.apply_zp (
-                        flux_ap, zp, airmass, exptime, ext_coeff,
-                        fluxerr=fluxerr_ap, return_fnu=True, zp_err=zp_std)
+                        flux_ap, zp_coords, airmass, exptime, ext_coeff,
+                        fluxerr=fluxerr_ap, return_fnu=True,
+                        zp_err=zp_std_coords)
 
 
                 mask_pos = (flux_ap > 0)
@@ -1332,12 +1343,13 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                       '[zogy.get_psfoptflux_mp]')
 
 
-        if zp is not None:
+        if zp_coords is not None:
             # infer calibrated magnitudes using the zeropoint
             mag_opt, magerr_opt, magerrtot_opt, fnu_opt, fnuerr_opt, \
-                fnuerrtot_opt = zogy.apply_zp (flux_opt, zp, airmass, exptime,
-                                               ext_coeff, fluxerr=fluxerr_opt,
-                                               return_fnu=True, zp_err=zp_std)
+                fnuerrtot_opt = zogy.apply_zp (
+                    flux_opt, zp_coords, airmass, exptime, ext_coeff,
+                    fluxerr=fluxerr_opt, return_fnu=True, zp_err=zp_std_coords)
+
 
             mask_pos = (flux_opt > 0)
             mag_opt[~mask_pos] = 99
@@ -1417,7 +1429,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # were already converted from nsigma_trans_orig to nsigma
         # requested
         airmassc = header['AIRMASSC']
-        Fpsferr = (10**(-0.4*(tlimmags - zp + airmassc * ext_coeff))
+        Fpsferr = (10**(-0.4*(tlimmags - zp_coords + airmassc * ext_coeff))
                    * exptime / nsigma)
 
 
@@ -1426,19 +1438,20 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                                      y_indices, x_indices)
 
 
-        if zp is not None:
+        if zp_coords is not None:
+
             # infer calibrated magnitudes using the zeropoint
             mag_zogy, magerr_zogy, magerrtot_zogy, fnu_zogy, fnuerr_zogy, \
-                fnuerrtot_zogy = zogy.apply_zp (np.abs(Fpsf), zp, airmass,
-                                                exptime, ext_coeff,
-                                                fluxerr=Fpsferr,
-                                                return_fnu=True, zp_err=zp_std)
+                fnuerrtot_zogy = zogy.apply_zp (
+                    Fpsf, zp_coords, airmass, exptime, ext_coeff,
+                    fluxerr=Fpsferr, return_fnu=True, zp_err=zp_std_coords)
 
             mask_zero = (Fpsf==0)
             mag_zogy[mask_zero] = 99
             #magerr_zogy[mask_zero] = 99
 
         else:
+
             mag_zogy = np.zeros(ncoords_ok, dtype='float32') + 99
             magerr_zogy = np.zeros(ncoords_ok, dtype='float32') + 99
             log.warning ('keyword PC-ZP not in header; unable to infer {} '
