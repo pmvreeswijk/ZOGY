@@ -39,13 +39,16 @@ chi2_snr_limit = 50      # transient signal-to-noise ratio limit above
                          # being falsely discarded based on a poor fit)
 
 
-# maximum number of flagged pixels of particular type (corresponding
-# to [mask_value] below) in the vicinity of the transient to filter
-transient_mask_max = {'bad': 0, 'cosmic ray': 0, 'saturated': 0,
-                      'saturated-connected': 0, 'satellite trail': 0, 'edge': 0,
-                      # if crosstalk correction is ok, then it should
-                      # not cause a fake transient
-                      'crosstalk': 100}
+# transient with any FLAGS_MASK value (see parameter mask_value
+# further down below) contained in transient_mask_discard are
+# discarded; e.g. 63 implies that any transient containing at least
+# one pixel in its inner profile with FLAGS_MASK 1 | 2 | 4 | 8 | 16 |
+# 32 (=63) does not appear in transient catalog
+transient_flagsmask_discard = 63 # = 1 | 2 | 4 | 8 | 16 | 32; allow crosstalk
+# same for FLAGS; 255 implies discard transients with any non-zero
+# Source Extractor FLAGS
+transient_flags_discard = 255 # = 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128
+
 
 save_thumbnails = True   # save thumbnails of reduced image, remapped reference
                          # image and ZOGY products D and Scorr in transient catalog
@@ -221,8 +224,10 @@ pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
 #           .format(os.environ['ZOGYHOME']))
 #cal_epoch = 2015.5
 # new catalog based on DR3
-cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12.fits'
-           .format(cal_dir))
+#cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12.fits'
+#           .format(cal_dir))
+cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12'
+           '_Cstar_blendcont_npick2.fits'.format(cal_dir))
 cal_epoch = 2016.0
 
 ast_nbright = 1500       # brightest no. of objects in the field to
@@ -293,9 +298,6 @@ bkg_objmask = True
 # background is adopted instead of the local one
 bkg_limfrac = 0.5
 
-# if force_phot_gaia=True: use object mask inferred from Gaia sources
-# rather than object mask determined by source extractor
-#use_gaia_objmask = False
 
 # integer subsampling factor to be able to sum over fraction of a
 # pixel; a value of n will split a pixel into n**2 subpixels
@@ -354,13 +356,12 @@ zp_default = {'ML1': {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4
 # image with shape (1024,2048), the zeropoints are determined on
 # subimages with shape (512,512); the zeropoint subimage sizes should
 # fit integer times into the full image
-#zp_nsubs_shape = (2,8)
 zp_nsubs_shape_new = {'ML1': (1,1), 'BG': (16,16)}
 zp_nsubs_shape_ref = {'ML1': (1,1), 'BG': (1,1)}
 
 # minimum number of non-saturated stars required (after sigma
 # clipping) to determine zeropoint(s) at any resolution
-phot_ncal_min = 10
+phot_ncal_min = 7
 
 
 #===============================================================================
@@ -383,6 +384,17 @@ swarp_cfg = cfg_dir+'swarp.config'           # SWarp configuration file
 mask_value = {'bad': 1, 'cosmic ray': 2, 'saturated': 4,
               'saturated-connected': 8, 'satellite trail': 16, 'edge': 32,
               'crosstalk': 64}
+
+# definition of flags recorded in FLAGS_OPT column in output catalog
+flags_opt_dict = {
+    'bkg_annulus':        0, # sky background determined from annulus
+    'bkg_localfit':       1, # sky determined by performing local fit
+    'bkg_global':         2, # local fit unsuccessful, using global sky
+    'calstar':            4, # entry in catalog is a calibration star
+    'source_minpixfrac':  8, # too few inner PSF pixels to infer flux_opt
+    'exception':         16, # exception occurred in flux_opt determination
+}
+
 
 # subfolder to save the many temporary numpy binary files
 dir_numpy = 'NumpyFiles'
