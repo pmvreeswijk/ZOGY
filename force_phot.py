@@ -41,7 +41,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.5'
+__version__ = '1.2.6'
 
 
 ################################################################################
@@ -1294,6 +1294,13 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                       '[zogy.get_psfoptflux_mp]')
 
         try:
+
+            # fit local background in zogy.get_psfoptflux_mp() if sky
+            # value was not successfully determined by
+            # zogy.get_apflux(), i.e. it is zero
+            mask_fit_local_bkg = (local_bkg==0)
+
+
             # determine optimal fluxes at pixel coordinates
             if ncpus is None:
                 # submit to [get_psfoptflux_mp] with single thread, as
@@ -1301,8 +1308,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # i.e. each cpu is processing a different image
                 flux_opt, fluxerr_opt, local_bkg_opt = zogy.get_psfoptflux_mp(
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                    ycoords, imtype=imtype, fwhm=fwhm,
-                    local_bkg=local_bkg, remove_psf=remove_psf,
+                    ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+                    mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
                     set_zogy=set_zogy, tel=tel, nthreads=1)
 
             else:
@@ -1315,8 +1322,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # image.
                 flux_opt, fluxerr_opt, local_bkg_opt = zogy.get_psfoptflux_mp(
                     psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                    ycoords, imtype=imtype, fwhm=fwhm,
-                    local_bkg=local_bkg, remove_psf=remove_psf,
+                    ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+                    mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
                     set_zogy=set_zogy, tel=tel, nthreads=ncpus)
 
 
@@ -1327,6 +1334,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                             psfex_bintable, data, data_bkg_std**2, data_mask,
                             xcoords, ycoords, imtype=imtype, fwhm=fwhm,
                             local_bkg=local_bkg,
+                            mask_fit_local_bkg=mask_fit_local_bkg,
                             remove_psf=remove_psf, psffit=True,
                             set_zogy=set_zogy, tel=tel, nthreads=ncpus))
 
