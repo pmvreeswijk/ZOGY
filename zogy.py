@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.5.0'
+__version__ = '1.5.1'
 
 
 ################################################################################
@@ -1038,7 +1038,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             data_Scorr_full[y_stat,x_stat].astype(float))
 
         if get_par(set_zogy.verbose,tel):
-            log.info('Scorr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
+            log.info('Scorr mean: {:.3f}, median: {:.3f}, std: {:.3f}'
                      .format(mean_Scorr, median_Scorr, std_Scorr))
 
         # make histrogram plot if needed
@@ -1049,43 +1049,59 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                            hist_xlabel='value in Scorr image')
 
 
+
         # compute statistics on Fpsferr image
         mean_Fpsferr, median_Fpsferr, std_Fpsferr = sigma_clipped_stats (
             data_Fpsferr_full[y_stat,x_stat].astype(float))
 
         if get_par(set_zogy.verbose,tel):
-            log.info('Fpsferr mean: {:.3f} , median: {:.3f}, std: {:.3f}'
+            log.info('Fpsferr mean: {:.3f}, median: {:.3f}, std: {:.3f}'
                      .format(mean_Fpsferr, median_Fpsferr, std_Fpsferr))
 
 
-        # convert Fpsferr image to limiting magnitude image
-        mask_zero = (data_Fpsferr_full==0)
-        data_Fpsferr_full[mask_zero] = median_Fpsferr
-        exptime, filt = read_header(header_new, ['exptime', 'filter'])
-        if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
-            zp = header_new['PC-ZP']
-            airm = header_new['AIRMASSC']
-            ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-            data_tlimmag = apply_zp((get_par(set_zogy.transient_nsigma,tel) *
-                                     data_Fpsferr_full), zp, airm, exptime,
-                                    ext_coeff).astype('float32')
-
-        # do not try to write scaled uint8 image (see block above);
-        # keep precision here and let fpack do the compression to some
-        # selected q-level
-        fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
-        fits.writeto(fits_tlimmag, data_tlimmag, header_tmp, overwrite=True)
-
-        del data_Scorr_full, data_Fpsferr_full, data_tlimmag
-
-
         # add header keyword(s):
+        keywords = ['exptime', 'filter']
+        exptime, filt = read_header(header_new, keywords)
+
         header_trans['Z-SCMED'] = (median_Scorr, 'median Scorr full image')
         header_trans['Z-SCSTD'] = (std_Scorr, 'sigma (STD) Scorr full image')
         header_trans['Z-FPEMED'] = (median_Fpsferr/exptime,
                                     '[e-/s] median Fpsferr full image')
         header_trans['Z-FPESTD'] = (std_Fpsferr/exptime,
                                     '[e-/s] sigma (STD) Fpsferr full image')
+
+
+
+        # transient limiting flux/magnitude and limiting magnitude image
+        if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
+
+            zp, zp_std, zp_err = get_zp_header (header_new, set_zogy=set_zogy)
+            airmass_center = header_new['AIRMASSC']
+            ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
+
+
+            # convert Fpsferr image to limiting magnitude image
+            #mask_zero = (data_Fpsferr_full==0)
+            #data_Fpsferr_full[mask_zero] = median_Fpsferr
+            fits_tlimmag = '{}_trans_limmag.fits'.format(base_newref)
+            fn_zps = '{}_zps.npy'.format(base_new)
+            zp_nsubs_shape = get_par(set_zogy.zp_nsubs_shape_new,tel)
+            create_limmag_image_trans (fits_tlimmag, header_tmp,
+                                       data_Fpsferr_full, zp,
+                                       airmass_center, exptime, ext_coeff,
+                                       zp_nsubs_shape, fn_zps)
+
+
+            # infer and add transient limiting flux and mag to header_trans
+            # using infer_limflux
+            infer_limflux (header_trans, base_new, data_Fpsferr_full,
+                           airmass_center, exptime, ext_coeff, zp, zp_std,
+                           zp_err, zp_nsubs_shape, trans=True)
+
+
+
+
+        del data_Scorr_full, data_Fpsferr_full
 
 
         # if [std_Scorr] is very large, do not bother to continue as
@@ -1097,6 +1113,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                        'spurious transients are likely to be identified'
                        .format(std_Scorr_limit))
             return header_new, header_trans
+
 
 
         # define fits files names
@@ -1206,16 +1223,10 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
 
-        # add header keyword(s):
-        header_trans['T-NSIGMA'] = (get_par(set_zogy.transient_nsigma,tel),
-                                   '[sigma] input transient detection threshold')
-        lflux = float(get_par(set_zogy.transient_nsigma,tel)) * median_Fpsferr
-        header_trans['T-LFLUX'] = (lflux/exptime, '[e-/s] full-frame transient '
-                                  '{}-sigma limiting flux'.format(
-                                      get_par(set_zogy.transient_nsigma,tel)))
+        # number of transients
         ntrans = len(table_trans)
         header_trans['T-NTRANS'] = (ntrans, 'number of >= {}-sigma transients '
-                                   '(pre-vetting)'.format(
+                                    '(pre-vetting)'.format(
                                        get_par(set_zogy.transient_nsigma,tel)))
 
         # add ratio of ntrans over total number of significant objects detected
@@ -1223,24 +1234,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             nobjects = header_new['NOBJECTS']
             header_trans['T-FTRANS'] = (ntrans/nobjects, 'transient fraction: '
                                         'T-NTRANS / NOBJECTS')
-
-
-        # infer limiting magnitudes from corresponding limiting
-        # fluxes using zeropoint and median airmass
-        if 'PC-ZP' in header_new and 'AIRMASSC' in header_new:
-            keywords = ['exptime', 'filter']
-            exptime, filt = read_header(header_new, keywords)
-            zp = header_new['PC-ZP']
-            airmass = header_new['AIRMASSC']
-            ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-            [[lmag], [lfnu]] = apply_zp([lflux], zp, airmass, exptime,
-                                        ext_coeff, return_fnu=True)
-            header_trans['T-LFNU'] = (lfnu, '[microJy] full-frame transient '
-                                      '{}-sigma limiting Fnu'.format(
-                                      get_par(set_zogy.transient_nsigma,tel)))
-            header_trans['T-LMAG'] = (lmag, '[mag] full-frame transient {}-sigma '
-                                      'limiting mag'.format(
-                                      get_par(set_zogy.transient_nsigma,tel)))
 
 
         # add fakestar header keywords
@@ -5602,7 +5595,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        replace_sat_psf=False, replace_sat_nmax=100,
                        set_zogy=None, tel=None, fwhm=None, diff=True,
                        get_flags_opt=False, get_flags_mask_inner=False,
-                       local_bkg=None, get_psf_footprint=False, nthreads=1):
+                       local_bkg=None, mask_fit_local_bkg=None,
+                       get_psf_footprint=False, nthreads=1):
 
 
     # function name
@@ -5626,6 +5620,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
     log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
     if get_par(set_zogy.timing,tel): t = time.time()
+    mem_use (label='at start of get_psfoptflux_mp')
 
 
     if remove_psf:
@@ -5809,7 +5804,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             replace_sat_psf, replace_sat_nmax, remove_psf,
             fwhm_use, diff, get_flags_opt, get_flags_mask_inner,
             psf_clean_factor, source_minpixfrac,
-            inner_psflim, mask_value, flags_opt_dict, local_bkg,
+            inner_psflim, mask_value, flags_opt_dict,
+            local_bkg, mask_fit_local_bkg,
             get_psf_footprint, lock, pid_list,
             n_fainter_neighbours, x_borders, tel, nthreads]
 
@@ -6126,15 +6122,16 @@ def get_psfoptflux_loop (
         fwhm_use=None, diff=True, get_flags_opt=False,
         get_flags_mask_inner=False, psf_clean_factor=None,
         source_minpixfrac=None, inner_psflim=None, mask_value=None,
-        flags_opt_dict=None, local_bkg=None, get_psf_footprint=False,
-        lock=None, pid_list=None, n_fainter_neighbours=None, x_borders=None,
-        tel=None, nthreads=None):
+        flags_opt_dict=None, local_bkg=None, mask_fit_local_bkg=None,
+        get_psf_footprint=False, lock=None, pid_list=None,
+        n_fainter_neighbours=None, x_borders=None, tel=None, nthreads=None):
 
 
 
     # function name
     fname = inspect.currentframe().f_code.co_name
     log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
+    t = time.time()
 
 
     # select relevant coordinates
@@ -6151,9 +6148,13 @@ def get_psfoptflux_loop (
         local_bkg_opt = np.zeros(ncoords, dtype='float32')
 
 
-    # fit sky inside flux_optimal() if local_sky_bkg is zero; perhaps
-    # better to make this an input parameter?
-    fit_sky = (local_bkg_opt==0)
+    # same for the accompanying mask that determines whether
+    # to perform a local sky background fit or not
+    if mask_fit_local_bkg is not None:
+        fit_sky = mask_fit_local_bkg[idx]
+    else:
+        # do not perform local sky background fit
+        fit_sky = np.zeros(ncoords, dtype=bool)
 
 
     # initialize output arrays, which will have the same length as the
@@ -6593,7 +6594,7 @@ def get_psfoptflux_loop (
                     flags_opt[i] |= flags_opt_dict['source_minpixfrac']
 
 
-                    if True:
+                    if False:
                         # do not warn about objects near the CCD edge
                         dpix_edge = 5
                         if (dpix_edge < x < xsize-dpix_edge and
@@ -6862,6 +6863,9 @@ def get_psfoptflux_loop (
         if not neighbourless:
             shm_tmp.close()
 
+
+
+    log_timing_memory (t0=t, label='in {}'.format(fname))
 
 
     return list2return
@@ -7422,12 +7426,10 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
             nsigma_inner, nsigma_outer,), max_nfev=200)
 
 
-        # CHECK!!! - could only adopt fit value if fit was successful,
-        # indicated by result.success boolean; if not, the flux_opt
-        # and fluxerr_opt values from the determination before this
-        # fit_sky block, done with sky value of zero, would be
-        # adopted; for the moment, adopt fit values irrespective of
-        # fit success
+        # adopt fit value if fit was successful, indicated by
+        # result.success boolean; if not, the flux_opt and fluxerr_opt
+        # values from the determination before this fit_sky block,
+        # done with sky value of zero, would be adopted
 
         if result.success:
 
@@ -8806,10 +8808,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # image median limiting flux/magnitude
         # ------------------------------------
 
-        # infer and add to header using infer_limflux
-        infer_limflux (header, base, data_wcs, data_bkg_std, data_mask, imtype,
-                       airmass_center, exptime, ext_coeff, zp, zp_std, zp_err,
-                       zp_nsubs_shape)
+        # infer and add limiting flux and magnitude to header using
+        # infer_limflux
+        infer_limflux (header, base, data_wcs, airmass_center, exptime,
+                       ext_coeff, zp, zp_std, zp_err, zp_nsubs_shape,
+                       data_bkg_std, data_mask, imtype, trans=False)
 
 
 
@@ -8981,29 +8984,42 @@ def infer_zp_highres (xcoords, ycoords, zp, zp_std, zp_err, ysize, xsize,
 
 ################################################################################
 
-def infer_limflux (header, base, data_wcs, data_bkg_std, data_mask, imtype,
-                   airmass_center, exptime, ext_coeff, zp, zp_std, zp_err,
-                   zp_nsubs_shape):
+def infer_limflux (header, base, data, airmass_center, exptime, ext_coeff,
+                   zp, zp_std, zp_err, zp_nsubs_shape, data_bkg_std=None,
+                   data_mask=None, imtype=None, trans=False):
 
 
     # determine image limiting flux using [get_psfoptflux] with
     # [get_limflux]=True for random coordinates across the field
     nlimits = 501
     edge = 100
-    ysize, xsize = data_wcs.shape
+    ysize, xsize = data.shape
     xlim = np.random.rand(nlimits)*(xsize-2*edge) + edge
     ylim = np.random.rand(nlimits)*(ysize-2*edge) + edge
 
 
-    # execute [get_psfoptflux]
-    nsigma = get_par(set_zogy.source_nsigma,tel)
-    psfex_bintable = '{}_psf.fits'.format(base)
-    limeflux_array, __, __ = get_psfoptflux_mp (
-        psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xlim, ylim,
-        get_limflux=True, limflux_nsigma=nsigma, imtype=imtype,
-        set_zogy=set_zogy, nthreads=1, tel=tel)
+    if trans:
 
-    # median electron flux
+        # in transient case, data should be the Fpsferr image, so
+        # simply read input [data] at ylim,xlim and multiply by nsigma
+        # to infer nsigma limiting flux in e-
+        nsigma = get_par(set_zogy.transient_nsigma,tel)
+        limeflux_array = nsigma * data[ylim.astype(int)-1,
+                                       xlim.astype(int)-1]
+
+    else:
+
+        # otherwise, execute [get_psfoptflux]
+        nsigma = get_par(set_zogy.source_nsigma,tel)
+        psfex_bintable = '{}_psf.fits'.format(base)
+        limeflux_array, __, __ = get_psfoptflux_mp (
+            psfex_bintable, data, data_bkg_std**2, data_mask, xlim, ylim,
+            get_limflux=True, limflux_nsigma=nsigma, imtype=imtype,
+            set_zogy=set_zogy, nthreads=1, tel=tel)
+
+
+
+    # median nsigma limiting electron flux
     limeflux = np.median(limeflux_array)
 
 
@@ -9022,22 +9038,41 @@ def infer_limflux (header, base, data_wcs, data_bkg_std, data_mask, imtype,
                                           return_fnu=True)
     limfnu = np.median(limfnu_array)
     limmag = np.median(limmag_array)
-    log.info('median {}-sigma limiting Fnu: {:.3f}'.format(nsigma, limfnu))
-    log.info('median {}-sigma limiting magnitude: {:.3f}'.format(nsigma, limmag))
+    if trans:
+        label = 'transient '
+    else:
+        label = ''
+
+    log.info('median {}{}-sigma limiting Fnu: {:.3f}'
+             .format(label, nsigma, limfnu))
+    log.info('median {}{}-sigma limiting magnitude: {:.3f}'.
+             format(label, nsigma, limmag))
 
 
+    if trans:
+        header['T-NSIGMA'] = (nsigma, '[sigma] input transient detection '
+                              'threshold')
+        header['T-LFLUX'] = (limeflux/exptime, '[e-/s] full-frame transient '
+                             '{}-sigma limiting flux'.format(nsigma))
+        header['T-LFNU'] = (limfnu, '[microJy] full-frame transient {}-sigma '
+                            'limiting Fnu'.format(nsigma))
+        header['T-LMAG'] = (limmag, '[mag] full-frame transient {}-sigma '
+                            'limiting mag'.format(nsigma))
 
-    # add n-sigma limiting flux in e-/s, in microJy and limiting
-    # magnitude to header
-    header['LIMEFLUX'] = (limeflux/exptime, '[e-/s] full-frame {}-sigma '
-                          'limiting flux'.format(nsigma))
-    header['LIMFNU'] = (limfnu, '[microJy] full-frame {}-sigma '
-                        'limiting Fnu'.format(nsigma))
-    header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
-                        .format(nsigma))
+    else:
+        # add n-sigma limiting flux in e-/s, in microJy and limiting
+        # magnitude to header
+        header['LIMEFLUX'] = (limeflux/exptime, '[e-/s] full-frame {}-sigma '
+                              'limiting flux'.format(nsigma))
+        header['LIMFNU'] = (limfnu, '[microJy] full-frame {}-sigma '
+                            'limiting Fnu'.format(nsigma))
+        header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
+                            .format(nsigma))
+
 
 
     return
+
 
 
 ################################################################################
@@ -9077,6 +9112,57 @@ def infer_satmag (table_cat, header):
                          'source')
     log.info('magnitude of brightest non-saturated source: {:.3f}'
              .format(satmag))
+
+    return
+
+
+################################################################################
+
+def create_limmag_image_trans (fits_limmag, header, data_err, zp,
+                               airmass_center, exptime, ext_coeff,
+                               zp_nsubs_shape, fn_zps):
+
+
+    # replace any zero values with a large value
+    mask_zero = (data_err==0)
+    data_err[mask_zero] = 100*np.median(data_err)
+
+
+    # if availabe, read zeropoints file and grow zp_subs to shape of
+    # data_wcs, so that higher-resolution zeropoints are taken into
+    # account
+    if zp_nsubs_shape != (1,1) and os.path.exists(fn_zps):
+
+        # read subimage zeropoints from numpy file
+        zp_subs, __, __, __ = np.load(fn_zps)
+
+        # convert zp_subs to image with the same shape as data_err
+        ysize, xsize = data_err.shape
+        fgrow = (ysize // zp_nsubs_shape[0], xsize // zp_nsubs_shape[1])
+        for ax in [0,1]:
+            zp_subs = np.repeat(zp_subs, fgrow[ax], axis=ax)
+
+        # let zp refer to this image zp
+        zp = zp_subs.copy()
+
+
+
+    # apply the zeropoint
+    nsigma = get_par(set_zogy.transient_nsigma,tel)
+    data_limmag = apply_zp(nsigma * data_err, zp, airmass_center, exptime,
+                           ext_coeff).astype('float32')
+
+
+    # set limiting magnitudes at edges to zero
+    #value_edge = get_par(set_zogy.mask_value['edge'],tel)
+    #mask_edge = (data_mask & value_edge == value_edge)
+    #data_limmag[mask_edge] = 0
+
+
+    # write limiting magnitude image
+    header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
+    fits.writeto(fits_limmag, data_limmag, header, overwrite=True)
+
 
     return
 
@@ -9240,9 +9326,9 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
     # apply the zeropoint
     ext_coeff = get_par(set_zogy.ext_coeff,tel)[filt]
-    data_limmag = apply_zp((get_par(set_zogy.source_nsigma,tel) * data_err),
-                           zp, airmass_center, exptime, ext_coeff
-                           ).astype('float32')
+    nsigma = get_par(set_zogy.source_nsigma,tel)
+    data_limmag = apply_zp(nsigma * data_err, zp, airmass_center, exptime,
+                           ext_coeff).astype('float32')
 
 
     # set limiting magnitudes at edges to zero; only consider 'real'
@@ -9409,13 +9495,21 @@ def run_force_phot (fits_in, header, fits_gaia, obsdate, ra_center, dec_center,
 
     mem_use ('[run_force_phot] before executing [get_psfoptflux_mp]')
 
+
+    # fit local background in get_psfoptflux_mp() if sky value was
+    # not successfully determined by get_apflux, i.e. it is zero
+    mask_fit_local_bkg = (local_bkg==0)
+
+
     # determine optimal fluxes at pixel coordinates
     flux_opt, fluxerr_opt, local_bkg_opt, flags_opt, flags_mask = \
-        get_psfoptflux_mp(psfex_bintable, data_wcs, data_bkg_std**2, data_mask,
-                          xcoords, ycoords, imtype=imtype, fwhm=fwhm,
-                          local_bkg=local_bkg, remove_psf=remove_psf,
-                          get_flags_opt=True, get_flags_mask_inner=True,
-                          set_zogy=set_zogy, tel=tel, nthreads=nthreads)
+        get_psfoptflux_mp(
+            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xcoords,
+            ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+            mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
+            get_flags_opt=True, get_flags_mask_inner=True, set_zogy=set_zogy,
+            tel=tel, nthreads=nthreads)
+
 
     mem_use ('[run_force_phot] after executing [get_psfoptflux_mp]')
 
@@ -9475,6 +9569,7 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     if bkg_global:
 
         local_bkg = None
+        mask_fit_local_bkg = None
 
     else:
 
@@ -9488,6 +9583,9 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
             # objects in the sky region; that background was also used
             # by the aperture measurements
             local_bkg = table_cat['BACKGROUND'].value
+            # do not perform a local sky background fit in
+            # get_psfoptflux_mp()
+            mask_fit_local_bkg = None
 
         else:
             # alternatively, determine sky background using
@@ -9502,11 +9600,18 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
                 tel=tel, nthreads=nthreads)
 
 
+            # fit local background in get_psfoptflux_mp() if sky value
+            # was not successfully determined by get_apflux, i.e. it
+            # is zero
+            mask_fit_local_bkg = (local_bkg==0)
+
+
 
     psfex_bintable = '{}_psf.fits'.format(base)
     flux_opt, fluxerr_opt, local_bkg_opt, flags_opt = get_psfoptflux_mp (
         psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
-        psffit=False, imtype=imtype, local_bkg=local_bkg, get_flags_opt=True,
+        psffit=False, imtype=imtype, local_bkg=local_bkg,
+        mask_fit_local_bkg=mask_fit_local_bkg, get_flags_opt=True,
         set_zogy=set_zogy, nthreads=nthreads, tel=tel)
 
 
@@ -9530,7 +9635,8 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         results = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
             psffit=True, imtype=imtype, local_bkg=local_bkg,
-            set_zogy=set_zogy, nthreads=nthreads, tel=tel)
+            mask_fit_local_bkg=mask_fit_local_bkg, set_zogy=set_zogy,
+            nthreads=nthreads, tel=tel)
 
         colnames = ['X_PSF', 'XERR_PSF', 'Y_PSF', 'YERR_PSF',
                     'E_FLUX_PSF', 'E_FLUXERR_PSF', 'CHI2_PSF']
@@ -9932,6 +10038,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         if bkg_global:
 
             local_bkg = None
+            mask_fit_local_bkg = None
 
         else:
 
@@ -9944,11 +10051,18 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 tel=tel, nthreads=1)
 
 
+            # fit local background in get_psfoptflux_mp() if sky value was
+            # not successfully determined by get_apflux, i.e. it is zero
+            mask_fit_local_bkg = (local_bkg==0)
+
+
+
         # infer their optimal fluxes
         psfex_bintable = '{}_psf.fits'.format(base)
         flux_opt, fluxerr_opt, __, flags_opt, flags_mask = get_psfoptflux_mp (
             psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xpos, ypos,
-            imtype=imtype, local_bkg=local_bkg, set_zogy=set_zogy,
+            imtype=imtype, local_bkg=local_bkg,
+            mask_fit_local_bkg=mask_fit_local_bkg, set_zogy=set_zogy,
             get_flags_opt=True, get_flags_mask_inner=True, nthreads=1, tel=tel)
 
 
@@ -14883,10 +14997,10 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     # N.B.: actually, fratio should not be converted to /s unit!!!
     #fratio_match *= header_ref['EXPTIME'] / header_new['EXPTIME']
 
-    log.info('fraction of PSF stars that match: {}'
+    log.info('fraction of PSF stars that match: {:.3f}'
              .format((len(idx_psf_new)+len(idx_psf_ref))/
                      (len(x_psf_new)+len(x_psf_ref))))
-    log.info ('median(fratio_match) using FLUX_AUTO: {}'
+    log.info ('median(fratio_match) using FLUX_AUTO: {:.3f}'
               .format(np.median(fratio_match)))
 
 
@@ -14976,7 +15090,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 fratio_match[m_nz] = flux_new[m_nz] / flux_ref[m_nz]
 
                 # corresponding error
-                fratio_err_match = fratio_match[m_nz] * np.sqrt(
+                fratio_err_match = np.zeros_like(fratio_match)
+                fratio_err_match[m_nz] = fratio_match[m_nz] * np.sqrt(
                     (fluxerr_new[m_nz] / flux_new[m_nz])**2 +
                     (fluxerr_ref[m_nz] / flux_ref[m_nz])**2)
 
@@ -15064,7 +15179,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 fratio_match[m_nz] = flux_new[m_nz] / flux_ref[m_nz]
 
                 # corresponding error
-                fratio_err_match = fratio_match[m_nz] * np.sqrt(
+                fratio_err_match = np.zeros_like(fratio_match)
+                fratio_err_match[m_nz] = fratio_match[m_nz] * np.sqrt(
                     (fluxerr_new[m_nz] / flux_new[m_nz])**2 +
                     (fluxerr_ref[m_nz] / flux_ref[m_nz])**2)
 
@@ -15079,7 +15195,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                        'E_FLUX_AUTO for the flux ratio')
 
 
-        log.info('median(fratio_match) using E_FLUX_OPT: {}'
+        log.info('median(fratio_match) using E_FLUX_OPT: {:.3f}'
                  .format(np.median(fratio_match)))
 
 
@@ -15094,7 +15210,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
 
     #---------------------------------------------------------------------------
-    def get_mean_fratio (fratio, fratio_err, weighted=True):
+    def get_mean_fratio (fratio_match, fratio_err_match, weighted=True):
 
         """helper function to calculate sigma-clipped (weighted) mean,
            median and std of fratio values; this is used below both
@@ -15102,6 +15218,13 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
            calculations; the boolean [weighted] determines whether the
            normal or weighted mean is returned
         """
+
+        # sigma clip input values
+        ma_clipped = sigma_clip(fratio_match)
+        mask_use = ~ma_clipped.mask
+        fratio = fratio_match[mask_use]
+        fratio_err = fratio_err_match[mask_use]
+
 
         # calculate full-frame average, standard deviation and median
         fratio_mean, fratio_med, fratio_std = (
@@ -15210,13 +15333,16 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     def local_or_full (value_local, value_full, std_full, nsigma=3):
         # function to return full-frame value if local value is more
         # than [nsigma] (full frame) away from the full-frame value
-        if (np.abs(value_local-value_full)/std_full > nsigma or
-            not np.isfinite(value_local)):
+
+        sigma = np.abs(value_local - value_full) / std_full
+        if sigma > nsigma or not np.isfinite(value_local):
 
             if get_par(set_zogy.verbose,tel):
-                log.info('np.abs(value_local-value_full)/std_full: {}'
-                         .format(np.abs(value_local-value_full)/std_full))
-                log.info('adopted value: {}'.format(value_full))
+                log.warning ('np.abs(value_local-value_full)/std_full: {:.3f} '
+                             'is greater than sigma limit of {}; adopting full-'
+                             'frame value: {:.3f} (local_or_full)'
+                             .format(sigma, nsigma, value_full))
+
             return value_full
 
         else:
@@ -15260,9 +15386,12 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 # local fratio stats using function get_mean_fratio
                 fratio_mean, fratio_med, fratio_std, fratio_err = \
                     get_mean_fratio (fratio_match[mask_sub],
-                                     fratio_err_match, weighted=True)
-                fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
-                                             fratio_std_full)
+                                     fratio_err_match[mask_sub], weighted=True)
+
+                # CHECK!!! - use local_or_full? at what nsigma?
+                if True:
+                    fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
+                                                 fratio_std_full, nsigma=3)
 
 
             # and the same for dx and dy
@@ -17755,7 +17884,8 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
         log.info('--------------------')
         log.info('nsub: {}'.format(nsub+1))
         log.info('--------------------')
-        log.info('fn: {:.3f}, fr: {:.3f}, fratio: {:.3f}'.format(fn, fr, fratio))
+        log.info('fn: {:.3f}, fr: {:.3f}, fratio: {:.3f}, fratio_err: {:.3f}'
+                 .format(fn, fr, fratio, fratio_err))
         log.info('dx: {:.3f}, dy: {:.3f}'.format(dx, dy))
         log.info('sn: {:.3f}, sr: {:.3f}'.format(sn, sr))
 
@@ -17889,11 +18019,16 @@ def run_ZOGY (nsub, data_ref, data_new, psf_ref, psf_new, data_ref_bkg_std,
     # !!!CHECK!!! - need to add Vfratio = (R * fratio _err)**2 ??
     # Vfratio is added below to V_S, so that it influences both Scorr
     # and alpha_std (= PSF flux error)
-    V_fratio = (R * fratio_err)**2
-    #V_fratio = 0
+    if True:
+        V_fratio = (R * fratio_err)**2
+        V_fratio_hat = fft.fft2(V_fratio, threads=nthreads)
+        VS_fratio = np.real(fft.ifft2(V_fratio_hat*kr2_hat, threads=nthreads))
+    else:
+        VS_fratio = 0
+
 
     # and finally Scorr
-    V_S = VSr + VSn + V_fratio
+    V_S = VSr + VSn + VS_fratio
     V_ast = VSr_ast + VSn_ast
     V = V_S + V_ast
     #Scorr = S / np.sqrt(V)
