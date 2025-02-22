@@ -18,15 +18,16 @@ if cal_dir is None:
 # be performed on images with size [subimage_size]+2xsubimage_border,
 # where only the central [subimage_size] pixels will be used for the
 # full output image
-subimage_size = 660      # size of subimages
-subimage_border = 30     # border around subimage to avoid edge effects
-#subimage_size = 960      # size of subimages
-#subimage_border = 32     # border around subimage to avoid edge effects
+# CHECK!!!
+#subimage_size = 660      # size of subimages
+#subimage_border = 30     # border around subimage to avoid edge effects
+subimage_size = 1320      # size of subimages
+subimage_border = 40      # border around subimage to avoid edge effects
 shape_new = (10560, 10560) # shape new image, ref image can have any shape
 
 
 # ZOGY parameters
-fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or
+fratio_local = True      # determine flux ratio (Fn/Fr) from subimage (T) or
                          # full frame (F)
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx,dy from subimage (T) or full frame (F)
@@ -175,7 +176,7 @@ fwhm_frac = 0.33         # fraction of objects, sorted in brightness
 #===============================================================================
 # PSF parameters
 #===============================================================================
-psf_poldeg = 3           # polynomial degree PSF across image (0=constant PSF)
+psf_poldeg = 2           # polynomial degree PSF across image (0=constant PSF)
 psf_clean_factor = 0     # pixels with values below (PSF peak * this
                          # factor) are set to zero; if this parameter
                          # is zero, no cleaning is done
