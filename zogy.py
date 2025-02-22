@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.5.1'
+__version__ = '1.5.2'
 
 
 ################################################################################
@@ -291,6 +291,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         log.critical(msg)
         raise RuntimeError(msg)
 
+
     # global parameters
     if new:
         global base_new, fwhm_new, pixscale_new #, ysize_new, xsize_new
@@ -304,6 +305,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # can be used in any function in this module
         base_ref = ref_fits.split('.fits')[0]
 
+
     # if either one of [base_new] or [base_ref] is not defined, set it
     # to the value of their counterpart as they're used below, a.o.
     # in function [get_psf]
@@ -312,6 +314,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new and ref:
         global base_newref
         base_newref = base_new
+
 
     # check if configuration files exist; if not exit
     def check_files (filelist):
@@ -1904,8 +1907,8 @@ def get_zp_header (header, set_zogy=None, channels=False):
                                  'default ZP value of {}'.format(key, val))
                 else:
                     val = 0
-                    log.warning ('keyword {} not found in header; adopting '
-                                 'value of 0'.format(key))
+                    #log.warning ('keyword {} not found in header; adopting '
+                    #             'value of 0'.format(key))
 
             # append value to list
             l_tmp.append(val)
@@ -4311,31 +4314,25 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     #     and Fpsferr, which should be possible as the PSF is
     #     better sampled than the image pixels
 
-    def help_psffit_D (psffit, moffat, gauss, get_flags_mask_inner=False):
-
-        # use [get_psfoptflux] to perform a PSF fit to D
-        results = get_psfoptflux_mp (
-            fits_new_psf, data_D, data_D_var, data_newref_mask,
-            table_trans['X_PEAK'], table_trans['Y_PEAK'], psffit=psffit,
-            moffat=moffat, gauss=gauss, psfex_bintable_ref=fits_ref_psf,
-            data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
-            header_new=header_new, header_ref=header_ref, set_zogy=set_zogy,
-            get_flags_mask_inner=get_flags_mask_inner,
-            nthreads=nthreads, tel=tel)
-
-        return results
+    results = get_psfoptflux_mp (
+        fits_new_psf, data_D, data_D_var, data_newref_mask,
+        table_trans['X_PEAK'], table_trans['Y_PEAK'], psffit=True,
+        moffat=False, gauss=False, psfex_bintable_ref=fits_ref_psf,
+        data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
+        header_new=header_new, header_ref=header_ref, set_zogy=set_zogy,
+        get_flags_mask_inner=True,
+        # CHECK!!! - setting nthreads to 1 temporarily, as multiple
+        # threads leads to memory error in some cases
+        nthreads=1, tel=tel)
+        #nthreads=nthreads, tel=tel)
 
 
-
-    # PSF fit to D, directly added as columns to table_trans
+    # add results as columns to table_trans
     colnames = ['X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
                 'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D', 'FLAGS_CENTRAL']
-    table_trans.add_columns(
-        help_psffit_D (True, False, False, get_flags_mask_inner=True),
-        names=colnames)
+    table_trans.add_columns(results, names=colnames)
 
     log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
-
 
 
 
@@ -4402,7 +4399,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     if not keep_all:
         table_trans = table_trans[mask_keep]
 
+
     log.info('ntrans after PSF_D fit S/N filter: {}'.format(len(table_trans)))
+
 
 
     # filter on FLAGS_CENTRAL (determined while performing PSF fit to D above)
@@ -4413,7 +4412,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     if not keep_all:
         table_trans = table_trans[mask_keep]
 
+
     log.info('ntrans after FLAGS_CENTRAL filter: {}'.format(len(table_trans)))
+
 
 
     # Gauss fit to D
@@ -4423,11 +4424,21 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     use_new_transcat = get_par(set_zogy.use_new_transcat,tel)
     if not use_new_transcat:
 
-        # Gauss fit to D, directly added as columns to table_trans
+        # fit Gauss to D using get_psfoptflux_mp
+        results = get_psfoptflux_mp (
+            fits_new_psf, data_D, data_D_var, data_newref_mask,
+            table_trans['X_PEAK'], table_trans['Y_PEAK'], psffit=False,
+            moffat=False, gauss=True, psfex_bintable_ref=fits_ref_psf,
+            data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
+            header_new=header_new, header_ref=header_ref, set_zogy=set_zogy,
+            nthreads=nthreads, tel=tel)
+
+
+        # add as columns to table_trans
         colnames = ['X_GAUSS_D', 'XERR_GAUSS_D', 'Y_GAUSS_D', 'YERR_GAUSS_D',
                     'FWHM_GAUSS_D', 'ELONG_GAUSS_D', 'CHI2_GAUSS_D']
-        table_trans.add_columns(help_psffit_D (False, False, True),
-                                names=colnames)
+        table_trans.add_columns(results, names=colnames)
+
 
         log.info ('[get_trans] time after Gauss fit to D: {}'
                   .format(time.time()-t))
@@ -4996,6 +5007,7 @@ def pool_func (func, itemlist, *args, nproc=1):
 
             # issue function and arguments to the worker pool
             results.append(pool.apply_async(func, args_tmp))
+
 
         # close the pool
         pool.close()
@@ -5593,6 +5605,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        imtype=None, inject_fake=False,
                        nsigma_fake=10, remove_psf=False,
                        replace_sat_psf=False, replace_sat_nmax=100,
+                       # CHECK - testing set_zogy
                        set_zogy=None, tel=None, fwhm=None, diff=True,
                        get_flags_opt=False, get_flags_mask_inner=False,
                        local_bkg=None, mask_fit_local_bkg=None,
@@ -5802,10 +5815,10 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             get_limflux, limflux_nsigma, fwhm_fit_init,
             inject_fake, nsigma_fake,
             replace_sat_psf, replace_sat_nmax, remove_psf,
-            fwhm_use, diff, get_flags_opt, get_flags_mask_inner,
-            psf_clean_factor, source_minpixfrac,
-            inner_psflim, mask_value, flags_opt_dict,
-            local_bkg, mask_fit_local_bkg,
+            fwhm_use, diff, get_flags_opt,
+            get_flags_mask_inner, psf_clean_factor,
+            source_minpixfrac, inner_psflim, mask_value,
+            flags_opt_dict, local_bkg, mask_fit_local_bkg,
             get_psf_footprint, lock, pid_list,
             n_fainter_neighbours, x_borders, tel, nthreads]
 
@@ -6132,6 +6145,8 @@ def get_psfoptflux_loop (
     fname = inspect.currentframe().f_code.co_name
     log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
     t = time.time()
+    log_timing_memory (t0=t, label='at start of get_psfoptflux_mp_loop')
+    #log.info ('nthreads: {}, globals(): {}'.format(nthreads, globals()))
 
 
     # select relevant coordinates
@@ -6661,6 +6676,11 @@ def get_psfoptflux_loop (
                 else:
                     show=False
 
+
+                # CHECK!!! - switched on for testing
+                #disk_use(label='in {}'.format(fname))
+                #log.info ('i: {}, (x,y)=({:.0f},{:.0f})'.format(i, x, y))
+
                 try:
                     xshift_psf[i], xerr_psf[i], yshift_psf[i], yerr_psf[i], \
                         flux_psf[i], fluxerr_psf[i], chi2_psf[i] = (
@@ -6865,8 +6885,7 @@ def get_psfoptflux_loop (
 
 
 
-    log_timing_memory (t0=t, label='in {}'.format(fname))
-
+    log_timing_memory (t0=t, label='at end of get_psfoptflux_mp_loop')
 
     return list2return
 
@@ -10147,7 +10166,8 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
             zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs, mask_used = \
                 calc_zp (x_array, y_array, zp_array, zp_err_array,
-                         data_wcs.shape, zp_nsubs_shape, tel, nsigma=2.5)
+                         data_wcs.shape, zp_nsubs_shape, tel, nsigma=2.5,
+                         pick_res_lowzpstd=True)
 
             fn_zps = '{}_zps.npy'.format(base)
             np.save(fn_zps, [zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs])
@@ -11102,7 +11122,8 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
 ################################################################################
 
 def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
-             zp_nsubs_shape, tel, nsigma=3, fzoom=(2,2)):
+             zp_nsubs_shape, tel, nsigma=3, fzoom=(2,2),
+             pick_res_lowzpstd=False):
 
 
     if get_par(set_zogy.timing,tel): t = time.time()
@@ -11183,12 +11204,27 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
                     _nused = np.repeat(_nused, fgrow[ax], axis=ax)
 
 
-                # replace zero-valued entries with values from
-                # lower-resolution array
-                zp[mask_zero] = _zp[mask_zero]
-                zp_std[mask_zero] = _zp_std[mask_zero]
-                zp_err[mask_zero] = _zp_err[mask_zero]
-                nused[mask_zero] = _nused[mask_zero]
+                if pick_res_lowzpstd:
+                    # mask indicating entries that have a lower but
+                    # positive zp_std in the lower resolution array,
+                    # or entries that are zero in highest resolution
+                    mask_lowstd = ((_zp_std > 0) & (_zp_std < zp_std) |
+                                   (zp_std == 0))
+                    # adopt those values
+                    zp[mask_lowstd] = _zp[mask_lowstd]
+                    zp_std[mask_lowstd] = _zp_std[mask_lowstd]
+                    zp_err[mask_lowstd] = _zp_err[mask_lowstd]
+                    nused[mask_lowstd] = _nused[mask_lowstd]
+
+                else:
+                    # replace zero-valued entries with values from
+                    # lower-resolution array
+                    mask_zero = (zp==0)
+                    zp[mask_zero] = _zp[mask_zero]
+                    zp_std[mask_zero] = _zp_std[mask_zero]
+                    zp_err[mask_zero] = _zp_err[mask_zero]
+                    nused[mask_zero] = _nused[mask_zero]
+
 
 
                 # for stars that were used, simply or-combine stars
@@ -11211,12 +11247,20 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
 
 
 
-            # check if any subimage zeropoint is zero
-            mask_zero = (zp==0)
-            if np.sum(mask_zero) == 0 or (ny,nx)==(1,1):
+            if pick_res_lowzpstd:
+                # now that values are selected based on lowest zp_std
+                # at any resolution, keep on iterating until nx=ny=1
+                if (ny,nx)==(1,1):
+                    # done
+                    break
 
-                # done
-                break
+            else:
+                # check if any subimage zeropoint is zero
+                mask_zero = (zp==0)
+                if np.sum(mask_zero) == 0 or (ny,nx)==(1,1):
+                    # done
+                    break
+
 
 
 
@@ -13133,11 +13177,11 @@ def fill_zeros_filter (data_mini, size_filter, use_median=True,
     if apply_filter:
         if use_median:
             # median filter
-            data_mini = ndimage.filters.median_filter(data_mini, size_filter)
+            data_mini = ndimage.median_filter(data_mini, size_filter)
         else:
             # mean filter
             weights = np.full((size_filter,size_filter), 1./size_filter**2)
-            data_mini = ndimage.filters.convolve(data_mini, weights)
+            data_mini = ndimage.convolve(data_mini, weights)
 
 
     return data_mini
@@ -13708,11 +13752,11 @@ def median_filter (data, size_filter, use_median=True):
 
     if use_median:
         # median filter
-        data_copy = ndimage.filters.median_filter(data_copy, size_filter)
+        data_copy = ndimage.median_filter(data_copy, size_filter)
     else:
         # mean filter
         weights = np.full((size_filter,size_filter), 1./size_filter**2)
-        data_copy = ndimage.filters.convolve(data_copy, weights)
+        data_copy = ndimage.convolve(data_copy, weights)
 
 
     return data_copy
@@ -15288,6 +15332,8 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         dy_mean, dy_med, dy_std = sigma_clipped_stats(dy_match, mask_value=0)
         dx_full = np.sqrt(dx_mean**2 + dx_std**2)
         dy_full = np.sqrt(dy_mean**2 + dy_std**2)
+        dx_std_full = dx_std
+        dy_std_full = dy_std
 
     else:
 
@@ -15299,7 +15345,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         dx_mean, dx_med, dx_std = 100, 100, 100
         dy_mean, dy_med, dy_std = 100, 100, 100
         dx_full, dy_full = 100, 100
-
+        dx_std_full, dy_std_full = 100, 100
 
 
     log.info('full-frame fratio mean: {:.3f} ({:.3f}), med: {:.3f}, std: {:.3f}'
@@ -15328,28 +15374,6 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     header['Z-FNRERR'] = (fratio_err_full,
                           'weighted error flux ratio (Fnew/Fref) full image')
 
-
-    #---------------------------------------------------------------------------
-    def local_or_full (value_local, value_full, std_full, nsigma=3):
-        # function to return full-frame value if local value is more
-        # than [nsigma] (full frame) away from the full-frame value
-
-        sigma = np.abs(value_local - value_full) / std_full
-        if sigma > nsigma or not np.isfinite(value_local):
-
-            if get_par(set_zogy.verbose,tel):
-                log.warning ('np.abs(value_local-value_full)/std_full: {:.3f} '
-                             'is greater than sigma limit of {}; adopting full-'
-                             'frame value: {:.3f} (local_or_full)'
-                             .format(sigma, nsigma, value_full))
-
-            return value_full
-
-        else:
-
-            return value_local
-
-    #---------------------------------------------------------------------------
 
 
     # loop subimages
@@ -15388,10 +15412,13 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                     get_mean_fratio (fratio_match[mask_sub],
                                      fratio_err_match[mask_sub], weighted=True)
 
-                # CHECK!!! - use local_or_full? at what nsigma?
-                if True:
-                    fratio_mean = local_or_full (fratio_mean, fratio_mean_full,
-                                                 fratio_std_full, nsigma=3)
+                # adopt full-frame values if local STD is higher than
+                # the full-frame STD
+                if fratio_std > fratio_std_full:
+                    fratio_mean = fratio_mean_full
+                    fratio_std = fratio_std_full
+                    fratio_err = fratio_err_full
+
 
 
             # and the same for dx and dy
@@ -15406,10 +15433,14 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 dy = np.sqrt(dy_mean**2 + dy_std**2)
 
 
-                # adopt full-frame values if local values are more
-                # than nsigma away from the full-frame values
-                dx = local_or_full (dx, dx_full, dx_std)
-                dy = local_or_full (dy, dy_full, dy_std)
+                # adopt full-frame values if local STD is higher than
+                # the full-frame STD
+                dr_var = dx_std**2 + dy_std**2
+                dr_var_full = dx_std_full**2 + dy_std_full**2
+                if dr_var > dr_var_full:
+                    dx = dx_full
+                    dy = dy_full
+
 
 
 
