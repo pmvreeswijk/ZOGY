@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.5.2'
+__version__ = '1.5.3'
 
 
 ################################################################################
@@ -373,8 +373,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         header['S-FWHM'] = (fwhm, '[pix] Sextractor FWHM estimate')
         header['S-FWSTD'] = (fwhm_std, '[pix] sigma (STD) FWHM estimate')
-        header['S-SEEING'] = (seeing, '[arcsec] SExtractor seeing estimate')
-        header['S-SEESTD'] = (seeing_std, '[arcsec] sigma (STD) SExtractor seeing')
+        header['S-SEEING'] = (seeing, '[arcsec] SExtractor FWHM estimate')
+        header['S-SEESTD'] = (seeing_std, '[arcsec] sigma (STD) SExtractor FWHM')
 
         header['S-ELONG'] = (elong, 'SExtractor ELONGATION (A/B) estimate')
         header['S-ELOSTD'] = (elong_std, 'sigma (STD) SExtractor ELONGATION (A/B)')
@@ -4321,10 +4321,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         data_new_bkg_std=data_new_bkg_std, data_ref_bkg_std=data_ref_bkg_std,
         header_new=header_new, header_ref=header_ref, set_zogy=set_zogy,
         get_flags_mask_inner=True,
-        # CHECK!!! - setting nthreads to 1 temporarily, as multiple
-        # threads leads to memory error in some cases
-        nthreads=1, tel=tel)
-        #nthreads=nthreads, tel=tel)
+        # CHECK!!! - setting nthreads to at most 1 temporarily, as
+        # multiple threads leads to memory error in some cases
+        nthreads=min(nthreads,1), tel=tel)
 
 
     # add results as columns to table_trans
@@ -6145,7 +6144,7 @@ def get_psfoptflux_loop (
     fname = inspect.currentframe().f_code.co_name
     log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
     t = time.time()
-    log_timing_memory (t0=t, label='at start of get_psfoptflux_mp_loop')
+    #log_timing_memory (t0=t, label='at start of get_psfoptflux_mp_loop')
     #log.info ('nthreads: {}, globals(): {}'.format(nthreads, globals()))
 
 
@@ -6885,7 +6884,7 @@ def get_psfoptflux_loop (
 
 
 
-    log_timing_memory (t0=t, label='at end of get_psfoptflux_mp_loop')
+    log_timing_memory (t0=t, label='at end of get_psfoptflux_loop')
 
     return list2return
 
@@ -8627,6 +8626,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             airmass_center, alt_center, az_center = get_airmass (
                 ra_center, dec_center, obsdate, lat, lon, height, get_altaz=True)
 
+
             # in case of reference image and header airmass==1 (set to
             # unity in refbuild module used for ML/BG) then force
             # airmasses calculated above to be unity.  If the reference
@@ -8634,8 +8634,17 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # calculation above will not be correct. It is assumed that
             # the fluxes in the combined reference image have been scaled
             # to an airmass of 1.
-            if imtype=='ref' and 'AIRMASS' in header and header['AIRMASS']==1:
-                airmass_center = 1
+            if not get_par(set_zogy.use_new_transcat,tel):
+                if imtype=='ref' and 'AIRMASS' in header and header['AIRMASS']==1:
+                    airmass_center = 1
+
+            # with set_zogy.use_new_transcat set to True, the
+            # reference image airmass, zeropoint and DATE-OBS is based
+            # on the 1st co-added image, so airmass calculation above
+            # should be correct
+
+
+
 
             log.info('airmass at image center: {:.3f}'.format(airmass_center))
             header['AIRMASSC'] = (airmass_center, 'airmass at image center')
@@ -8865,6 +8874,27 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     update_imcathead ('{}.fits'.format(base), header)
 
 
+
+    # ---------------------------------
+    # zeropoint flattening of new image
+    # ---------------------------------
+
+
+    scale_zps_sub = get_par(set_zogy.scale_zps_sub,tel)
+
+    if imtype=='new' and scale_zps_sub:
+
+        # scale the new image according to the difference between the
+        # higher-resolution zeropoints and the full-image zeropoint
+        fn_zps = '{}_zps.npy'.format(base)
+        if isfile(fn_zps):
+
+            log.info ('scaling new image according to higher-resolution '
+                      'zeropoints for {}'.format(base))
+            scale_highres_zps (data_wcs, header, tel, fn_zps)
+
+
+
     # ------------------------
     # preparation of subimages
     # ------------------------
@@ -8969,6 +8999,60 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     return dict_fftdata, dict_psf, psf_orig, dict_fftdata_bkg_std
 
+
+
+################################################################################
+
+def scale_highres_zps (data, header, tel, fn_zps):
+
+    """function to scale the image to the higher-resolution zeropoints
+    recorded in [fn_zps] with respect to the full-image zeropoint
+    """
+
+    log.info ('reading zeropoints numpy file {}'.format(fn_zps))
+
+    if fn_zps[0:5] == 'gs://':
+        # read numpy file from GCP
+        bucket_name, bucket_file = get_bucket_name (fn_zps)
+        bucket = storage.Client().bucket(bucket_name)
+        blob = bucket.blob(bucket_file)
+        with blob.open('rb') as f:
+            #zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(f)
+            zp_subs, __, __, __  = np.load(f)
+    else:
+        # read numpy file
+        #zp_subs, zp_std_subs, zp_err_subs, zp_ncal_subs = np.load(fn_zps)
+        zp_subs, __, __, __ = np.load(fn_zps)
+
+
+
+    # convert zp_subs to image with the same shape as data_err
+    ysize, xsize = data.shape
+    zp_nsubs_shape = zp_subs.shape
+    #log.info ('zp_nsubs_shape: {}'.format(zp_nsubs_shape))
+
+
+    fgrow = (ysize // zp_nsubs_shape[0], xsize // zp_nsubs_shape[1])
+    for ax in [0,1]:
+        zp_subs = np.repeat(zp_subs, fgrow[ax], axis=ax)
+
+
+    # image ZP
+    zp = header['PC-ZP']
+
+
+    # factor with which to boost zp_subs to match the image
+    # zeropoint
+    factor_zp = 10**(0.4*(zp - zp_subs))
+    #log.info ('zp: {}, zp_subs[0:10]: {} factor_zp[0:10]: {}'
+    #          .format(zp, zp_subs[0:10], factor_zp[0:10]))
+
+
+    # apply factor
+    data[:] *= factor_zp
+
+
+    return
 
 
 ################################################################################
@@ -9544,8 +9628,8 @@ def run_force_phot (fits_in, header, fits_gaia, obsdate, ra_center, dec_center,
     table_gaia['E_FLUX_OPT'] = flux_opt.astype('float32')
     table_gaia['E_FLUXERR_OPT'] = fluxerr_opt.astype('float32')
     table_gaia['SNR_OPT'] = snr_opt
-    table_gaia['FLAGS_OPT'] = flags_opt
-    table_gaia['FLAGS_MASK'] = flags_mask
+    table_gaia['FLAGS_OPT'] = flags_opt.astype('uint8')
+    table_gaia['FLAGS_MASK'] = flags_mask.astype('uint8')
     table_gaia['BACKGROUND'] = local_bkg_opt.astype('float32')
 
 
@@ -9635,15 +9719,20 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
 
     # add optimal flux columns to table
-    table_cat['E_FLUX_OPT'] = flux_opt
-    table_cat['E_FLUXERR_OPT'] = fluxerr_opt
+    table_cat['E_FLUX_OPT'] = flux_opt.astype('float32')
+    table_cat['E_FLUXERR_OPT'] = fluxerr_opt.astype('float32')
 
 
     # update background column
-    table_cat['BACKGROUND'] = local_bkg_opt
+    table_cat['BACKGROUND'] = local_bkg_opt.astype('float32')
 
-    # optimal flux flags
-    table_cat['FLAGS_OPT'] = flags_opt
+
+    # optimal flux flags; FLAGS_OPT was already added to table_cat in
+    # phot_calibrate(), to flag the calibration stars
+    # CHECK!!!
+    #log.info ('flags_opt.dtype in infer_optimal_fluxmag(): {}'
+    #          .format(flags_opt.dtype))
+    table_cat['FLAGS_OPT'] |= flags_opt.astype('uint8')
 
 
     # [mypsffit] determines if PSF-fitting part is also performed;
@@ -10085,6 +10174,13 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             get_flags_opt=True, get_flags_mask_inner=True, nthreads=1, tel=tel)
 
 
+        # make sure flags are uint8; because of np.concatenate
+        # operation in get_psfoptflux_mp(), these could be floating
+        # point arrays
+        flags_opt = flags_opt.astype('uint8')
+        flags_mask = flags_mask.astype('uint8')
+
+
 
     # calculate the zeropoint (for ML/BG also calculate it per channel
     # and do the ZP surface fit), starting with the airmasses of the
@@ -10135,6 +10231,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         # exception occured in optimal flux determination
         mask_flags_opt = ((flags_opt_dict['source_minpixfrac'] |
                            flags_opt_dict['exception']) & flags_opt == 0)
+
 
         mask_zp = ((snr_opt >= 10) & mask_flags_opt & (flags_mask==0))
         log.info ('{} calibration catalog entries left after applying '
@@ -10252,6 +10349,17 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 xpos[mask_zp][mask_used].astype('float32'),
                 ypos[mask_zp][mask_used].astype('float32'),
                 dist_max=2*fwhm, return_offsets=False)
+
+
+
+            # table_cat will not contain column FLAGS_OPT at this
+            # point if forced-photometry was not run on the image and
+            # infer_optimal_fluxmag() will be run (after the
+            # calibration)
+            if 'FLAGS_OPT' not in table_cat.colnames:
+                table_cat['FLAGS_OPT'] = np.zeros(len(table_cat), dtype='uint8')
+
+
 
 
         # update FLAGS_OPT
@@ -10445,7 +10553,10 @@ def remove_files (filelist, verbose=False):
         if isfile(f):
 
             if f[0:5] == 'gs://':
-                cmd = ['gsutil', '-q', 'rm', f]
+                # gsutil command (not actively supported anymore)
+                #cmd = ['gsutil', '-q', 'rm', f]
+                # gcloud alternative
+                cmd = ['gcloud', 'storage', 'rm', f]
                 result = subprocess.run(cmd)
             else:
                 os.remove(f)
@@ -14261,7 +14372,7 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
         header['PSF-FWHM'] = (psf_fwhm,
                               '[pix] image FWHM inferred by PSFEx')
         header['PSF-SEE'] = (psf_fwhm*pixscale,
-                             '[arcsec] image seeing inferred by PSFEx')
+                             '[arcsec] image FWHM inferred by PSFEx')
         #header['PSF-ELON'] = (psf_elon, 'median elongation of PSF stars')
         #header['PSF-ESTD'] = (psf_elon_std, 'elongation sigma (STD) of PSF stars')
 
@@ -14970,35 +15081,10 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     log.info('executing get_fratio_dxdy ...')
 
 
-    #---------------------------------------------------------------------------
-    def readcat (psfcat):
-
-        """helper function to read PSFEx output ASCII catalog and
-           extract x, y and normalisation factor from the PSF stars
-        """
-
-        table = ascii.read(psfcat, format='sextractor')
-        # In PSFEx version 3.18.2 and higher all objects from the
-        # input SExtractor catalog are recorded, and in that case the
-        # entries with FLAGS_PSF=0 need to be selected.
-        if 'FLAGS_PSF' in table.colnames:
-            mask_psfstars = (table['FLAGS_PSF']==0)
-        # In PSFEx version 3.17.1, only stars with zero flags are
-        # recorded in the output catalog, so use the entire table
-        else:
-            mask_psfstars = np.ones(len(table), dtype=bool)
-
-        x = table['X_IMAGE'][mask_psfstars]
-        y = table['Y_IMAGE'][mask_psfstars]
-        norm = table['NORM_PSF'][mask_psfstars]
-        return x, y, norm
-
-    #---------------------------------------------------------------------------
-
     # read psfcat_new
-    x_psf_new, y_psf_new, norm_psf_new = readcat(psfcat_new)
+    x_psf_new, y_psf_new, norm_psf_new = read_psfcat(psfcat_new)
     # read psfcat_ref
-    x_psf_ref, y_psf_ref, norm_psf_ref = readcat(psfcat_ref)
+    x_psf_ref, y_psf_ref, norm_psf_ref = read_psfcat(psfcat_ref)
 
     log.info('number of PSF stars in new: {}'.format(len(x_psf_new)))
     log.info('number of PSF stars in ref: {}'.format(len(x_psf_ref)))
@@ -15102,8 +15188,19 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
         if len(table_new)==len(table_ref) and len(table_new)> 0:
 
+            # if new image is flattened using subimage zeropoints
+            # before image subtraction is performed, do not used the
+            # electron fluxes, as they have not been corrected using
+            # the subimage zeropoints; instead in that case use the
+            # calibrated mag_opt or fnu_opt and convert to electron
+            # fluxes using the single image zeropoint (to which the
+            # subimages have been scaled)
+            scale_zps_sub = get_par(set_zogy.scale_zps_sub,tel)
+
+
             if ('E_FLUX_OPT' in table_new.colnames and
-                'E_FLUX_OPT' in table_ref.colnames):
+                'E_FLUX_OPT' in table_ref.colnames and
+                not scale_zps_sub):
 
                 # final catalog fluxes have been saved in e-/s, while
                 # the corresponding header EXPTIME indicates the image
@@ -15138,6 +15235,10 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 fratio_err_match[m_nz] = fratio_match[m_nz] * np.sqrt(
                     (fluxerr_new[m_nz] / flux_new[m_nz])**2 +
                     (fluxerr_ref[m_nz] / flux_ref[m_nz])**2)
+
+
+                log.info('median(fratio_match) using E_FLUX_OPT: {:.3f}'
+                         .format(np.median(fratio_match)))
 
 
 
@@ -15188,13 +15289,25 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 exptime_ref, filt_ref, obsdate_ref = read_header (header_ref,
                                                                   keywords)
 
-                if 'AIRMASS' in header_ref and header_ref['AIRMASS']==1:
-                    airmass_ref = 1
-                    log.info ('airmass_ref: {}'.format(airmass_ref))
-                else:
+                try:
                     airmass_ref = get_airmass (ra_cat_ref[idx_cat_ref],
                                                dec_cat_ref[idx_cat_ref],
                                                obsdate_ref, lat, lon, height)
+                except:
+                    log.error ('get_airmass for sources in reference image '
+                               'failed; using single airmass instead')
+
+                    if 'AIRMASSC' in header_ref:
+                        airmass_ref = header_ref['AIRMASSC']
+                        key = 'AIRMASSC'
+                    elif 'AIRMASS' in header_ref:
+                        airmass_ref = header_ref['AIRMASS']
+                        key = 'AIRMASS'
+
+                    log.info ('adopting airmass_ref {:.3f} from header keyword '
+                              '{}'.format(key, airmass_ref))
+
+
 
                 zp_ref = header_ref['PC-ZP']
                 ext_coeff_ref = header_ref['PC-EXTCO']
@@ -15229,6 +15342,15 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                     (fluxerr_ref[m_nz] / flux_ref[m_nz])**2)
 
 
+                if 'MAG_OPT' in table_ref.colnames:
+                    label = 'MAG_OPT'
+                else:
+                    label = 'FNU_OPT'
+
+                log.info('median(fratio_match) using {}: {:.3f}'
+                         .format(label, np.median(fratio_match)))
+
+
             else:
                 log.warning ('E_FLUX_OPT and/or MAG_OPT not available in '
                              'catalogs to infer flux ratios; using E_FLUX_AUTO')
@@ -15239,9 +15361,6 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                        'E_FLUX_AUTO for the flux ratio')
 
 
-        log.info('median(fratio_match) using E_FLUX_OPT: {:.3f}'
-                 .format(np.median(fratio_match)))
-
 
 
     # now also determine fratio, dx and dy for each subimage which can
@@ -15251,67 +15370,6 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
     fratio_err_subs = np.zeros(nsubs)
     dx_subs = np.zeros(nsubs)
     dy_subs = np.zeros(nsubs)
-
-
-    #---------------------------------------------------------------------------
-    def get_mean_fratio (fratio_match, fratio_err_match, weighted=True):
-
-        """helper function to calculate sigma-clipped (weighted) mean,
-           median and std of fratio values; this is used below both
-           for the full-frame and - if relevant - for the subimages
-           calculations; the boolean [weighted] determines whether the
-           normal or weighted mean is returned
-        """
-
-        # sigma clip input values
-        ma_clipped = sigma_clip(fratio_match)
-        mask_use = ~ma_clipped.mask
-        fratio = fratio_match[mask_use]
-        fratio_err = fratio_err_match[mask_use]
-
-
-        # calculate full-frame average, standard deviation and median
-        fratio_mean, fratio_med, fratio_std = (
-            sigma_clipped_stats(fratio, mask_value=0))
-
-
-        if weighted:
-            # replace fratio_mean with weighted mean, where fratio_err
-            # is first corrected such that distribution of fratio and
-            # fratio_err has a reduced chi-square value of unity
-            # (using function from dreamreduce: zeropoints.find_sigma)
-            res = fratio - fratio_med
-            sigma = find_sigma (res, fratio_err)
-            log.info ('inferred additional sigma in get_mean_fratio: {:.3f}'
-                      .format(sigma))
-            #fratio_vartot = fratio_err**2 + sigma**2
-
-            # weights
-            m_nz = (fratio_err != 0)
-            weights = 1/fratio_err[m_nz]**2
-
-            # weighted mean
-            fratio_mean = np.average(fratio[m_nz], weights=weights)
-
-            # weighted sample standard deviation
-            fratio_wstd = np.sqrt(np.sum(weights * (fratio[m_nz] - fratio_mean)**2) /
-                                  np.sum(weights))
-
-            # weighted error; add sigma to avoid underestimating the
-            # error
-            weights = 1/(fratio_err[m_nz]**2 + sigma**2)
-            fratio_werr = np.sqrt(1/np.sum(weights))
-
-        else:
-            # fratio_werr has not been defined yet; simply scale the
-            # fratio_std with the square root of the number of
-            # measurements
-            fratio_werr = fratio_std / np.sqrt(len(fratio))
-
-
-        return fratio_mean, fratio_med, fratio_wstd, fratio_werr
-
-    #---------------------------------------------------------------------------
 
 
     # calculations below require a bare minimum of matches, otherwise
@@ -15456,6 +15514,96 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
 
     return success, x_psf_new_match, y_psf_new_match, dx_match, dy_match, \
         fratio_subs, fratio_std_subs, fratio_err_subs, dx_subs, dy_subs
+
+
+################################################################################
+
+def read_psfcat (psfcat):
+
+    """read PSFEx output ASCII catalog and extract x, y and
+    normalisation factor from the PSF stars
+    """
+
+    table = ascii.read(psfcat, format='sextractor')
+    # In PSFEx version 3.18.2 and higher all objects from the
+    # input SExtractor catalog are recorded, and in that case the
+    # entries with FLAGS_PSF=0 need to be selected.
+    if 'FLAGS_PSF' in table.colnames:
+        mask_psfstars = (table['FLAGS_PSF']==0)
+
+    # In PSFEx version 3.17.1, only stars with zero flags are
+    # recorded in the output catalog, so use the entire table
+    else:
+        mask_psfstars = np.ones(len(table), dtype=bool)
+
+
+    x = table['X_IMAGE'][mask_psfstars]
+    y = table['Y_IMAGE'][mask_psfstars]
+    norm = table['NORM_PSF'][mask_psfstars]
+
+    return x, y, norm
+
+
+################################################################################
+
+def get_mean_fratio (fratio_match, fratio_err_match, weighted=True):
+
+    """calculate sigma-clipped (weighted) mean, median and std of
+       fratio values; this is used below both for the full-frame and -
+       if relevant - for the subimages calculations; the boolean
+       [weighted] determines whether the normal or weighted mean is
+       returned
+
+    """
+
+    # sigma clip input values
+    ma_clipped = sigma_clip(fratio_match)
+    mask_use = ~ma_clipped.mask
+    fratio = fratio_match[mask_use]
+    fratio_err = fratio_err_match[mask_use]
+
+
+    # calculate full-frame average, standard deviation and median
+    fratio_mean, fratio_med, fratio_std = (
+        sigma_clipped_stats(fratio, mask_value=0))
+
+
+    if weighted:
+        # replace fratio_mean with weighted mean, where fratio_err
+        # is first corrected such that distribution of fratio and
+        # fratio_err has a reduced chi-square value of unity
+        # (using function from dreamreduce: zeropoints.find_sigma)
+        res = fratio - fratio_med
+        sigma = find_sigma (res, fratio_err)
+        log.info ('inferred additional sigma in get_mean_fratio: {:.3f}'
+                  .format(sigma))
+        #fratio_vartot = fratio_err**2 + sigma**2
+
+        # weights
+        m_nz = (fratio_err != 0)
+        weights = 1/fratio_err[m_nz]**2
+
+        # weighted mean
+        fratio_mean = np.average(fratio[m_nz], weights=weights)
+
+        # weighted sample standard deviation
+        fratio_wstd = np.sqrt(np.sum(weights * (fratio[m_nz] - fratio_mean)**2) /
+                              np.sum(weights))
+
+        # weighted error; add sigma to avoid underestimating the
+        # error
+        weights = 1/(fratio_err[m_nz]**2 + sigma**2)
+        fratio_werr = np.sqrt(1/np.sum(weights))
+
+    else:
+        # fratio_werr has not been defined yet; simply scale the
+        # fratio_std with the square root of the number of
+        # measurements
+        fratio_werr = fratio_std / np.sqrt(len(fratio))
+
+
+
+    return fratio_mean, fratio_med, fratio_wstd, fratio_werr
 
 
 ################################################################################
@@ -16900,6 +17048,12 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
     cmd_dict['-STARNNW_NAME'] = starnnw_name
     cmd_dict['-CATALOG_TYPE'] = 'FITS_1.0'
 
+    # CHECK!!! - play with these deblending parameters to try to get
+    # more deformed stars to be used by PSFEx; current settings are 64
+    # and 0.00004; SExtractor defaults are 32 and 0.005
+    cmd_dict['-DEBLEND_NTHRESH'] = '32'
+    cmd_dict['-DEBLEND_MINCONT'] = '0.005'
+
 
     for npass in range(npasses):
 
@@ -17439,12 +17593,26 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
                                 columns=['FLAGS', 'SNR_WIN', 'IMAFLAGS_ISO',
                                          'XWIN_IMAGE', 'YWIN_IMAGE'])
 
+
+        # make ds9 regions file with all detections
+        # CHECK!!!
+        if False:
+            result = prep_ds9regions(
+                '{}_alldet_ds9regions.txt'.format(base),
+                #'/home/sa_105685508700717199458/Slurm/{}_alldet_ds9regions.txt'
+                #.format(base.split('/')[-1]),
+                data_ldac['XWIN_IMAGE'], data_ldac['YWIN_IMAGE'],
+                radius=2., width=2, color='blue')
+
+
         # SExtractor flags 0 or 1 and S/N larger than value
         # defined in settings file; note that this is the same as
         # the default rejection mask on SExtractor FLAGS defined
         # in the psfex.config file: SAMPLE_FLAGMASK = 0x00fe
         # (=254) or '0b11111110'
+        #
         s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
+        # CHECK!!! - try allowing SExtractor flags of 1 and 2
         index_ok = np.nonzero((data_ldac['FLAGS']<=1) &
                               (data_ldac['SNR_WIN']>=s2n) &
                               (data_ldac['IMAFLAGS_ISO']==0))[0]
@@ -17492,11 +17660,12 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             fits_tmp.write(data_ldac_ok, extname='LDAC_OBJECTS')
 
 
-        if get_par(set_zogy.make_plots,tel):
-            result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
-                                     data_ldac_ok['XWIN_IMAGE'],
-                                     data_ldac_ok['YWIN_IMAGE'],
-                                     radius=5., width=2, color='red')
+        if True or get_par(set_zogy.make_plots,tel):
+            #result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
+            result = prep_ds9regions(
+                '/home/sa_105685508700717199458/Slurm/{}_psfstars_ds9regions.txt'
+                .format(base.split('/')[-1]), data_ldac_ok['XWIN_IMAGE'],
+                data_ldac_ok['YWIN_IMAGE'], radius=5., width=2, color='purple')
 
 
         if get_par(set_zogy.timing,tel):
@@ -17531,9 +17700,15 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
            '-PSF_SIZE', psf_size_config_str, '-PSF_SAMPLING', str(psf_samp),
            '-SAMPLE_MINSN', str(get_par(set_zogy.psf_stars_s2n_min,tel)),
            '-NTHREADS', str(nthreads), '-PSFVAR_NSNAP', str(nsnap),
-           '-PSFVAR_DEGREES', str(poldeg)]
-    #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
-    #       '-SAMPLE_MAXELLIP', maxellip_str]
+           '-PSFVAR_DEGREES', str(poldeg),
+           #       '-SAMPLE_FWHMRANGE', sample_fwhmrange,
+           # CHECK!!!
+           # Maximum fractional FWHM variability (1.0 = 100%) allowed for input vignettes;
+           # current value = 0.2 is too low; set to 1.0, SAMPLE_MAXELLIP was set to 0.75
+           # (=A/B up to factor of 7)
+           '-SAMPLE_MAXELLIP', '0.75',
+           '-SAMPLE_VARIABILITY', '1.0'
+           ]
 
     if get_par(set_zogy.make_plots,tel):
         cmd += ['-CHECKPLOT_TYPE', 'FWHM, ELLIPTICITY, COUNTS, COUNT_FRACTION, '
@@ -17585,6 +17760,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
     psf_out = '{}_psf.fits'.format(base)
     os.rename (psf_in, psf_out)
 
+
     # if zero stars were found by PSFEx, raise exception
     header_psf = read_hdulist(psf_out, get_data=False, get_header=True)
     if header_psf['ACCEPTED']==0:
@@ -17592,6 +17768,18 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
                '{}'.format(cat_in))
         log.exception (msg)
         raise Exception (msg)
+
+
+    # record psf stars used in ds9 regions file
+    if True or get_par(set_zogy.make_plots,tel):
+        #result = prep_ds9regions('{}_psfstars_used_ds9regions.txt'.format(base),
+        psfexcat = '{}_psfex.cat'.format(base)
+        x_psf, y_psf, norm_psf = read_psfcat(psfexcat)
+        result = prep_ds9regions(
+            '/home/sa_105685508700717199458/Slurm/{}_psfstars_used_ds9regions.txt'
+            .format(base.split('/')[-1]), x_psf, y_psf, radius=7.,
+            width=2, color='green')
+
 
 
     # no need to limit disk space of LDAC catalog anymore, as it is no
