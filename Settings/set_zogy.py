@@ -27,7 +27,7 @@ shape_new = (10560, 10560) # shape new image, ref image can have any shape
 
 
 # ZOGY parameters
-fratio_local = True      # determine flux ratio (Fn/Fr) from subimage (T) or
+fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or
                          # full frame (F)
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx,dy from subimage (T) or full frame (F)
@@ -59,6 +59,13 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 # switch to use old or new (~June 2024) transient catalog definition
 use_new_transcat = {'ML1': False, 'BG': True}
+
+
+# use "flattened" new image with subimage zeropoints (as defined with
+# zp_nsubs_shape_new below) in optimal image subraction; if reference
+# images have not been flattened (set with set_br.scale_zps), then
+# (probably) best to set scale_zps_sub to False as well
+scale_zps_sub = {'ML1': False, 'BG': True}
 
 
 #===============================================================================
