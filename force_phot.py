@@ -41,7 +41,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.6'
+__version__ = '1.2.7'
 
 
 ################################################################################
@@ -2023,10 +2023,12 @@ def verify_lengths(p1, p2):
 
 ################################################################################
 
-def create_col_descr(keys2add, header):
+def create_col_descr(keys2add, header, ra_col, dec_col):
 
     col_descr = {
         'NUMBER_IN':         'line number of coordinates in input list',
+        ra_col:              'input source right ascension (RA)',
+        dec_col:             'input source declination (DEC)',
         'FILENAME':          'base filename of matching image',
         'X_POS_RED':         '[pix] x pixel coordinate corresponding to input RA/DEC in red image',
         'Y_POS_RED':         '[pix] y pixel coordinate corresponding to input RA/DEC in red image',
@@ -2083,9 +2085,12 @@ def create_col_descr(keys2add, header):
         'THUMBNAIL_SCORR':   'square thumbnail of the significance image centered at input coords',
         #
         'MAG_ZOGY_PLUSREF':       '[mag] sum of ZOGY and ref image magnitude',
-        'MAGERR_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude error',
-        'MAGERRTOT_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude total error (incl. ZP errors)',
-        'SNR_ZOGY_PLUSREF':       'sum of ZOGY and ref image magnitude signal-to-noise ratio',
+        'MAGERR_ZOGY_PLUSREF':    '[mag] sum of ZOGY and ref image magnitude errors',
+        'MAGERRTOT_ZOGY_PLUSREF': '[mag] sum of ZOGY and ref image magnitude total errors (incl. ZP errors)',
+        'SNR_ZOGY_PLUSREF':       'sum of ZOGY and ref image signal-to-noise ratio',
+        'FNU_ZOGY_PLUSREF':       '[microJy] sum of ZOGY and ref image fluxes',
+        'FNUERR_ZOGY_PLUSREF':    '[microJy] sum of ZOGY and ref image flux errors',
+        'FNUERRTOT_ZOGY_PLUSREF': '[microJy] sum of ZOGY and ref image flux total errors (incl. ZP errors)',
         #
         'TQC-FLAG':          'transient QC flag (green|yellow|orange|red)',
     }
@@ -3037,7 +3042,8 @@ if __name__ == "__main__":
 
 
 
-        col_descr_dict = create_col_descr (keys2add, header_transtable)
+        col_descr_dict = create_col_descr (keys2add, header_transtable,
+                                           args.ra_col, args.dec_col)
         with fits.open(args.file_out, mode='update') as hdulist:
             for i, col0 in enumerate(table_out.colnames):
                 ncol = i + 1
@@ -3046,6 +3052,8 @@ if __name__ == "__main__":
                     col = '_'.join(col0.split('_')[:2])
                     if 'REF' in col0:
                         col += '_REF'
+                    if 'RED' in col0:
+                        col += '_RED'
                 else:
                     col = col0
 
