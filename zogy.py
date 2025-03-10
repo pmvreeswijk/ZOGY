@@ -11794,6 +11794,7 @@ def find_sigma (res, err, axis=None, maxiter=15, epsilon=1e-2):
     chi2red = get_chi2red (res, err, err1, axis=axis)
     #log.info ('chi2red begin interval: {}'.format(chi2red))
 
+
     # if chi2red is still below 1, even when a zero sigma was added to
     # the individual errors, return err1 if chi2red is scalar or
     # create mask to set the corresponding values to zero, further
@@ -11813,6 +11814,8 @@ def find_sigma (res, err, axis=None, maxiter=15, epsilon=1e-2):
     # of interval
     chi2red = get_chi2red (res, err, err2, axis=axis)
     #log.info ('chi2red end interval: {}'.format(chi2red))
+
+
     # if chi2red is still below 1, even when a zero sigma was added to
     # the individual errors, return err2 if chi2red is scalar or
     # create mask to set the corresponding values to zero, further
@@ -15576,11 +15579,17 @@ def get_mean_fratio (fratio_match, fratio_err_match, weighted=True):
 
 
     # calculate full-frame average, standard deviation and median
-    fratio_mean, fratio_med, fratio_std = (
-        sigma_clipped_stats(fratio, mask_value=0))
+    fratio_mean, fratio_med, fratio_std = (sigma_clipped_stats(fratio,
+                                                               mask_value=0))
 
 
-    if weighted:
+    m_nz = (fratio_err != 0)
+    if weighted and np.sum(m_nz) > 1:
+
+        # do not use values with zero errors
+        fratio = fratio[m_nz]
+        fratio_err = fratio_err[m_nz]
+
         # replace fratio_mean with weighted mean, where fratio_err
         # is first corrected such that distribution of fratio and
         # fratio_err has a reduced chi-square value of unity
@@ -15592,19 +15601,18 @@ def get_mean_fratio (fratio_match, fratio_err_match, weighted=True):
         #fratio_vartot = fratio_err**2 + sigma**2
 
         # weights
-        m_nz = (fratio_err != 0)
-        weights = 1/fratio_err[m_nz]**2
+        weights = 1/fratio_err**2
 
         # weighted mean
-        fratio_mean = np.average(fratio[m_nz], weights=weights)
+        fratio_mean = np.average(fratio, weights=weights)
 
         # weighted sample standard deviation
-        fratio_wstd = np.sqrt(np.sum(weights * (fratio[m_nz] - fratio_mean)**2) /
+        fratio_wstd = np.sqrt(np.sum(weights * (fratio - fratio_mean)**2) /
                               np.sum(weights))
 
         # weighted error; add sigma to avoid underestimating the
         # error
-        weights = 1/(fratio_err[m_nz]**2 + sigma**2)
+        weights = 1/(fratio_err**2 + sigma**2)
         fratio_werr = np.sqrt(1/np.sum(weights))
 
     else:
@@ -17672,7 +17680,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
             fits_tmp.write(data_ldac_ok, extname='LDAC_OBJECTS')
 
 
-        if True or get_par(set_zogy.make_plots,tel):
+        if get_par(set_zogy.make_plots,tel):
             #result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
             result = prep_ds9regions(
                 '/home/sa_105685508700717199458/Slurm/{}_psfstars_ds9regions.txt'
@@ -17783,7 +17791,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
 
 
     # record psf stars used in ds9 regions file
-    if True or get_par(set_zogy.make_plots,tel):
+    if get_par(set_zogy.make_plots,tel):
         #result = prep_ds9regions('{}_psfstars_used_ds9regions.txt'.format(base),
         psfexcat = '{}_psfex.cat'.format(base)
         x_psf, y_psf, norm_psf = read_psfcat(psfexcat)
