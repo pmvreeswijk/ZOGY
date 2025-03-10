@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.5.3'
+__version__ = '1.5.4'
 
 
 ################################################################################
@@ -15268,6 +15268,13 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 # may be different telescopes
                 ext_coeff_new = header_new['PC-EXTCO']
 
+
+                log.info ('exptime_new: {}, filt_new: {}, obsdate_new: {}, '
+                          'zp_new: {}, ext_coeff_new: {}'
+                          .format(exptime_new, filt_new, obsdate_new, zp_new,
+                                  ext_coeff_new))
+
+
                 # check if MAG_OPT is present in table
                 if 'MAG_OPT' in table_new.colnames:
 
@@ -15289,28 +15296,33 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
                 exptime_ref, filt_ref, obsdate_ref = read_header (header_ref,
                                                                   keywords)
 
-                try:
+                # previously, ref images were projected to an airmass
+                # of 1, and the date of observation would be an
+                # average date, so airmass calculation of individual
+                # stars would be off; in that case just adopt the
+                # airmass from the header keyword
+                for key in ['AIRMASSC', 'AIRMASS']:
+                    if key in header_ref and header_ref[key]==1:
+                        airmass_ref = header_ref[key]
+                        log.info ('adopting airmass_ref {:.3f} from header '
+                                  'keyword {}'.format(airmass_ref, key))
+                        break
+                else:
+                    # calculate airmasses of individual sources
                     airmass_ref = get_airmass (ra_cat_ref[idx_cat_ref],
                                                dec_cat_ref[idx_cat_ref],
                                                obsdate_ref, lat, lon, height)
-                except:
-                    log.error ('get_airmass for sources in reference image '
-                               'failed; using single airmass instead')
-
-                    if 'AIRMASSC' in header_ref:
-                        airmass_ref = header_ref['AIRMASSC']
-                        key = 'AIRMASSC'
-                    elif 'AIRMASS' in header_ref:
-                        airmass_ref = header_ref['AIRMASS']
-                        key = 'AIRMASS'
-
-                    log.info ('adopting airmass_ref {:.3f} from header keyword '
-                              '{}'.format(key, airmass_ref))
-
 
 
                 zp_ref = header_ref['PC-ZP']
                 ext_coeff_ref = header_ref['PC-EXTCO']
+
+
+                log.info ('exptime_ref: {}, filt_ref: {}, obsdate_ref: {}, '
+                          'zp_ref: {}, ext_coeff_ref: {}'
+                          .format(exptime_ref, filt_ref, obsdate_ref, zp_ref,
+                                  ext_coeff_ref))
+
 
                 # check if MAG_OPT is present in table
                 if 'MAG_OPT' in table_ref.colnames:
