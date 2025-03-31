@@ -17701,8 +17701,8 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
         if get_par(set_zogy.make_plots,tel):
             result = prep_ds9regions(
                 '{}_psfstars_ds9regions.txt'.format(base),
-                .format(base.split('/')[-1]), data_ldac_ok['XWIN_IMAGE'],
-                data_ldac_ok['YWIN_IMAGE'], radius=5., width=2, color='purple')
+                data_ldac_ok['XWIN_IMAGE'], data_ldac_ok['YWIN_IMAGE'],
+                radius=5., width=2, color='purple')
 
 
         if get_par(set_zogy.timing,tel):
