@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.5.4'
+__version__ = '1.5.5'
 
 
 ################################################################################
@@ -1778,6 +1778,7 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     table_trans['MAGERR_OPT_REF'] = np.zeros_like(zeros_tmp)
     table_trans['MAGERRTOT_OPT_REF'] = np.zeros_like(zeros_tmp)
     table_trans['FLAGS_MASK_REF'] = np.zeros(ntrans, dtype='uint8')
+    table_trans['FLAGS_OPT_REF'] = np.zeros(ntrans, dtype='uint8')
 
     # fill values at correct index
     table_trans['FNU_OPT_REF'][index_out] = table_fphot_ref['FNU_OPT_RED']
@@ -1787,6 +1788,7 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     table_trans['MAGERR_OPT_REF'][index_out] = table_fphot_ref['MAGERR_OPT_RED']
     table_trans['MAGERRTOT_OPT_REF'][index_out] = table_fphot_ref['MAGERRTOT_OPT_RED']
     table_trans['FLAGS_MASK_REF'][index_out] = table_fphot_ref['FLAGS_MASK_RED']
+    table_trans['FLAGS_OPT_REF'][index_out] = table_fphot_ref['FLAGS_OPT_RED']
 
 
     # crossmatch with new source-extractor catalog
@@ -1851,6 +1853,7 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     table_trans['MAGERR_OPT_RED'] = np.zeros_like(zeros_tmp)
     table_trans['MAGERRTOT_OPT_RED'] = np.zeros_like(zeros_tmp)
     table_trans['FLAGS_MASK_RED'] = np.zeros(ntrans, dtype='uint8')
+    table_trans['FLAGS_OPT_RED'] = np.zeros(ntrans, dtype='uint8')
 
     # fill values at correct index
     table_trans['FNU_OPT_RED'][index_out] = table_fphot_red['FNU_OPT_RED']
@@ -1860,6 +1863,7 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     table_trans['MAGERR_OPT_RED'][index_out] = table_fphot_red['MAGERR_OPT_RED']
     table_trans['MAGERRTOT_OPT_RED'][index_out] = table_fphot_red['MAGERRTOT_OPT_RED']
     table_trans['FLAGS_MASK_RED'][index_out] = table_fphot_red['FLAGS_MASK_RED']
+    table_trans['FLAGS_OPT_RED'][index_out] = table_fphot_red['FLAGS_OPT_RED']
 
 
     log.info ('len(table_trans) at end of trans_crossmatch_fphot: {}'
@@ -3547,6 +3551,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'MAGERR_OPT_REF':      ['E', 'mag'      , 'Forced-photometry optimal AB mag error in reference image at transient position'],
         'MAGERRTOT_OPT_REF':   ['E', 'mag'      , 'Forced-photometry optimal AB mag total error (incl. ZP error) in reference image at transient position'],
         'FLAGS_MASK_REF':      ['I', ''         , 'OR-combined flags over inner profile in reference image mask'],
+        'FLAGS_OPT_REF':       ['I', ''         , 'Optimal photometry flags in reference image'],
         #
         #'NUMBER_NEAR_RED':     ['J', ''         , 'Running number of full-source catalogue source nearest to the transient'],
         'SEP_NEAR_RED':        ['E', 'arcsec'   , 'Separation to nearest source in reduced image'],
@@ -3560,6 +3565,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'MAGERR_OPT_RED':      ['E', 'mag'      , 'Forced-photometry optimal AB mag error in reduced image at transient position'],
         'MAGERRTOT_OPT_RED':   ['E', 'mag'      , 'Forced-photometry optimal AB mag total error (incl. ZP error) in reduced image at transient position'],
         'FLAGS_MASK_RED':      ['I', ''         , 'OR-combined flags over inner profile in reduced image mask'],
+        'FLAGS_OPT_RED':       ['I', ''         , 'Optimal photometry flags in reduced image'],
     }
 
 
@@ -3704,13 +3710,13 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
                               'MAGERRTOT_AUTO_NEAR_REF',
                               'FNU_OPT_REF', 'FNUERR_OPT_REF', 'FNUERRTOT_OPT_REF',
                               'MAG_OPT_REF', 'MAGERR_OPT_REF', 'MAGERRTOT_OPT_REF',
-                              'FLAGS_MASK_REF',
+                              'FLAGS_MASK_REF', 'FLAGS_OPT_REF',
                               #
                               'SEP_NEAR_RED', 'FWHM_NEAR_RED', 'ELONG_NEAR_RED',
                               'CLASS_STAR_NEAR_RED',
                               'FNU_OPT_RED', 'FNUERR_OPT_RED', 'FNUERRTOT_OPT_RED',
                               'MAG_OPT_RED', 'MAGERR_OPT_RED', 'MAGERRTOT_OPT_RED',
-                              'FLAGS_MASK_RED'
+                              'FLAGS_MASK_RED', 'FLAGS_OPT_RED',
                               ]
 
 
@@ -8251,7 +8257,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # fix pixels using function [fixpix]
     mask_value = get_par(set_zogy.mask_value,tel)
     if imtype=='new':
+        fixsatpix_bool = False
         if get_par(set_zogy.interp_sat,tel):
+            fixsatpix_bool = True
             data_wcs = fixpix (data_wcs, satlevel=satlevel,
                                data_bkg_std=data_bkg_std, data_mask=data_mask,
                                imtype=imtype, header=header,
@@ -8261,6 +8269,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                along_row=get_par(set_zogy.interp_along_row,tel),
                                interp_func=get_par(set_zogy.interp_func,tel),
                                interp_dpix=get_par(set_zogy.interp_dpix,tel))
+
+
+        header['FIXSATPX'] = (fixsatpix_bool, 'fixed saturated pixels before '
+                              'subtraction?')
+
 
     if remap:
 
@@ -8658,27 +8671,15 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # using image center and location, calculate the barycentric
             # julian date corresponding to it; see:
             # https://docs.astropy.org/en/stable/time/index.html#barycentric-and-heliocentric-light-travel-time-corrections
-            if 'MJD-OBS' in header:
-                mjd_obs = header['MJD-OBS']
-            elif 'DATE-OBS' in header:
-                mjd_obs = Time(header['DATE-OBS'], format='isot').mjd
-            else:
-                log.error ('neither MJD-OBS nor DATE-OBS keyword found in '
-                           'header; unable to determine Barycentric JD for {}'
-                           .format(input_fits))
-
-            if 'mjd_obs' in locals():
-                location = EarthLocation(lat=lat, lon=lon, height=height)
-                time_obs = Time(mjd_obs, format='mjd', scale='utc',
-                                location=location)
-                coords_center = SkyCoord(ra_center*u.deg, dec_center*u.deg)
-                ltt_bary = time_obs.light_travel_time(coords_center)
-                bjd_obs = (time_obs.tdb + ltt_bary).mjd
-                header['BJD-OBS'] = (bjd_obs, '[d] Barycentric JD (using '
-                                     'DATE-OBS, RA/DEC-CNTR)')
-
-
-
+            mjd_obs = Time(obsdate, format='isot').mjd
+            location = EarthLocation(lat=lat, lon=lon, height=height)
+            time_obs = Time(mjd_obs, format='mjd', scale='utc',
+                            location=location)
+            coords_center = SkyCoord(ra_center*u.deg, dec_center*u.deg)
+            ltt_bary = time_obs.light_travel_time(coords_center)
+            bjd_obs = (time_obs.tdb + ltt_bary).mjd
+            header['BJD-OBS'] = (bjd_obs, '[d] Barycentric JD (using '
+                                 'DATE-OBS, RA/DEC-CNTR)')
 
 
 
@@ -8869,29 +8870,36 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     infer_satmag (table_cat, header)
 
 
-    # update header of input fits image with keywords added by
-    # different functions
-    update_imcathead ('{}.fits'.format(base), header)
-
-
 
     # ---------------------------------
     # zeropoint flattening of new image
     # ---------------------------------
 
 
-    scale_zps_sub = get_par(set_zogy.scale_zps_sub,tel)
+    if imtype=='new':
 
-    if imtype=='new' and scale_zps_sub:
+        scale_zps_sub = get_par(set_zogy.scale_zps_sub,tel)
+        fn_zps = '{}_zps.npy'.format(base)
 
         # scale the new image according to the difference between the
         # higher-resolution zeropoints and the full-image zeropoint
-        fn_zps = '{}_zps.npy'.format(base)
-        if isfile(fn_zps):
+        scale_bool = False
+        if scale_zps_sub and isfile(fn_zps):
 
             log.info ('scaling new image according to higher-resolution '
                       'zeropoints for {}'.format(base))
             scale_highres_zps (data_wcs, header, tel, fn_zps)
+            scale_bool = True
+
+
+        header['PC-ZPSCL'] = (scale_bool, 'zeropoint-scaled image before '
+                              'subtraction?')
+
+
+
+    # update header of input fits image with keywords added by
+    # different functions
+    update_imcathead ('{}.fits'.format(base), header)
 
 
 
@@ -9727,12 +9735,15 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     table_cat['BACKGROUND'] = local_bkg_opt.astype('float32')
 
 
-    # optimal flux flags; FLAGS_OPT was already added to table_cat in
-    # phot_calibrate(), to flag the calibration stars
-    # CHECK!!!
-    #log.info ('flags_opt.dtype in infer_optimal_fluxmag(): {}'
-    #          .format(flags_opt.dtype))
-    table_cat['FLAGS_OPT'] |= flags_opt.astype('uint8')
+    # optimal flux flags; FLAGS_OPT should have already been added to
+    # table_cat in phot_calibrate(), to flag the calibration stars
+    if 'FLAGS_OPT' in table_cat.colnames:
+        table_cat['FLAGS_OPT'] |= flags_opt.astype('uint8')
+    else:
+        # in case the calibration catalog was not found, it is not
+        # present; in that case define the column values here
+        table_cat['FLAGS_OPT'] = flags_opt.astype('uint8')
+
 
 
     # [mypsffit] determines if PSF-fitting part is also performed;
@@ -10203,13 +10214,17 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     source_ids_used = []
     if ncalstars>0:
 
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG']:
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd']:
             if '20181115' in fits_cal:
                 # old calibration catalog lacks _ML subscripts
                 filt_subscript = ''
             else:
                 # new catalog contains _ML and _BG subscripts
-                filt_subscript = '_{}'.format(tel[0:2])
+                if tel == 'Mkd':
+                    filt_subscript = '_{}'.format(tel)
+                else:
+                    filt_subscript = '_{}'.format(tel[0:2])
+
         else:
             # what to do for other telescopes?
             #filt_subscript = '_{}'.format(tel)
@@ -12926,7 +12941,7 @@ def get_back (data, header, fits_objmask, bkg_boxsize, fits_mask=None,
     '-OBJECTS' image, where objects have zero values). The subimages
     (with size: [set_zogy.bkg_boxsize] are then median filtered.
 
-    For ML/BG images and if set_zogy.use_2Dfit is True, a low order
+    For ML/BG images and if set_zogy.use2Dfit is True, a low order
     polynomial 2D fit is performed to the filtered mini background and
     if the fit value is lower than the filtered image for a particular
     subimage, that value is used.
@@ -16257,7 +16272,11 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
             mask_nonzero = ((dra_array!=0) & (ddec_array!=0))
             label1 = r'dRA={:.3f}$\pm${:.3f}"'.format(dra_median, dra_std)
             label2 = r'dDEC={:.3f}$\pm${:.3f}"'.format(ddec_median, ddec_std)
-            title = '{}\n{}'.format(base.split('/')[-1], header['ORIGFILE'])
+            if 'ORIGFILE' in header:
+                title = '{}\n{}'.format(base.split('/')[-1], header['ORIGFILE'])
+            else:
+                title = '{}'.format(base.split('/')[-1])
+
 
             result = plot_scatter_hist(
                 dra_array[mask_nonzero], ddec_array[mask_nonzero], limits,
@@ -16936,7 +16955,8 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('executing run_sextractor ...')
+    log.info('executing run_sextractor using config file {} ...'
+             .format(file_config))
 
     base = image.replace('.fits','')
 
@@ -17619,8 +17639,6 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
         if False:
             result = prep_ds9regions(
                 '{}_alldet_ds9regions.txt'.format(base),
-                #'/home/sa_105685508700717199458/Slurm/{}_alldet_ds9regions.txt'
-                #.format(base.split('/')[-1]),
                 data_ldac['XWIN_IMAGE'], data_ldac['YWIN_IMAGE'],
                 radius=2., width=2, color='blue')
 
@@ -17681,9 +17699,8 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
 
 
         if get_par(set_zogy.make_plots,tel):
-            #result = prep_ds9regions('{}_psfstars_ds9regions.txt'.format(base),
             result = prep_ds9regions(
-                '/home/sa_105685508700717199458/Slurm/{}_psfstars_ds9regions.txt'
+                '{}_psfstars_ds9regions.txt'.format(base),
                 .format(base.split('/')[-1]), data_ldac_ok['XWIN_IMAGE'],
                 data_ldac_ok['YWIN_IMAGE'], radius=5., width=2, color='purple')
 
@@ -17796,9 +17813,8 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
         psfexcat = '{}_psfex.cat'.format(base)
         x_psf, y_psf, norm_psf = read_psfcat(psfexcat)
         result = prep_ds9regions(
-            '/home/sa_105685508700717199458/Slurm/{}_psfstars_used_ds9regions.txt'
-            .format(base.split('/')[-1]), x_psf, y_psf, radius=7.,
-            width=2, color='green')
+            '{}_psfstars_used_ds9regions.txt'.format(base),
+            x_psf, y_psf, radius=7., width=2, color='green')
 
 
 
