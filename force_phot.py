@@ -41,7 +41,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.7'
+__version__ = '1.2.8'
 
 
 ################################################################################
@@ -245,9 +245,11 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     if fullsource:
 
         # optimal photometry columns
-        names_fullsource = ['BACKGROUND_RED', 'MAG_OPT_RED', 'MAGERR_OPT_RED',
-                            'MAGERRTOT_OPT_RED', 'SNR_OPT_RED', 'LIMMAG_OPT_RED']
+        names_fullsource = ['FLAGS_OPT_RED', 'BACKGROUND_RED', 'MAG_OPT_RED',
+                            'MAGERR_OPT_RED', 'MAGERRTOT_OPT_RED', 'SNR_OPT_RED',
+                            'LIMMAG_OPT_RED']
         names += names_fullsource
+        dtypes += ['int16']
         dtypes += ['float32'] * 6
 
 
@@ -316,9 +318,11 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
 
         # magnitude, snr and limiting magnitude columns
-        names_ref = ['BACKGROUND_REF', 'MAG_OPT_REF', 'MAGERR_OPT_REF',
-                     'MAGERRTOT_OPT_REF', 'SNR_OPT_REF', 'LIMMAG_OPT_REF']
+        names_ref = ['FLAGS_OPT_REF', 'BACKGROUND_REF', 'MAG_OPT_REF',
+                     'MAGERR_OPT_REF', 'MAGERRTOT_OPT_REF', 'SNR_OPT_REF',
+                     'LIMMAG_OPT_REF']
         names += names_ref
+        dtypes += ['int16']
         dtypes += ['float32'] * 6
 
 
@@ -702,8 +706,12 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
             # infer path to ref folder from basename
             ref_dir = '{}/ref'.format(basename.split('/red/')[0])
         else:
-            # for BlackGEM, refer to GCP bucket
-            ref_dir = 'gs://blackgem-ref'
+            # for BlackGEM, refer to GCP bucket; refer to the right
+            # one depending on the processing environment
+            # (test/staging/production)
+            bucket_env = filename.split('gs://')[-1].split('blackgem-red')[0]
+            ref_dir = 'gs://{}blackgem-ref'.format(bucket_env)
+
 
 
         # read field ID and reference image name from header
@@ -1075,7 +1083,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             if google_cloud:
 
                 # read numpy file from GCP
-                bucket_name, bucket_file = get_bucket_name (fn_zps)
+                bucket_name, bucket_file = zogy.get_bucket_name (fn_zps)
                 bucket = storage.Client().bucket(bucket_name)
                 blob = bucket.blob(bucket_file)
                 with blob.open('rb') as f:
@@ -1306,11 +1314,12 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # submit to [get_psfoptflux_mp] with single thread, as
                 # the multiprocessing is done at the image level,
                 # i.e. each cpu is processing a different image
-                flux_opt, fluxerr_opt, local_bkg_opt = zogy.get_psfoptflux_mp(
-                    psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                    ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
-                    mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
-                    set_zogy=set_zogy, tel=tel, nthreads=1)
+                flux_opt, fluxerr_opt, local_bkg_opt, flags_opt = \
+                    zogy.get_psfoptflux_mp(
+                        psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
+                        ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+                        mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
+                        get_flags_opt=True, set_zogy=set_zogy, tel=tel, nthreads=1)
 
             else:
                 # submit to [get_psfoptflux_mp] with [ncpu] threads as
@@ -1320,11 +1329,12 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # [force_phot] function only provides ncpus to
                 # [get_rows] and [infer_mags] in case of a single
                 # image.
-                flux_opt, fluxerr_opt, local_bkg_opt = zogy.get_psfoptflux_mp(
-                    psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                    ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
-                    mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
-                    set_zogy=set_zogy, tel=tel, nthreads=ncpus)
+                flux_opt, fluxerr_opt, local_bkg_opt, flags_opt = \
+                    zogy.get_psfoptflux_mp(
+                        psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
+                        ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+                        mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
+                        get_flags_opt=True, set_zogy=set_zogy, tel=tel, nthreads=ncpus)
 
 
                 if False:
@@ -1383,6 +1393,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
         # update table
+        table['FLAGS_OPT{}'.format(s2add)] = flags_opt.astype('int16')
         table['MAG_OPT{}'.format(s2add)] = mag_opt.astype('float32')
         table['MAGERR_OPT{}'.format(s2add)] = magerr_opt.astype('float32')
         table['MAGERRTOT_OPT{}'.format(s2add)] = magerrtot_opt.astype('float32')
@@ -2033,6 +2044,7 @@ def create_col_descr(keys2add, header, ra_col, dec_col):
         'X_POS_RED':         '[pix] x pixel coordinate corresponding to input RA/DEC in red image',
         'Y_POS_RED':         '[pix] y pixel coordinate corresponding to input RA/DEC in red image',
         'FLAGS_MASK_RED':    'OR-combined flagged pixels within 2xFWHM of coords in red image',
+        'FLAGS_OPT_RED':     'Optimal photometry flags in red image',
         'BACKGROUND_RED':    '[e-] sky background estimated from sky annulus in red image',
         'MAG_OPT_RED':       '[mag] optimal AB magnitude in red image',
         'MAGERR_OPT_RED':    '[mag] optimal AB magnitude error in red image',
@@ -2062,6 +2074,7 @@ def create_col_descr(keys2add, header, ra_col, dec_col):
         'X_POS_REF':         '[pix] x pixel coordinate corresponding to input RA/DEC in ref image',
         'Y_POS_REF':         '[pix] y pixel coordinate corresponding to input RA/DEC in ref image',
         'FLAGS_MASK_REF':    'OR-combined flagged pixels within 2xFWHM of coords in ref image',
+        'FLAGS_OPT_REF':     'Optimal photometry flags in ref image',
         'BACKGROUND_REF':    '[e-] sky background estimated from sky annulus in ref image',
         'MAG_OPT_REF':       '[mag] optimal AB magnitude in ref image',
         'MAGERR_OPT_REF':    '[mag] optimal AB magnitude error in ref image',
@@ -2340,6 +2353,16 @@ if __name__ == "__main__":
     parser.add_argument('--logfile', type=str, default=None,
                         help='if name is provided, an output logfile is created; '
                         'default=None')
+
+    parser.add_argument('--proc_env', choices=['test', 'staging', 'production'],
+                        default='production',
+                        help='processing environment (test, staging or '
+                        'production) used for BlackGEM; this determines the '
+                        'bucket name that files will be read from; default='
+                        'production, referring to the bucket gs://blackgem-red; '
+                        'test will refer to gs://blackgem-test-env/blackgem-red,'
+                        ' and staging to gs://blackgem-staging-env/blackgem-red')
+
 
     args = parser.parse_args()
     tel = args.telescope
@@ -2642,13 +2665,17 @@ if __name__ == "__main__":
                               'ML1_headers_cat.fits']
     else:
 
-        # for BG, loop telescopes and add header table if needed
+        # for BG, loop telescopes and add header table if needed;
+        # exact location depends on input parameter proc_env
+        bucket_env = {'test': 'blackgem-test-env/',
+                      'staging': 'blackgem-staging-env/',
+                      'production': ''}
         fits_hdrtable_list = []
         for tel_tmp in ['BG2', 'BG3', 'BG4']:
             if tel in tel_tmp:
                 fits_hdrtable_list.append(
-                    'gs://blackgem-hdrtables/{}/{}_headers_cat.fits'
-                    .format(tel_tmp, tel_tmp))
+                    'gs://{}blackgem-hdrtables/{}/{}_headers_cat.fits'
+                    .format(bucket_env[args.proc_env], tel_tmp, tel_tmp))
 
 
 
