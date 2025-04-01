@@ -11215,6 +11215,7 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
     zp_array = (mag_cal - mag_opt_inst +
                 airmass_cal * get_par(set_zogy.ext_coeff,tel)[filt])
 
+
     # determine error in individual zeropoints
     if magerr_cal is None:
         # if magerr_cal is not provided, then set zp error equal
@@ -11237,12 +11238,15 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
 
 
     # return x_array, y_array, zp_array and zp_err_array in order of
-    # brightness determined by [mag_cal]
-    index_sort = np.argsort(mag_cal)
+    # brightness determined by [mag_cal]; N.B.: order in brightness
+    # not needed anymore since weighted mean is being used, and is
+    # leading to a problem later when using [mask_zp][mask_used]
+    # to indidate calstars used in FLAGS_OPT
+    #index_sort = np.argsort(mag_cal)
+    #return x_array[index_sort], y_array[index_sort], zp_array[index_sort], \
+    #    zp_err_array[index_sort]
 
-    return x_array[index_sort], y_array[index_sort], zp_array[index_sort], \
-        zp_err_array[index_sort]
-
+    return x_array, y_array, zp_array, zp_err_array
 
 
 ################################################################################
