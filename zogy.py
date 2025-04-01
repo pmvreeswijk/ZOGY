@@ -10142,8 +10142,8 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     ra_cal = table_cal['ra'].value
     dec_cal = table_cal['dec'].value
     xpos, ypos = WCS(header).all_world2pix(ra_cal, dec_cal, 1)
-    #table_cal['X_POS'] = xpos
-    #table_cal['Y_POS'] = ypos
+    table_cal['x_pos'] = xpos.astype('float32')
+    table_cal['y_pos'] = ypos.astype('float32')
 
 
     if 'SOURCE_ID' not in colnames:
@@ -10200,6 +10200,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     lon = get_par(set_zogy.obs_lon,tel)
     height = get_par(set_zogy.obs_height,tel)
     airmass_cal = get_airmass (ra_cal, dec_cal, obsdate, lat, lon, height)
+    table_cal['airmass'] = airmass_cal.astype('float32')
 
 
     # definition of flags_opt values
@@ -10232,7 +10233,8 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
         # extract calibration magnitudes
-        mag_cal = table_cal['{}{}'.format(filt, filt_subscript)].value
+        col_filt = '{}{}'.format(filt, filt_subscript)
+        mag_cal = table_cal[col_filt].value
 
 
         # pick calibration stars with good S/N, non-problematic flags_opt
@@ -10254,13 +10256,18 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                   .format(np.sum(mask_zp)))
 
 
-        # collect individual zeropoints across entire image;
-        # N.B. these output arrays are sorted in brightess according
-        # to mag_cal
-        x_array, y_array, zp_array, zp_err_array = collect_zps (
+        # collect individual zeropoints across entire image
+        x_array = xpos[mask_zp]
+        y_array = ypos[mask_zp]
+        zp_array, zp_err_array = collect_zps (
             xpos[mask_zp], ypos[mask_zp], flux_opt[mask_zp],
             fluxerr_opt[mask_zp], mag_cal[mask_zp], airmass_cal[mask_zp],
             exptime, filt, base=base)
+
+
+        # limit table_cal to mask_zp and add zeropoints
+        table_cal = table_cal[mask_zp]
+        table_cal['zeropoint'] = zp_array.astype('float32')
 
 
         # determine single zeropoint for entire image
@@ -10340,12 +10347,18 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
 
+
+        # limit table_cal to stars that were actually used in zeropoint(s)
+        # determination
+        table_cal = table_cal[mask_used]
+
+
         if 'SOURCE_ID' in colnames:
 
             # determine source IDs that were used from mask_used and
             # indicate for the corresponding entries in FLAGS_OPT column
             # of table_cat that object was used as a calibration star
-            source_ids_used = list(table_cal['source_id'][mask_zp][mask_used])
+            source_ids_used = list(table_cal['source_id'])
 
             # indicate calstars used in catalog
             idx_cat, __ = idx_matching_values (table_cat['SOURCE_ID'].value,
@@ -10359,10 +10372,8 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             idx_cat, __ = get_matches_pix(
                 table_cat['X_POS'].value.astype('float32'),
                 table_cat['Y_POS'].value.astype('float32'),
-                # xpos and ypos are calibration table (table_cal)
-                # pixel positions inferred above
-                xpos[mask_zp][mask_used].astype('float32'),
-                ypos[mask_zp][mask_used].astype('float32'),
+                table_cal['x_pos'].value,
+                table_cal['y_pos'].value,
                 dist_max=2*fwhm, return_offsets=False)
 
 
@@ -10380,17 +10391,11 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         # update FLAGS_OPT
         table_cat['FLAGS_OPT'][idx_cat] |= flags_opt_dict['calstar']
 
-        # after sorting in brightness and masking table_cal with
-        # [mask_zp], add (x,y) positions, zeropoints and airmasses to
-        # it, and overwrite [fits_calcat_field] that can be used to
-        # inspect the zeropoints as a function of position and stellar
-        # colour
-        index_sort = np.argsort(mag_cal[mask_zp])
-        table_cal = table_cal[mask_zp][index_sort]
-        table_cal['x_pos'] = x_array.astype('float32')
-        table_cal['y_pos'] = y_array.astype('float32')
-        table_cal['zeropoint'] = zp_array.astype('float32')
-        table_cal['airmass'] = airmass_cal[mask_zp][index_sort].astype('float32')
+
+        # sort table_cal in brightness using col_filt defined above
+        # and save it, so it can be used to inspect the zeropoints as
+        # a function of position and stellar colour
+        table_cal.sort(col_filt)
         table_cal.write (fits_calcat_field, format='fits', overwrite=True)
 
 
@@ -10538,7 +10543,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
         log_timing_memory (t0=t, label='in phot_calibrate')
 
 
-    return zp, zp_std, zp_err, ncal_used, airmass_cal
+    return zp, zp_std, zp_err, ncal_used, table_cal['airmass'].value
 
 
 ################################################################################
@@ -11237,16 +11242,10 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
             radius=10., width=1, color='blue', value=mag_cal)
 
 
-    # return x_array, y_array, zp_array and zp_err_array in order of
-    # brightness determined by [mag_cal]; N.B.: order in brightness
-    # not needed anymore since weighted mean is being used, and is
-    # leading to a problem later when using [mask_zp][mask_used]
-    # to indidate calstars used in FLAGS_OPT
-    #index_sort = np.argsort(mag_cal)
-    #return x_array[index_sort], y_array[index_sort], zp_array[index_sort], \
-    #    zp_err_array[index_sort]
+    # return x_array, y_array, zp_array and zp_err_array (previously
+    # done in order of brightness, but that is not needed anymore)
 
-    return x_array, y_array, zp_array, zp_err_array
+    return zp_array, zp_err_array
 
 
 ################################################################################
