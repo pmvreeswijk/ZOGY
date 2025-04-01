@@ -10410,6 +10410,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             if (col[0] in colnames and col[1] in colnames):
 
                 col_array = (table_cal[col[0]] - table_cal[col[1]])
+                zp_array = table_cal['zeropoint']
 
                 fig, ax = plt.subplots(1, 1)
                 fig.subplots_adjust(hspace=0, wspace=0)
