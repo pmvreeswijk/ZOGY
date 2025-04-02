@@ -10552,18 +10552,27 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 def idx_matching_values (a, b):
 
     """given arrays with values, return indices of both arrays where
-    the values are equal
+    the values are equal; the input arrays do not need to be sorted,
+    and the output indices will follow the order of the equal elements
+    as they appear in a; if a and/or b are not unique, only the
+    element with the highest index will be returned
     """
 
-    # Use intersect to find common elements between two arrays
-    overlap = np.intersect1d(a, b)
+    # make sure a and b are sorted
+    idx_a_sort = np.argsort(a)
+    idx_b_sort = np.argsort(b)
+
+    # use intersect to find common elements between two arrays
+    overlap, i_a, __ = np.intersect1d(a, b, return_indices=True)
+    # sort common values in order of which they appear in a
+    overlap = a[np.sort(i_a)]
 
     # indices of common elements in each array
-    idx_a = np.searchsorted(a, overlap)
-    idx_b = np.searchsorted(b, overlap)
+    idx_a = np.searchsorted(a, overlap, sorter=idx_a_sort)
+    idx_b = np.searchsorted(b, overlap, sorter=idx_b_sort)
 
     # return indices
-    return idx_a, idx_b
+    return idx_a_sort[idx_a], idx_b_sort[idx_b]
 
 
 ################################################################################
