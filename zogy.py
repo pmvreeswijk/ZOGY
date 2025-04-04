@@ -10215,7 +10215,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     source_ids_used = []
     if ncalstars>0:
 
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd']:
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd', 'TJO', 'PhotSat']:
             if '20181115' in fits_cal:
                 # old calibration catalog lacks _ML subscripts
                 filt_subscript = ''
@@ -10223,6 +10223,9 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 # new catalog contains _ML and _BG subscripts
                 if tel == 'Mkd':
                     filt_subscript = '_{}'.format(tel)
+                elif tel == 'TJO' or tel == 'PhotSat':
+                    # use the BG calibration for now
+                    filt_subscript = '_BG'
                 else:
                     filt_subscript = '_{}'.format(tel[0:2])
 
@@ -10230,6 +10233,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # what to do for other telescopes?
             #filt_subscript = '_{}'.format(tel)
             filt_subscript = ''
+
 
 
         # extract calibration magnitudes
@@ -10257,9 +10261,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
         # collect individual zeropoints across entire image
-        x_array = xpos[mask_zp]
-        y_array = ypos[mask_zp]
-        zp_array, zp_err_array = collect_zps (
+        x_array, y_array, zp_array, zp_err_array = collect_zps (
             xpos[mask_zp], ypos[mask_zp], flux_opt[mask_zp],
             fluxerr_opt[mask_zp], mag_cal[mask_zp], airmass_cal[mask_zp],
             exptime, filt, base=base)
@@ -10311,9 +10313,9 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
             # apply statistics below for ML/BG images on 8x8
             # subimages for backward compatibility
-            zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs, __ = \
-                calc_zp (x_array, y_array, zp_array, zp_err_array,
-                         data_wcs.shape, (8,8), tel)
+            zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs, __ = calc_zp (
+                x_array, y_array, zp_array, zp_err_array,
+                data_wcs.shape, (8,8), tel)
 
 
             # add statistics of these arrays to header
@@ -10410,13 +10412,13 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             if (col[0] in colnames and col[1] in colnames):
 
                 col_array = (table_cal[col[0]] - table_cal[col[1]])
-                zp_array = table_cal['zeropoint']
+                zp_tmp = table_cal['zeropoint']
 
                 fig, ax = plt.subplots(1, 1)
                 fig.subplots_adjust(hspace=0, wspace=0)
                 fig.suptitle(base.split('/')[-1], fontsize=10)
 
-                ax.plot(col_array, zp_array, 'o', color='tab:blue',
+                ax.plot(col_array, zp_tmp, 'o', color='tab:blue',
                         markersize=5, markeredgecolor='k')
                 ax.set_ylabel('image zeropoints (mag)')
                 ax.set_xlabel('{} - {} colour'.format(col[0], col[1]))
@@ -10432,8 +10434,8 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
             # calculate zeropoint for each channel
             zp_chan, zp_std_chan, zp_err_chan, ncal_chan, __ = calc_zp (
-                x_array, y_array, zp_array, zp_err_array, data_wcs.shape, (2,8),
-                tel)
+                x_array, y_array, zp_array, zp_err_array,
+                data_wcs.shape, (2,8), tel)
 
 
             # convert to 1-dimensional arrays
@@ -11255,7 +11257,7 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
     # return x_array, y_array, zp_array and zp_err_array (previously
     # done in order of brightness, but that is not needed anymore)
 
-    return zp_array, zp_err_array
+    return x_array, y_array, zp_array, zp_err_array
 
 
 ################################################################################
@@ -11302,7 +11304,7 @@ def calc_zp (x_array, y_array, zp_array, zp_err_array, image_shape,
         # determine zeropoints
         log.info ('inferring zeropoints for (ny,nx)=({},{}) subimages'
                   .format(ny, nx))
-        _zp, _zp_std, _zp_err, _nstars, _nused, _mask_used = zps_weighted_mean (
+        _zp, _zp_std, _zp_err, _nstars, _nused, _mask_used = zps_wmean (
             x_array, y_array, zp_array, zp_err_array, image_shape,
             (ny,nx), ncal_min=ncal_min, nsigma=nsigma)
 
@@ -11476,7 +11478,7 @@ def calc_zp_old (x_array, y_array, zp_array, zp_err_array, filt, imtype,
 
         # determine zeropoints of the 16 channels of the
         # MeerLICHT/BlackGEM CCD
-        zp, zp_std, zp_err, __, nused, mask_used = zps_weighted_mean (
+        zp, zp_std, zp_err, __, nused, mask_used = zps_wmean (
             x_array, y_array, zp_array, zp_err_array, 1320, 5280,
             (2,8), ncal_min=ncal_min, nsigma=nsigma)
 
@@ -11497,7 +11499,7 @@ def calc_zp_old (x_array, y_array, zp_array, zp_err_array, filt, imtype,
                          'integer times in image')
         nysubs = int(ysize / boxsize)
         nxsubs = int(xsize / boxsize)
-        zp, zp_std, zp_err, __, nused, mask_used = zps_weighted_mean (
+        zp, zp_std, zp_err, __, nused, mask_used = zps_wmean (
             x_array, y_array, zp_array, zp_err_array, boxsize, boxsize,
             (nysubs, nxsubs), ncal_min=ncal_min, nsigma=nsigma)
 
@@ -11583,8 +11585,8 @@ def zps_medarray (xcoords, ycoords, zps, dx, dy, array_shape, nval_use):
 
 ################################################################################
 
-def zps_weighted_mean (xcoords, ycoords, zps, zpserr, image_shape,
-                       zp_nsubs_shape, ncal_min=15, nsigma=3):
+def zps_wmean (xcoords, ycoords, zps, zpserr, image_shape, zp_nsubs_shape,
+               ncal_min=15, nsigma=3):
 
     """Function that returns 5 arrays, each with shape
     [zp_nsubs_shape], with the clipped weighted mean zeropoint, the
