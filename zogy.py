@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.5.5'
+__version__ = '1.6.0'
 
 
 ################################################################################
@@ -3581,15 +3581,15 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS',
                                'FLAGS_MASK', 'FLAGS_OPT', 'BACKGROUND',
                                'FNU_APER', 'FNUERR_APER',
-                               'FNU_OPT', 'FNUERR_OPT', #'FNUERRTOT_OPT',
-                               'FNUERRTOT1_OPT', 'FNUERRTOT2_OPT',
+                               'FNU_OPT', 'FNUERR_OPT', 'FNUERRTOT_OPT']
+                               #'FNUERRTOT1_OPT', 'FNUERRTOT2_OPT',
                                # CHECK!!! - following columns
                                # are just for testing and should be
                                # removed when going to production
-                               'MAG_OPT', 'MAGERR_OPT', #'MAGERRTOT_OPT',
-                               'MAGERRTOT1_OPT', 'MAGERRTOT2_OPT',
-                               'SNR_OPT', 'LIMMAG_OPT',
-                               'E_FLUX_OPT', 'E_FLUXERR_OPT']
+                               #'MAG_OPT', 'MAGERR_OPT', 'MAGERRTOT_OPT',
+                               #'MAGERRTOT1_OPT', 'MAGERRTOT2_OPT',
+                               #'SNR_OPT', 'LIMMAG_OPT',
+                               #'E_FLUX_OPT', 'E_FLUXERR_OPT']
 
 
     # forced photometry switch
@@ -6077,15 +6077,12 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
     # CHECK!!!
-    if False and remove_psf:
+    if remove_psf and get_par(set_zogy.keep_tmp,tel):
 
         # record D with PSFs removed
-        if False:
-            # in regular output folder with other products
-            basename = psfex_bintable.split('_psf.fits')[0]
-        else:
-            # in local folder where zogy is run
-            basename = psfex_bintable.split('_psf.fits')[0].split('/')[-1]
+        basename = psfex_bintable.split('_psf.fits')[0]
+        # in local folder where zogy is run
+        #basename = psfex_bintable.split('_psf.fits')[0].split('/')[-1]
 
         fits_psf_removed = '{}_psf_removed.fits'.format(basename)
         log.info ('writing {}'.format(fits_psf_removed))
@@ -8767,10 +8764,11 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                 table_cat[col_fnuerrtot] = _fnuerrtot.astype('float32')
 
 
+                # CHECK!!!
                 # rename fnuerrtot and magerrtot to fnuerrtot2 and
                 # magerrtot2 and add errtot1, which is the measurerement
                 # error plus zp_err (instead of zp_std)
-                if True:
+                if False:
                     col_magerrtot1 = col.replace('E_FLUX', 'MAGERRTOT1')
                     col_magerrtot2 = col.replace('E_FLUX', 'MAGERRTOT2')
 
@@ -10215,7 +10213,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     source_ids_used = []
     if ncalstars>0:
 
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd', 'TJO', 'PhotSat']:
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd', 'TJO', 'PS']:
             if '20181115' in fits_cal:
                 # old calibration catalog lacks _ML subscripts
                 filt_subscript = ''
@@ -10223,7 +10221,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 # new catalog contains _ML and _BG subscripts
                 if tel == 'Mkd':
                     filt_subscript = '_{}'.format(tel)
-                elif tel == 'TJO' or tel == 'PhotSat':
+                elif tel == 'TJO' or tel == 'PS':
                     # use the BG calibration for now
                     filt_subscript = '_BG'
                 else:
@@ -15222,7 +15220,7 @@ def get_fratio_dxdy (cat_new, cat_ref, psfcat_new, psfcat_ref, header_new,
         if len(table_new)==len(table_ref) and len(table_new)> 0:
 
             # if new image is flattened using subimage zeropoints
-            # before image subtraction is performed, do not used the
+            # before image subtraction is performed, do not use the
             # electron fluxes, as they have not been corrected using
             # the subimage zeropoints; instead in that case use the
             # calibrated mag_opt or fnu_opt and convert to electron
