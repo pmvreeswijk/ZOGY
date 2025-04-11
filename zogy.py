@@ -17101,11 +17101,10 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
     cmd_dict['-STARNNW_NAME'] = starnnw_name
     cmd_dict['-CATALOG_TYPE'] = 'FITS_1.0'
 
-    # CHECK!!! - play with these deblending parameters to try to get
     # more deformed stars to be used by PSFEx; current settings are 64
     # and 0.00004; SExtractor defaults are 32 and 0.005
-    cmd_dict['-DEBLEND_NTHRESH'] = '32'
-    cmd_dict['-DEBLEND_MINCONT'] = '0.005'
+    #cmd_dict['-DEBLEND_NTHRESH'] = '32'
+    #cmd_dict['-DEBLEND_MINCONT'] = '0.005'
 
 
     for npass in range(npasses):
