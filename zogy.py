@@ -14245,8 +14245,8 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
             # set polynomial degree to use in [run_psfex]
             poldeg = get_par(set_zogy.psf_poldeg,tel)
             # but if only 1 subimage, use constant PSF
-            if nsubs==1:
-                poldeg = 0
+            #if nsubs==1:
+            #    poldeg = 0
             # size of axes of PSF output snap image; does not need to
             # be same as number of subimage
             nsnap = min(nx, ny)
