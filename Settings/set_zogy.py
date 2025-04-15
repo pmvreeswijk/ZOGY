@@ -10,6 +10,12 @@ if cal_dir is None:
     cal_dir = '/idia/projects/meerlicht/CalFiles'
 
 
+# string to append to input filename(s) before the .fits extension to
+# use for all output products; if left empty '' or None, the input
+# images will be overwritten unless they are compressed files
+output_str2add = None
+
+
 #===============================================================================
 # ZOGY
 #===============================================================================
