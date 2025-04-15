@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.0'
+__version__ = '1.6.1'
 
 
 ################################################################################
@@ -249,6 +249,15 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         elif ref_fits is not None:
             logfile = ref_fits.replace('.fits', '.log')
 
+    # get rid of compressed extension
+    for ext in ['.gz', '.fz']:
+        logfile = logfile.replace(ext, '')
+
+    # add str2add to logfile
+    str2add = get_par(set_zogy.output_str2add,tel)
+    if str2add is not None:
+        logfile = '{}{}.log'.format(logfile.split('.log')[0], str2add)
+
 
     # attach logfile to logging if not already attached
     handlers = log.handlers[:]
@@ -299,11 +308,21 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         # can be used in any function in this module
         base_new = new_fits.split('.fits')[0]
 
+        # add output string if needed
+        if str2add is not None:
+            base_new = '{}{}'.format(base_new, str2add)
+
+
     if ref:
         global base_ref, fwhm_ref, pixscale_ref
         # define the base names of input fits files as global so they
         # can be used in any function in this module
         base_ref = ref_fits.split('.fits')[0]
+
+        # add output string if needed
+        if str2add is not None:
+            base_ref = '{}{}'.format(base_ref, str2add)
+
 
 
     # if either one of [base_new] or [base_ref] is not defined, set it
@@ -335,6 +354,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         check_files([get_par(set_zogy.sex_cfg_psffit,tel),
                      get_par(set_zogy.sex_par_psffit,tel)])
 
+
     # the elements in [keywords] should be defined as strings, but do
     # not refer to the actual keyword names; the latter are
     # constructed inside the [read_header] function
@@ -347,11 +367,44 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         ysize_new, xsize_new, gain_new, satlevel_new, ra_new, dec_new, \
             pixscale_new = (read_header(header_new, keywords))
 
+        # use prep_input_image() to - if needed - uncompress, convert
+        # to float32, correct for any non-unity gain and add output
+        # string to, the input image and header
+        new_fits, header_new = prep_fits (new_fits, header_new, gain_new,
+                                          satlevel_new, str2add)
+        satlevel_new *= gain_new
+        gain_new = 1.0
+
+        # if gain and/or satlevel is defined in set_zogy, remove them
+        if 'gain' in dir(set_zogy) and set_zogy.gain != 1:
+            del set_zogy.gain
+
+        if 'satlevel' in dir(set_zogy):
+            del set_zogy.satlevel
+
+
+
     if ref:
         # read in header of ref_fits
         header_ref = read_hdulist (ref_fits, get_data=False, get_header=True)
         ysize_ref, xsize_ref, gain_ref, satlevel_ref, ra_ref, dec_ref, \
             pixscale_ref = (read_header(header_ref, keywords))
+
+        # use prep_input_image() to - if needed - uncompress, convert
+        # to float32, correct for any non-unity gain and add output
+        # string to, the input image and header
+        ref_fits, header_ref = prep_fits (ref_fits, header_ref, gain_ref,
+                                          satlevel_ref, str2add)
+        satlevel_ref *= gain_ref
+        gain_ref = 1.0
+
+        # if gain and/or satlevel is defined in set_zogy, remove them
+        if 'gain' in dir(set_zogy) and set_zogy.gain != 1:
+            del set_zogy.gain
+
+        if 'satlevel' in dir(set_zogy):
+            del set_zogy.satlevel
+
 
 
     # function to run SExtractor on fraction of the image, applied
@@ -760,10 +813,12 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
         # fratio is in counts if input images were in counts; convert
-        # to electrons
-        fratio_subs *= gain_new / gain_ref
-        fratio_std_subs *= gain_new / gain_ref
-        fratio_err_subs *= gain_new / gain_ref
+        # to electrons - not needed anymore since input images are
+        # converted to electrons at start
+        if False:
+            fratio_subs *= gain_new / gain_ref
+            fratio_std_subs *= gain_new / gain_ref
+            fratio_err_subs *= gain_new / gain_ref
 
 
         if get_par(set_zogy.make_plots,tel):
@@ -1439,6 +1494,99 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         return header_ref
 
 
+
+
+################################################################################
+
+def prep_fits (fits_in, header, gain, satlevel, str2add):
+
+    """if needed: uncompress, convert to float32, correct for any
+       non-unity gain and add output string to [input_fits]
+    """
+
+    # uncompress
+    fits_in = unzip (fits_in)
+
+
+    # update name with str2add
+    if str2add is not None:
+        base = fits_in.split('.fits')[0]
+        fits_out = '{}{}.fits'.format(base, str2add)
+    else:
+        fits_out = fits_in
+
+
+    # read image if bitpix is positive (integer data) or gain is not
+    # equal to unity
+    bitpix = int(header['BITPIX'])
+    if bitpix > 0 or gain != 1:
+
+        # read image data; memmap needs to be False for integer images
+        # with BZERO/BSCALE/BLANK keywords present
+        data = read_hdulist (fits_in, memmap=False)
+
+        if bitpix > 0:
+            # convert to float32
+            data = data.astype('float32')
+
+        if gain != 1:
+            # multiply by gain
+            data *= gain
+
+            # update gain keyword value in header
+            key_gain = get_par(set_zogy.key_gain,tel)
+            header[key_gain] = 1.0
+
+            # update satlevel keyword value in header
+            key_satlevel = get_par(set_zogy.key_satlevel,tel)
+            header[key_satlevel] = gain * satlevel
+
+
+        # save image to fits with
+        fits.writeto(fits_out, data, header, overwrite=True)
+
+
+    elif str2add is not None:
+
+        # name was updated; copy (unzipped) fits_in to fits_out
+        shutil.copy2 (fits_in, fits_out)
+
+
+
+    return fits_out, header
+
+
+################################################################################
+
+def unzip(imgname):
+
+    """Unzip a gzipped of fpacked file"""
+
+    if '.gz' in imgname:
+        imgname_new = imgname.replace('.gz','')
+        if os.path.exists(imgname_new):
+            log.error ('gzipping {} but {} already exists; exiting zogy'
+                       .format(imgname, imgname_new))
+            raise SystemExit
+        else:
+            log.info ('gunzipping {}'.format(imgname))
+            subprocess.run(['gunzip', '--keep', imgname])
+            imgname = imgname_new
+
+
+    elif '.fz' in imgname:
+        imgname_new = imgname.replace('.fz','')
+        if os.path.exists(imgname_new):
+            log.error ('funpacking {} but {} already exists; exiting zogy'
+                       .format(imgname, imgname_new))
+            raise SystemExit
+        else:
+            log.info ('funpacking {}'.format(imgname))
+            subprocess.run(['funpack', imgname])
+            imgname = imgname.replace('.fz','')
+
+
+    return imgname
 
 
 ################################################################################
@@ -3358,6 +3506,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
     if cat_in is not None:
 
+        if get_par(set_zogy.keep_tmp,tel):
+            # save catalog before formatting
+            cat_preformat = cat_in.replace('.fits', '_preformat.fits')
+            shutil.copy2 (cat_in, cat_preformat)
+
+
         # read data and header of [cat_in]
         with fits.open(cat_in, memmap=True) as hdulist:
             prihdu = hdulist[0]
@@ -3418,7 +3572,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         'FNU_APER':            ['E', 'uJy'      , 'Aperture flux within radius x FWHM'],
         'FNUERR_APER':         ['E', 'uJy'      , 'Aperture flux error within radius x FWHM'],
         'FNUERRTOT_APER':      ['E', 'uJy'      , 'Aperture flux total error (incl. ZP error) within radius x FWHM'],
-        'BACKGROUND':          ['E', 'e-'       , 'Sky background from sky annulus (float) or local fit (2 decimals)'],
+        'BACKGROUND':          ['E', 'e-'       , 'Sky background from sky annulus, local fit or global (see FLAGS_OPT)'],
         #'E_FLUX_MAX':          ['E', 'e-/s'    ],
         'E_FLUX_AUTO':         ['E', 'e-/s'     , 'Electron flux within a Kron-like elliptical aperture'],
         'E_FLUXERR_AUTO':      ['E', 'e-/s'     , 'Electron flux error within a Kron-like elliptical aperture'],
@@ -3574,8 +3728,10 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
     if not get_par(set_zogy.record_fnu,tel):
         keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS', 'FLAGS_MASK',
                                'BACKGROUND', 'MAG_APER', 'MAGERR_APER',
+                               # CHECK!!!
                                #'E_FLUX_OPT', 'E_FLUXERR_OPT',
-                               'MAG_OPT', 'MAGERR_OPT', 'SNR_OPT', 'LIMMAG_OPT']
+                               'MAG_OPT', 'MAGERR_OPT', #'MAGERRTOT_OPT',
+                               'SNR_OPT', 'LIMMAG_OPT']
     else:
         # in Fnu
         keys_to_record_gaia = ['SOURCE_ID', 'X_POS', 'Y_POS',
@@ -5927,7 +6083,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 # thread as overhead becomes considerable
                 if n_todo < 30000:
 
-                    log.info ('using single thread')
+                    log.info ('less than 30,000 sources to process; '
+                              'using single thread')
 
                     # based on new selection of sources, create single
                     # list of indices
@@ -6076,7 +6233,9 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
 
-    # CHECK!!!
+    # save image with PSFs removed; N.B. remove_psf is left to default
+    # False in case this function is not used for Gaia forced
+    # photometry
     if remove_psf and get_par(set_zogy.keep_tmp,tel):
 
         # record D with PSFs removed
@@ -6636,11 +6795,13 @@ def get_psfoptflux_loop (
                 show=False
                 if False:
                     # show optimal fit of particular object(s)
-                    dist_tmp = np.sqrt((x-8027)**2 + (y-6098)**2)
+                    dist_tmp = np.sqrt((x-430)**2 + (y-367)**2)
                     if dist_tmp < 20:
                         show=True
                         log.info ('showing object at x,y={:.0f},{:.0f}'
                                   .format(x,y))
+                        log.info ('local_bkg_opt[i]: {:.3f}'.format(local_bkg_opt[i]))
+                        log.info ('fit_sky[i]: {}'.format(fit_sky[i]))
 
 
                 # extract optimal flux
@@ -7391,7 +7552,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
     # iteratively determine optimal flux
     flux_opt, fluxerr_opt, flags_opt_iter = flux_optimal_iter (
         P, D-sky_bkg, bkg_var+np.maximum(sky_bkg,0), mask_use, nsigma_inner,
-        nsigma_outer, max_iters, epsilon, V_ast, mask_inner, False, x, y,
+        nsigma_outer, max_iters, epsilon, V_ast, mask_inner, show, x, y,
         source_minpixfrac, flags_opt_dict)
 
 
@@ -7504,12 +7665,6 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
         #                  chi2red))
         #log.info (fit_report(result))
 
-
-        if show:
-            label = '_{:.0f}_{:.0f}'.format(x, y)
-            ds9_arrays(P=P, D=D, bkg_var=bkg_var, sky_2d=sky_2d, V=V,
-                       resid=resid, mask_use=mask_use.astype(int),
-                       label=label)
 
 
 
@@ -8245,10 +8400,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                +0.5).astype('uint8')
 
 
-    # convert counts to electrons
-    satlevel *= gain
-    data_wcs *= gain
-    data_bkg_std *= gain
+    # convert counts to electrons; not needed anymore since input
+    # images are converted to electrons at start
+    if False:
+        satlevel *= gain
+        data_wcs *= gain
+        data_bkg_std *= gain
 
 
     # fix pixels using function [fixpix]
@@ -8274,10 +8431,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     if remap:
 
-        # convert counts to electrons
-        data_ref_remap *= gain
-        #data_ref_bkg_remap *= gain
-        data_ref_bkg_std_remap *= gain
+        # convert counts to electrons; not needed anymore since input
+        # images are converted to electrons at start
+        if False:
+            data_ref_remap *= gain
+            #data_ref_bkg_remap *= gain
+            data_ref_bkg_std_remap *= gain
+
+
         # fix pixels using function [fixpix] also in remapped
         # reference image; already done for ML/BG reference images
         if (get_par(set_zogy.interp_sat,tel) and
@@ -8859,7 +9020,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
                                  data_wcs, data_bkg_std, data_mask, nsubs,
                                  psf_orig, remap, zp, airmass_center,
                                  zp_nsubs_shape, fn_zps)
-
 
 
 
@@ -9667,6 +9827,13 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
     # read pixel positions
     xwin = table_cat['X_POS'].value
     ywin = table_cat['Y_POS'].value
+
+
+    # if less than 30,000 sources, switch to single
+    # thread as overhead becomes considerable
+    if len(table_cat) < 30000:
+        log.info ('less than 30,000 sources to process; using single thread')
+        nthreads = 1
 
 
     # use local or global background?
@@ -10925,8 +11092,8 @@ def prep_plots (table, header, base):
 
 
     # read a few extra header keywords needed below
-    keywords = ['gain', 'exptime', 'filter', 'obsdate']
-    gain, exptime, filt, obsdate = read_header(header, keywords)
+    keywords = ['exptime', 'filter', 'obsdate']
+    exptime, filt, obsdate = read_header(header, keywords)
 
 
     # filter arrays by FLAG
@@ -10935,8 +11102,8 @@ def prep_plots (table, header, base):
         index &= (table['FLAGS_MASK']==0)
 
     class_star = table['CLASS_STAR'][index]
-    flux_auto = table['E_FLUX_AUTO'][index] * gain
-    fluxerr_auto = table['E_FLUXERR_AUTO'][index] * gain
+    flux_auto = table['E_FLUX_AUTO'][index]
+    fluxerr_auto = table['E_FLUXERR_AUTO'][index]
     s2n_auto = flux_auto / fluxerr_auto
     flux_opt = table['E_FLUX_OPT'][index]
     fluxerr_opt = table['E_FLUXERR_OPT'][index]
@@ -10967,6 +11134,7 @@ def prep_plots (table, header, base):
         # write catalog with psffit to output
         table.write(fits_cat.replace('.fits','_psffit.fits'), format='fits',
                     overwrite=True)
+
 
     if 'MAG_OPT' in table.colnames:
         # histogram of all 'good' objects as a function of magnitude
@@ -11035,11 +11203,11 @@ def prep_plots (table, header, base):
         field_format_err = 'E_FLUXERR_APER_R{}xFWHM'.format(aper)
 
         if field in table.colnames:
-            flux_aper = table[field][index,i] * gain
-            fluxerr_aper = table[field_err][index,i] * gain
+            flux_aper = table[field][index,i]
+            fluxerr_aper = table[field_err][index,i]
         elif field_format in table.colnames:
-            flux_aper = table[field_format][index] * gain
-            fluxerr_aper = table[field_format_err][index] * gain
+            flux_aper = table[field_format][index]
+            fluxerr_aper = table[field_format_err][index]
 
 
         dmag = calc_mag (flux_opt, flux_aper)
@@ -11071,7 +11239,7 @@ def prep_plots (table, header, base):
         # read SExtractor psffit fits table
         table = Table.read(sexcat_ldac_psffit, hdu=2, memmap=True)
 
-        flux_sexpsf = table['E_FLUX_PSF'][index] * gain
+        flux_sexpsf = table['E_FLUX_PSF'][index]
 
         dmag = calc_mag (flux_sexpsf, flux_opt)
         plot_scatter (x_array, dmag, limits, class_star, xlabel=xlabel,
@@ -11223,6 +11391,7 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
     # corresponding (symmetrical) error
     magerr_opt_inst = pogson * fluxerr_opt / flux_opt
 
+
     # zeropoints; N.B.: although an airmass of 1.2 was used to infer
     # the mag_cal, this same airmass was used for the (hypothetical)
     # standard star, so the zeropoints below need not be corrected for
@@ -11245,11 +11414,17 @@ def collect_zps (x_array, y_array, flux_opt, fluxerr_opt, mag_cal, airmass_cal,
     # calibration magnitudes in case temporary products are kept
     if get_par(set_zogy.keep_tmp,tel) and base is not None:
         result = prep_ds9regions(
-            '{}_calstars_zps.txt'.format(base), x_array, y_array,
+            '{}_ds9regions_calstars_zps.txt'.format(base), x_array, y_array,
             radius=5., width=1, color='blue', value=zp_array)
         result = prep_ds9regions(
-            '{}_calstars_mags.txt'.format(base), x_array, y_array,
+            '{}_ds9regions_calstars_mags.txt'.format(base), x_array, y_array,
             radius=10., width=1, color='blue', value=mag_cal)
+        result = prep_ds9regions(
+            '{}_ds9regions_calstars_instmags.txt'.format(base), x_array, y_array,
+            radius=10., width=1, color='blue', value=mag_opt_inst)
+        result = prep_ds9regions(
+            '{}_ds9regions_calstars_airmassk.txt'.format(base), x_array, y_array,
+            radius=10., width=1, color='blue', value=airmass_cal * get_par(set_zogy.ext_coeff,tel)[filt])
 
 
     # return x_array, y_array, zp_array and zp_err_array (previously
@@ -17662,7 +17837,6 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
         # (=254) or '0b11111110'
         #
         s2n = get_par(set_zogy.psf_stars_s2n_min,tel)
-        # CHECK!!! - try allowing SExtractor flags of 1 and 2
         index_ok = np.nonzero((data_ldac['FLAGS']<=1) &
                               (data_ldac['SNR_WIN']>=s2n) &
                               (data_ldac['IMAFLAGS_ISO']==0))[0]
