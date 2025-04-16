@@ -10602,7 +10602,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # plot histogram of zeropoints using clipped_stats()
             clipped_stats (table_cal['zeropoint'], clip_zeros=True,
                            make_hist=get_par(set_zogy.make_plots,tel),
-                           name_hist='{}_zp_hist.pdf'.format(base),
+                           name_hist='{}_zeropoint_hist.pdf'.format(base),
                            hist_xlabel='{} zeropoint (mag)'.format(filt))
 
 
