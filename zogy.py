@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.1'
+__version__ = '1.6.2'
 
 
 ################################################################################
@@ -9884,11 +9884,13 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
 
 
     psfex_bintable = '{}_psf.fits'.format(base)
-    flux_opt, fluxerr_opt, local_bkg_opt, flags_opt = get_psfoptflux_mp (
-        psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
-        psffit=False, imtype=imtype, local_bkg=local_bkg,
-        mask_fit_local_bkg=mask_fit_local_bkg, get_flags_opt=True,
-        set_zogy=set_zogy, nthreads=nthreads, tel=tel)
+    flux_opt, fluxerr_opt, local_bkg_opt, flags_opt, flags_mask = \
+        get_psfoptflux_mp (
+            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xwin, ywin,
+            psffit=False, imtype=imtype, local_bkg=local_bkg,
+            mask_fit_local_bkg=mask_fit_local_bkg, get_flags_opt=True,
+            get_flags_mask_inner=True, set_zogy=set_zogy, nthreads=nthreads,
+            tel=tel)
 
 
     # add optimal flux columns to table
@@ -9909,6 +9911,9 @@ def infer_optimal_fluxmag (table_cat, header, exptime, filt, obsdate, base,
         # present; in that case define the column values here
         table_cat['FLAGS_OPT'] = flags_opt.astype('uint8')
 
+
+    # add FLAGS_MASK
+    table_cat['FLAGS_MASK'] = flags_mask.astype('uint8')
 
 
     # [mypsffit] determines if PSF-fitting part is also performed;
@@ -10591,6 +10596,16 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 plt.savefig('{}_zeropoint_vs_color_{}.pdf'.format(base, imtype))
                 if get_par(set_zogy.show_plots,tel): plt.show()
                 plt.close()
+
+
+
+            # plot histogram of zeropoints using clipped_stats()
+            clipped_stats (table_cal['zeropoint'], clip_zeros=True,
+                           make_hist=get_par(set_zogy.make_plots,tel),
+                           name_hist='{}_zp_hist.pdf'.format(base),
+                           hist_xlabel='{} zeropoint (mag)'.format(filt))
+
+
 
 
 
@@ -11354,20 +11369,35 @@ def create_modify_mask (data, satlevel, data_mask=None):
     if data_mask is None:
         data_mask = np.zeros(data.shape, dtype='uint8')
 
-    value = get_par(set_zogy.mask_value['saturated'],tel)
-    mask_sat_check = (data_mask & value == value)
+    val_sat = get_par(set_zogy.mask_value['saturated'],tel)
+    mask_sat_check = (data_mask & val_sat != 0)
 
     # if no saturated pixels already present, add them
     if np.sum(mask_sat_check) == 0:
         mask_sat = (data >= 0.8*satlevel)
-        data_mask[mask_sat] |= get_par(set_zogy.mask_value['saturated'],tel)
+        data_mask[mask_sat] |= val_sat
         # pixels connected to saturated pixels
         mask_sat_adj = ndimage.binary_dilation(mask_sat,structure=
                                                np.ones((3,3)).astype('bool'),
                                                iterations=1)
+        # avoid defining saturated pixels as saturated-connected
         mask_sat_adj[mask_sat] = False
-        data_mask[mask_sat_adj] |= get_par(set_zogy.mask_value
-                                           ['saturated-connected'],tel)
+        val_satcon = get_par(set_zogy.mask_value['saturated-connected'],tel)
+        data_mask[mask_sat_adj] |= val_satcon
+
+
+    # if no edge pixels defined yet, define the outer rim of dpix
+    # pixels as edge pixels
+    val_edge = get_par(set_zogy.mask_value['edge'],tel)
+    mask_edge_check = (data_mask & val_edge != 0)
+    if np.sum(mask_edge_check) == 0:
+        dpix = 3
+        data_mask[0:dpix,:] |= val_edge
+        data_mask[-dpix:,:] |= val_edge
+        data_mask[:,0:dpix] |= val_edge
+        data_mask[:,-dpix:] |= val_edge
+
+
 
     return data_mask
 
@@ -11636,7 +11666,7 @@ def calc_zp_old (x_array, y_array, zp_array, zp_err_array, filt, imtype,
 
                 clipped_stats (zp_array[mask_use], clip_zeros=True,
                                make_hist=get_par(set_zogy.make_plots,tel),
-                               name_hist='{}_zp_hist.pdf'.format(base),
+                               name_hist='{}_zeropoint_hist.pdf'.format(base),
                                hist_xlabel='{} zeropoint (mag)'.format(filt))
 
 
@@ -16037,7 +16067,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
 
 
     # string with depths
-    dstep = 50
+    dstep = get_par(set_zogy.astronet_depth_step,tel)
     depth_str = (str(list(range(dstep,nbright//3+1,dstep)))
                  .replace('[','').replace(']','').replace(' ',''))
 
