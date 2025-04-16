@@ -231,6 +231,12 @@ astronet_config = '{}/astrometry/astrometry.cfg'.format(cal_dir)
 astronet_radius = 30.
 pixscale_varyfrac = 0.0015 # pixscale solution found by Astrometry.net will
                            # be within this fraction of the assumed pixscale
+# solve-field depth parameter step; this determines how many of the
+# brightest sources are used to find a solution before moving on to
+# the next index file; if no solution is found for any index file, it
+# will use the next batch of [astronet_depth_step] sources up to
+# [ast_nbright]/3
+astronet_depth_step = 50
 
 
 # calibration catalog used for photometry and to check the astrometry
