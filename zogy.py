@@ -10761,14 +10761,48 @@ def idx_matching_values (a, b):
 
 def remove_files (filelist, verbose=False):
 
+    # assume all files are either google cloud or not, so sufficient
+    # to only check the 1st file
+    google_cloud = (filelist[0][0:5]=='gs://')
+
+    # make sure files exist
+    filelist = [f for f in filelist if isfile(f)]
+    if len(filelist)==0:
+        log.warning ('no existing file(s) to remove')
+        return
+
+
+    if verbose:
+        for f in filelist:
+            log.info ('removing file {}'.format(f))
+
+
+    if not google_cloud:
+        for f in filelist:
+            os.remove(f)
+    else:
+        # gsutil command (not actively supported anymore)
+        cmd = ['gsutil', '-m', '-q', 'rm', '-I']
+        # gcloud alternative (much slower)
+        #cmd = ['xargs', '-P', '4', '-I', '{}', 'gcloud', 'storage', 'rm', '{}']
+        result = subprocess.run(cmd, input='\n'.join(filelist).encode('utf-8'))
+
+
+    return
+
+
+################################################################################
+
+def remove_files_orig (filelist, verbose=False):
+
     for f in filelist:
         if isfile(f):
 
             if f[0:5] == 'gs://':
                 # gsutil command (not actively supported anymore)
-                #cmd = ['gsutil', '-q', 'rm', f]
+                cmd = ['gsutil', '-m', '-q', 'rm', f]
                 # gcloud alternative
-                cmd = ['gcloud', 'storage', 'rm', f]
+                #cmd = ['gcloud', 'storage', 'rm', f]
                 result = subprocess.run(cmd)
             else:
                 os.remove(f)
