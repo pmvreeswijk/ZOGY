@@ -117,7 +117,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.2'
+__version__ = '1.6.3'
 
 
 ################################################################################
@@ -17045,10 +17045,11 @@ def get_fwhm (fits_cat, fraction, class_sort=False, get_elong=False, nmin=5):
 
 
     # these arrays correspond to objecst with flag==0 and flux_auto>0
-    # add a S/N requirement
+    # add a S/N requirement tied to set_zogy.fwhm_detect_thresh
+    snr_limit = get_par(set_zogy.fwhm_detect_thresh,tel)
     index = ((data['FLAGS']==0) & (data['FLUX_AUTO']>0) &
              (data['FLUXERR_AUTO']>0) &
-             (data['FLUX_AUTO']/data['FLUXERR_AUTO']>20))
+             (data['FLUX_AUTO']/data['FLUXERR_AUTO']>snr_limit))
     fwhm = data['FWHM_IMAGE'][index]
     class_star = data['CLASS_STAR'][index]
     flux_auto = data['FLUX_AUTO'][index]
