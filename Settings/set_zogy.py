@@ -246,8 +246,8 @@ astronet_depth_step = 50
 # new catalog based on DR3
 #cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12.fits'
 #           .format(cal_dir))
-cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12'
-           '_Cstar_blendcont_npick2.fits'.format(cal_dir))
+cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_HPfine12_select_npick2_q17.fits'
+           .format(cal_dir))
 cal_epoch = 2016.0
 
 ast_nbright = 1500       # brightest no. of objects in the field to
