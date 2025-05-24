@@ -1699,7 +1699,7 @@ def get_keys (header, ra_in, dec_in, tel):
 
 
     # zp_err using function in zogy
-    zp, zp_std, zp_err = zogy.get_zp_header(header, set_zogy=set_zogy)
+    __, zp_std, zp_err = zogy.get_zp_header(header, set_zogy=set_zogy)
 
 
     # determine object airmass, unless input image is a combined
