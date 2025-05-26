@@ -2052,11 +2052,16 @@ def get_zp_header (header, set_zogy=None, channels=False):
             else:
                 # npar=0 concerns the zeropoint itself
                 if npar==0:
-                    # if keyword not found, adopt default zeropoint
-                    # value instead
-                    val = header['PC-ZPDEF']
-                    log.warning ('keyword {} not found in header; adopting '
-                                 'default ZP value of {}'.format(key, val))
+                    # if keyword not found, try adopting default
+                    # zeropoint value instead
+                    if 'PC-ZPDEF' in header:
+                        val = header['PC-ZPDEF']
+                        log.warning ('keyword {} not found in header; adopting '
+                                     'default ZP value of {}'.format(key, val))
+                    else:
+                        val = None
+                        log.warning ('keyword {} nor PC-ZPDEF found in header; '
+                                     'returning None for zp'.format(key))
                 else:
                     val = 0
                     #log.warning ('keyword {} not found in header; adopting '
