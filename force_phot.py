@@ -2106,6 +2106,10 @@ def create_col_descr(keys2add, header, ra_col, dec_col):
         'FNUERRTOT_ZOGY_PLUSREF': '[microJy] sum of ZOGY and ref image flux total errors (incl. ZP errors)',
         #
         'TQC-FLAG':          'transient QC flag (green|yellow|orange|red)',
+        #
+        # include PC-ZPERR manually in case it is not in the header
+        # (initial reduction did not include this keyword)
+        'PC-ZPERR':          '[mag] weighted error zeropoint',
     }
 
 
