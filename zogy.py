@@ -5763,6 +5763,23 @@ def prep_indices (xcoords, nthreads, mask=None, x_sort=False):
 
 ################################################################################
 
+def create_shared_memory (name, size):
+
+    try:
+        # create
+        shm = SharedMemory(name=name, size=size, create=True)
+    except FileExistsError:
+        # attach instead
+        shm = SharedMemory(name=name, create=False)
+    except Exception as e:
+        log.error ('exception was raised in create_shared_memory(): {}'
+                   .format(e))
+
+    return shm
+
+
+################################################################################
+
 def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        psffit=False, moffat=False, gauss=False, get_limflux=False,
                        limflux_nsigma=5, psfex_bintable_ref=None,
@@ -5910,7 +5927,13 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
         # create a shared memory for D
-        shm_D = SharedMemory(name='D_shared', size=D.nbytes, create=True)
+        #shm_D = SharedMemory(name='D_shared', size=D.nbytes, create=True)
+        #
+        # use create_shared_memory() instead, which takes care of
+        # already existing shared memory from previous process that
+        # was not properly closed and unlinked (e.g. from Slurm
+        # NODE_FAIL)
+        shm_D = create_shared_memory (name='D_shared', size=D.nbytes)
         # create a new numpy array that uses the shared memory
         D_shared = np.ndarray(D.shape, D.dtype, buffer=shm_D.buf)
         # populate the array
@@ -5919,7 +5942,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
         # create a shared memory for the xy coordinates being processed
         xy = np.zeros((2,nthreads))
-        shm_xy = SharedMemory(name='xy_shared', size=xy.nbytes, create=True)
+        #shm_xy = SharedMemory(name='xy_shared', size=xy.nbytes, create=True)
+        shm_xy = create_shared_memory (name='xy_shared', size=xy.nbytes)
         # xy_shared array will have shape (2,nthreads), where xy[0]
         # and xy[1] will refer to the xcoords and ycoords, respectively
         xy_shared = np.ndarray(xy.shape, xy.dtype, buffer=shm_xy.buf)
@@ -5931,7 +5955,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # record the PSFs of the sources without any nearby
         # neighbours, to be subtracted from the original D image to be
         # used in the next iteration; so same shape and size as D
-        shm_tmp = SharedMemory(name='tmp_shared', size=D.nbytes, create=True)
+        #shm_tmp = SharedMemory(name='tmp_shared', size=D.nbytes, create=True)
+        shm_tmp = create_shared_memory (name='tmp_shared', size=D.nbytes)
         # create a new numpy array that uses the shared memory
         tmp_shared = np.ndarray(D.shape, D.dtype, buffer=shm_tmp.buf)
         # initialize to zero
