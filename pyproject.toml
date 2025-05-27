@@ -21,3 +21,8 @@ dynamic = ['version']
 
 [project.urls]
 Homepage = 'https://github.com/pmvreeswijk/ZOGY'
+
+[tool.setuptools.packages.find]
+where = ['.']
+include = ['Settings']
+exclude = ['Config']
