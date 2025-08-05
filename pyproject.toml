@@ -5,7 +5,7 @@ build-backend = 'setuptools.build_meta'
 
 [project]
 name = 'zogy'
-version =
+dynamic = ['version']
 authors = [
   {name = 'Paul Vreeswijk', email = 'pmvreeswijk@gmail.com'},
   {name = 'Kerry Paterson'},
@@ -19,7 +19,6 @@ dependencies = [
     'numpy', 'astropy', 'matplotlib', 'scipy', 'psutil',
     'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
     'tensorflow-cpu==2.13', 'fitsio', 'fsspec', 'gcsfs']
-dynamic = ['version']
 
 [project.urls]
 Homepage = 'https://github.com/pmvreeswijk/ZOGY'
