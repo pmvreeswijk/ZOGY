@@ -9856,10 +9856,6 @@ def run_force_phot_gaia (fits_in, header, fits_gaia, obsdate, ra_center,
     bkg_std_coords = data_bkg_std[y_indices, x_indices]
 
 
-    # CHECK!!! - for debugging
-    log.info ('(before get_apflux) files in /dev/shm: {}'
-              .format(glob.glob('/dev/shm/*')))
-
     # determine aperture fluxes at pixel coordinates
     flux_aps, fluxerr_aps, local_bkg = get_apflux (
         xcoords, ycoords, data_wcs, data_mask, fwhm, objmask=objmask,
@@ -12549,12 +12545,14 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
 
         magerr = np.zeros_like(flux)
         magerr[mask_use] = pogson * fluxerr[mask_use] / np.abs(flux[mask_use])
+        magerr[~mask_use] = 99
         list2return.append(magerr)
 
 
         # determine magerrtot if [zp_err] is provided
         if zp_err is not None:
             magerrtot = np.sqrt(magerr**2 + zp_err**2)
+            magerrtot[~mask_use] = 99
             list2return.append(magerrtot)
 
 
