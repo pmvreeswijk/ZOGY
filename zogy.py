@@ -21,7 +21,10 @@ import inspect
 
 
 import multiprocessing as mp
+import multiprocessing.shared_memory as sm
 from multiprocessing.shared_memory import SharedMemory
+
+
 #from multiprocessing import active_children
 # define mp start method through context; this same method is used in
 # blackbox, buildref and force_phot; set to 'spawn' because 'fork'
@@ -117,7 +120,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.3'
+__version__ = '1.6.4'
 
 
 ################################################################################
@@ -1604,9 +1607,11 @@ def add_refkeys (header_trans, header_ref):
             else:
                 key_ref = 'R-QCFLAG'
 
+            # indicate ref image in comment
+            comment = '{} ref image'.format(header_ref.comments[key])
 
             # add to transient header
-            header_trans[key_ref] = (header_ref[key], header_ref.comments[key])
+            header_trans[key_ref] = (header_ref[key], comment)
 
         else:
 
@@ -1710,9 +1715,9 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
                           catalog
     MAGERR_AUTO_NEAR_REF: [mag] corresponding error
     MAGERRTOT_AUTO_NEAR_REF: [mag] corresponding total error (incl. ZP error)
-    FNU_OPT_REF           [microJy] forced-photometry flux in reference image at
+    FNU_OPT_REF           [uJy] forced-photometry flux in reference image at
                           transient position
-    FNUERR_OPT_REF        [microJy] corresponding error
+    FNUERR_OPT_REF        [uJy] corresponding error
     FLAGS_MASK_REF        OR comb. of bad pixels inner PSF profile in reference
                           image
 
@@ -1725,10 +1730,10 @@ def trans_crossmatch_fphot (table_trans, fits_red, fits_red_mask, sexcat_new,
     ELONG_NEAR_RED        elongation of nearest source in reduced image
     CLASS_STAR_NEAR_RED   SExtractor star/galaxy classification of nearest
                           red-image source
-    FNU_OPT_RED           [microJy] forced-photometry flux in reduced image at
+    FNU_OPT_RED           [uJy] forced-photometry flux in reduced image at
                           transient position
-    FNUERR_OPT_RED        [microJy] corresponding error
-    FNUERRTOT_OPT_RED     [microJy] corresponding total error (incl. ZP error)
+    FNUERR_OPT_RED        [uJy] corresponding error
+    FNUERRTOT_OPT_RED     [uJy] corresponding total error (incl. ZP error)
     FLAGS_MASK_RED        OR comb. of bad pixels inner PSF profile in reduced
                           image
 
@@ -5763,19 +5768,46 @@ def prep_indices (xcoords, nthreads, mask=None, x_sort=False):
 
 ################################################################################
 
-def create_shared_memory (name, size):
+def create_shared_memory (name=None, size=None):
 
     try:
-        # create
-        shm = SharedMemory(name=name, size=size, create=True)
+        # create; if input name is not specified, a unique name will
+        # be generated, accessible with attribute shm.name; N.B.
+        # track argument should be set to False (default: True) if
+        # using multiprocessing 'spawn' start method - unfortunately,
+        # track argument is only available for python 3.13+, while
+        # for version before that it is effectively set to True.
+        shm = SharedMemory(name=name, size=size, create=True) #, track=False)
+        log.info ('shared memory created with name: {} and size: {}'
+                  .format(shm.name, shm.size))
+
     except FileExistsError:
         # attach instead
-        shm = SharedMemory(name=name, create=False)
+        log.warning ('shared memory with name {} already exists; attaching it '
+                     'instead of creating a new one'.format(name))
+        shm = SharedMemory(name=name, create=False) #, track=False)
     except Exception as e:
         log.error ('exception was raised in create_shared_memory(): {}'
                    .format(e))
 
     return shm
+
+
+################################################################################
+
+def shm_exists(name):
+
+    pname = '/dev/shm/{}'.format(name)
+    exists = os.path.exists(pname)
+    if exists:
+        atime = time.ctime(os.path.getatime(pname))
+        mtime = time.ctime(os.path.getmtime(pname))
+    else:
+        atime = None
+        mtime = None
+
+    filelist = glob.glob('/dev/shm/*')
+    return exists, atime, mtime, filelist
 
 
 ################################################################################
@@ -5918,6 +5950,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
     # create shared memory arrays and a lock in case remove_psf is
     # True and nthreads > 1
+    shm_names = None
     if remove_psf and nthreads > 1:
 
         # create manager lock and list
@@ -5933,7 +5966,11 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # already existing shared memory from previous process that
         # was not properly closed and unlinked (e.g. from Slurm
         # NODE_FAIL)
-        shm_D = create_shared_memory (name='D_shared', size=D.nbytes)
+        #
+        #shm_D = create_shared_memory (name='D_shared', size=D.nbytes)
+        # leave name to None to generate unique name
+        bname = psfex_bintable.split('_psf.fits')[0].split('/')[-1]
+        shm_D = create_shared_memory ('{}_D'.format(bname), size=D.nbytes)
         # create a new numpy array that uses the shared memory
         D_shared = np.ndarray(D.shape, D.dtype, buffer=shm_D.buf)
         # populate the array
@@ -5942,8 +5979,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
         # create a shared memory for the xy coordinates being processed
         xy = np.zeros((2,nthreads))
-        #shm_xy = SharedMemory(name='xy_shared', size=xy.nbytes, create=True)
-        shm_xy = create_shared_memory (name='xy_shared', size=xy.nbytes)
+        #shm_xy = create_shared_memory (name='xy_shared', size=xy.nbytes)
+        shm_xy = create_shared_memory ('{}_xy'.format(bname), size=xy.nbytes)
         # xy_shared array will have shape (2,nthreads), where xy[0]
         # and xy[1] will refer to the xcoords and ycoords, respectively
         xy_shared = np.ndarray(xy.shape, xy.dtype, buffer=shm_xy.buf)
@@ -5955,12 +5992,16 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         # record the PSFs of the sources without any nearby
         # neighbours, to be subtracted from the original D image to be
         # used in the next iteration; so same shape and size as D
-        #shm_tmp = SharedMemory(name='tmp_shared', size=D.nbytes, create=True)
-        shm_tmp = create_shared_memory (name='tmp_shared', size=D.nbytes)
+        #shm_tmp = create_shared_memory (name='tmp_shared', size=D.nbytes)
+        shm_tmp = create_shared_memory ('{}_tmp'.format(bname), size=D.nbytes)
         # create a new numpy array that uses the shared memory
         tmp_shared = np.ndarray(D.shape, D.dtype, buffer=shm_tmp.buf)
         # initialize to zero
         tmp_shared[:] = 0
+
+
+        # collect names in dictionary
+        shm_names = {'D':shm_D.name, 'xy':shm_xy.name, 'tmp':shm_tmp.name}
 
 
         # alternative could be to split coordinates according to
@@ -6011,12 +6052,13 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             source_minpixfrac, inner_psflim, mask_value,
             flags_opt_dict, local_bkg, mask_fit_local_bkg,
             get_psf_footprint, lock, pid_list,
-            n_fainter_neighbours, x_borders, tel, nthreads]
+            n_fainter_neighbours, shm_names, x_borders, tel, nthreads]
+
 
 
 
     # feed these lists to pool_func
-    if not remove_psf or single_pass:
+    if not remove_psf or nthreads==1:
 
         if nthreads == 1:
 
@@ -6027,7 +6069,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
         else:
 
-            # multiprocess
+            # multiprocess (without shared memory)
             results = pool_func (get_psfoptflux_loop, idx_list, *pars,
                                  nproc=nthreads)
             # results is a list of output arrays; need to concatenate these
@@ -6125,6 +6167,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     # and set nthreads to 1
                     pars[13] = D_shared
                     pars[-1] = 1
+                    pars[-4] = None
 
 
                     # need to keep track of the sources with
@@ -6154,6 +6197,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     # reset pars
                     pars[13] = D
                     pars[-1] = nthreads
+                    pars[-4] = shm_names
 
 
                 else:
@@ -6289,21 +6333,44 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
 
-    if remove_psf and nthreads > 1:
+    if shm_names is not None:
 
         # close the shared memories
         shm_D.close()
         shm_xy.close()
         shm_tmp.close()
-        # release the shared memories
-        shm_D.unlink()
-        shm_xy.unlink()
-        shm_tmp.unlink()
 
+
+        # release the shared memories; done in try-except statements
+        # as resource manager or something else might already unlink
+        # them when pool of worker has finished
+        try:
+            shm_D.unlink()
+        except:
+            log.warning ('shared memory shm_D with name {} was already unlinked'
+                         .format(shm_names['D']))
+
+        try:
+            shm_xy.unlink()
+        except:
+            log.warning ('shared memory shm_xy with name {} was already unlinked'
+                         .format(shm_names['xy']))
+
+        try:
+            shm_tmp.unlink()
+        except:
+            log.warning ('shared memory shm_tmp with name {} was already '
+                         'unlinked'.format(shm_names['tmp']))
+
+
+
+        log.info ('shutting down multi-processing manager')
+        manager.shutdown()
 
 
     if get_par(set_zogy.timing,tel):
         log_timing_memory (t0=t, label='in get_psfoptflux_mp')
+
 
 
     return list2return
@@ -6328,7 +6395,8 @@ def get_psfoptflux_loop (
         source_minpixfrac=None, inner_psflim=None, mask_value=None,
         flags_opt_dict=None, local_bkg=None, mask_fit_local_bkg=None,
         get_psf_footprint=False, lock=None, pid_list=None,
-        n_fainter_neighbours=None, x_borders=None, tel=None, nthreads=None):
+        n_fainter_neighbours=None, shm_names=None,
+        x_borders=None, tel=None, nthreads=None):
 
 
 
@@ -6423,21 +6491,31 @@ def get_psfoptflux_loop (
 
 
 
-    if remove_psf and nthreads > 1:
+    if shm_names is not None:
+
+
+        # check if shared memories still exist:
+        if False:
+            for name in shm_names.values():
+                exists, atime, mtime, files = shm_exists(name)
+                log.info ('(at end of loop) shared memory with name {} exists?: '
+                          '{}, atime: {} min, mtime: {} min, files: {}'
+                          .format(name, exists, atime, mtime, files))
+
 
         # attach shared memory array D_shared
-        shm_D = SharedMemory('D_shared')
+        shm_D_loop = SharedMemory(shm_names['D'])
         # create a new numpy array that uses the shared memory
-        D_shared = np.ndarray(D.shape, dtype=D.dtype, buffer=shm_D.buf)
+        D_shared = np.ndarray(D.shape, dtype=D.dtype, buffer=shm_D_loop.buf)
         # let input D refer to the shared array
         #del D # is this needed??
         D = D_shared
 
 
         # attach shared memory array xy_shared
-        shm_xy = SharedMemory('xy_shared')
+        shm_xy_loop = SharedMemory(shm_names['xy'])
         # create a new numpy array that uses the shared memory
-        xy_shared = np.ndarray((2,nthreads), dtype=float, buffer=shm_xy.buf)
+        xy_shared = np.ndarray((2,nthreads), dtype=float, buffer=shm_xy_loop.buf)
 
 
         # boolean to indicate if this iteration processes objects with
@@ -6447,9 +6525,19 @@ def get_psfoptflux_loop (
 
         if not neighbourless:
             # attach shared memory array tmp_shared
-            shm_tmp = SharedMemory('tmp_shared')
+            shm_tmp_loop = SharedMemory(shm_names['tmp'])
             # create a new numpy array that uses the shared memory
-            tmp_shared = np.ndarray(D.shape, dtype=D.dtype, buffer=shm_tmp.buf)
+            tmp_shared = np.ndarray(D.shape, dtype=D.dtype,
+                                    buffer=shm_tmp_loop.buf)
+
+
+        # check if shared memories still exist:
+        if False:
+            for name in shm_names.values():
+                exists, atime, mtime, files = shm_exists(name)
+                log.info ('(at end of loop) shared memory with name {} exists?: '
+                          '{}, atime: {} min, mtime: {} min, files: {}'
+                          .format(name, exists, atime, mtime, files))
 
 
         # define threshold pixel distance for nearby neighbour, so
@@ -7069,13 +7157,25 @@ def get_psfoptflux_loop (
         list2return = [mask_psf_footprint]
 
 
-    if remove_psf and nthreads > 1:
-        # close the shared memory
-        shm_D.close()
-        shm_xy.close()
-        if not neighbourless:
-            shm_tmp.close()
+    if shm_names is not None:
 
+        # close the shared memory
+        log.info ('closing shared memory {}'.format(shm_D_loop.name))
+        shm_D_loop.close()
+        log.info ('closing shared memory {}'.format(shm_xy_loop.name))
+        shm_xy_loop.close()
+        if not neighbourless:
+            log.info ('closing shared memory {}'.format(shm_tmp_loop.name))
+            shm_tmp_loop.close()
+
+
+        # check if shared memories still exist:
+        if False:
+            for name in shm_names.values():
+                exists, atime, mtime, files = shm_exists(name)
+                log.info ('(at end of loop) shared memory with name {} exists?: '
+                          '{}, atime: {} min, mtime: {} min, files: {}'
+                          .format(name, exists, atime, mtime, files))
 
 
     log_timing_memory (t0=t, label='at end of get_psfoptflux_loop')
@@ -8582,7 +8682,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
     # infer image rotation angle from header, used
     # to rotate the image properly to find objects on the
-    # frame in [phot_calibrate] and [run_force_phot]
+    # frame in [phot_calibrate] and [run_force_phot_gaia]
     if 'A-ROT' in header:
         rot = header['A-ROT']
     else:
@@ -8684,7 +8784,7 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # ------------------------------------------
 
             # update header of input fits image with keywords added by
-            # PSFEx and [phot_calibrate]; the function [run_force_phot]
+            # PSFEx and [phot_calibrate]; the function [run_force_phot_gaia]
             # requires the zeropoint to be present in the header
             update_imcathead (input_fits, header)
 
@@ -8692,14 +8792,14 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # perform forced photometry on input_fits at relevant
             # positions in input catalog
             psfex_bintable = '{}_psf.fits'.format(base)
-            table_cat = run_force_phot (
+            table_cat = run_force_phot_gaia (
                 input_fits, header, get_par(set_zogy.gaia_cat,tel), obsdate,
                 ra_center, dec_center, fov_half_deg, rot, ysize, xsize, fwhm,
                 data_wcs, data_mask, objmask, data_bkg_std, psfex_bintable,
                 imtype='new', nthreads=nthreads)
 
 
-            log.info ('table_cat.colnames (just after run_force_phot): {}'
+            log.info ('table_cat.colnames (just after run_force_phot_gaia): {}'
                       .format(table_cat.colnames))
 
             # make copy of source extractor catalog, before
@@ -9352,18 +9452,18 @@ def infer_limflux (header, base, data, airmass_center, exptime, ext_coeff,
         header['T-NSIGMA'] = (nsigma, '[sigma] input transient detection '
                               'threshold')
         header['T-LFLUX'] = (limeflux/exptime, '[e-/s] full-frame transient '
-                             '{}-sigma limiting flux'.format(nsigma))
-        header['T-LFNU'] = (limfnu, '[microJy] full-frame transient {}-sigma '
-                            'limiting Fnu'.format(nsigma))
+                             '{}-sigma lim. flux'.format(nsigma))
+        header['T-LFNU'] = (limfnu, '[uJy] full-frame transient {}-sigma '
+                            'lim. Fnu'.format(nsigma))
         header['T-LMAG'] = (limmag, '[mag] full-frame transient {}-sigma '
-                            'limiting mag'.format(nsigma))
+                            'lim. mag'.format(nsigma))
 
     else:
         # add n-sigma limiting flux in e-/s, in microJy and limiting
         # magnitude to header
         header['LIMEFLUX'] = (limeflux/exptime, '[e-/s] full-frame {}-sigma '
                               'limiting flux'.format(nsigma))
-        header['LIMFNU'] = (limfnu, '[microJy] full-frame {}-sigma '
+        header['LIMFNU'] = (limfnu, '[uJy] full-frame {}-sigma '
                             'limiting Fnu'.format(nsigma))
         header['LIMMAG'] = (limmag, '[mag] full-frame {}-sigma limiting mag'
                             .format(nsigma))
@@ -9647,10 +9747,11 @@ def create_limmag_image (fits_limmag, header, exptime, filt, data_wcs,
 
 ################################################################################
 
-def run_force_phot (fits_in, header, fits_gaia, obsdate, ra_center, dec_center,
-                    fov_half_deg, rot, ysize, xsize, fwhm, data_wcs, data_mask,
-                    objmask, data_bkg_std, psfex_bintable, imtype='new',
-                    nthreads=1):
+def run_force_phot_gaia (fits_in, header, fits_gaia, obsdate, ra_center,
+                         dec_center, fov_half_deg, rot, ysize, xsize, fwhm,
+                         data_wcs, data_mask, objmask, data_bkg_std,
+                         psfex_bintable, imtype='new', nthreads=1):
+
 
     """function that performs forced photometry on [fits_in] at the
     RADECs in [fits_gaia] relevant for the input image.  [fits_gaia]
@@ -9668,7 +9769,7 @@ def run_force_phot (fits_in, header, fits_gaia, obsdate, ra_center, dec_center,
     """
 
     if get_par(set_zogy.timing,tel): t = time.time()
-    log.info('executing run_force_phot ...')
+    log.info('executing run_force_phot_gaia ...')
 
 
     # use functions [get_gaia_image_table] and - only if the
@@ -9735,6 +9836,181 @@ def run_force_phot (fits_in, header, fits_gaia, obsdate, ra_center, dec_center,
 
     # remove PSF after measuring?
     remove_psf = get_par(set_zogy.remove_psf,tel)
+
+
+    # aperture fluxes
+    # ---------------
+
+    mem_use ('[run_force_phot_gaia] before executing [get_apflux]')
+
+    # if [bkg_global] is True, set [bkg_radii] to None so that
+    # a zero background flux will be adopted in [get_apflux]
+    if bkg_global:
+        bkg_radii = None
+
+
+    # infer bkg_std at xcoords,ycoords; needed as input to apflux
+    # in case bkg_std cannot be determined from background annulus
+    x_indices = (xcoords-0.5).astype(int)
+    y_indices = (ycoords-0.5).astype(int)
+    bkg_std_coords = data_bkg_std[y_indices, x_indices]
+
+
+    # CHECK!!! - for debugging
+    log.info ('(before get_apflux) files in /dev/shm: {}'
+              .format(glob.glob('/dev/shm/*')))
+
+    # determine aperture fluxes at pixel coordinates
+    flux_aps, fluxerr_aps, local_bkg = get_apflux (
+        xcoords, ycoords, data_wcs, data_mask, fwhm, objmask=objmask,
+        apphot_radii=apphot_radii, bkg_radii=bkg_radii, bkg_limfrac=bkg_limfrac,
+        bkg_std_coords=bkg_std_coords, set_zogy=set_zogy, tel=tel,
+        nthreads=nthreads)
+
+
+    # CHECK!!! - for debugging
+    log.info ('(after get_apflux) files in /dev/shm: {}'
+              .format(glob.glob('/dev/shm/*')))
+
+
+    # add various aperture columns to table
+    for i_rad, radius in enumerate(apphot_radii):
+
+        # get flux for specific aperture radius
+        flux_ap = flux_aps[i_rad]
+        fluxerr_ap = fluxerr_aps[i_rad]
+
+
+        # add electron flux and error to table_gaia
+        col_tmp = 'E_FLUX_APER_R{}xFWHM'.format(radius)
+        table_gaia[col_tmp] = flux_ap.astype('float32')
+        col_tmp = 'E_FLUXERR_APER_R{}xFWHM'.format(radius)
+        table_gaia[col_tmp] = fluxerr_ap.astype('float32')
+
+
+        if False:
+            # signal-to-noise ratio
+            mask_nonzero = (fluxerr_ap != 0)
+            snr_ap = np.zeros_like(flux_ap, dtype='float32')
+            snr_ap[mask_nonzero] = (flux_ap[mask_nonzero] /
+                                    fluxerr_ap[mask_nonzero])
+            col_tmp = 'SNR_APER_R{}xFWHM'.format(radius)
+            table_gaia[col_tmp] = snr_ap
+
+
+
+    # optimal fluxes
+    # --------------
+
+    mem_use ('[run_force_phot_gaia] before executing [get_psfoptflux_mp]')
+
+
+    # fit local background in get_psfoptflux_mp() if sky value was
+    # not successfully determined by get_apflux, i.e. it is zero
+    mask_fit_local_bkg = (local_bkg==0)
+
+
+    # CHECK!!! - for debugging
+    log.info ('(before get_psfoptflux_mp) files in /dev/shm: {}'
+              .format(glob.glob('/dev/shm/*')))
+
+
+    # CHECK!!! - try disabling the garbage collector
+    #log.info ('disabling gc')
+    #gc.disable()
+
+
+    # determine optimal fluxes at pixel coordinates
+    flux_opt, fluxerr_opt, local_bkg_opt, flags_opt, flags_mask = \
+        get_psfoptflux_mp(
+            psfex_bintable, data_wcs, data_bkg_std**2, data_mask, xcoords,
+            ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+            mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
+            get_flags_opt=True, get_flags_mask_inner=True, set_zogy=set_zogy,
+            tel=tel, nthreads=nthreads)
+
+
+    # CHECK!!! - for debugging
+    log.info ('(after get_psfoptflux_mp) files in /dev/shm: {}'
+              .format(glob.glob('/dev/shm/*')))
+
+
+    # CHECK!!! - try disabling the garbage collector
+    #log.info ('enabling gc')
+    #gc.enable()
+
+
+
+
+    mem_use ('[run_force_phot_gaia] after executing [get_psfoptflux_mp]')
+
+
+    # calculate signal-to-noise ratio; applies to either the SNR
+    # of the limit or the matched source in the catalog
+    snr_opt = np.zeros_like(flux_opt, dtype='float32')
+    mask_nonzero = (fluxerr_opt != 0)
+    snr_opt[mask_nonzero] = (flux_opt[mask_nonzero] / fluxerr_opt[mask_nonzero])
+
+
+    # update table_gaia
+    table_gaia['E_FLUX_OPT'] = flux_opt.astype('float32')
+    table_gaia['E_FLUXERR_OPT'] = fluxerr_opt.astype('float32')
+    table_gaia['SNR_OPT'] = snr_opt
+    table_gaia['FLAGS_OPT'] = flags_opt.astype('uint8')
+    table_gaia['FLAGS_MASK'] = flags_mask.astype('uint8')
+    table_gaia['BACKGROUND'] = local_bkg_opt.astype('float32')
+
+
+    # source ID column is expected to be in capital letters
+    if 'source_id' in table_gaia.colnames:
+        table_gaia.rename_column('source_id', 'SOURCE_ID')
+        # sort by SOURCE_ID
+        table_gaia.sort('SOURCE_ID')
+
+
+    if get_par(set_zogy.timing,tel):
+        log_timing_memory (t0=t, label='in run_force_phot_gaia')
+
+
+    return table_gaia
+
+
+################################################################################
+
+def run_force_phot (fits_in, xcoords, yxcoords, obsdate, fwhm,
+                    data_wcs, data_mask, objmask, data_bkg_std,
+                    psfex_bintable, imtype='new', nthreads=1):
+
+
+    """function that performs forced photometry on [fits_in] at the
+    input pixel coordinates: xcoords, ycoords.
+
+    A table is returned, containing their pixel positions, aperture
+    and optimal electron fluxes and background. Along with the
+    original input columns of fits_gaia, where the ra,dec coordinates
+    include a correction for proper motion.
+
+    """
+
+    if get_par(set_zogy.timing,tel): t = time.time()
+    log.info('executing run_force_phot ...')
+
+
+    # set various parameters
+    nsigma = get_par(set_zogy.source_nsigma,tel)
+    apphot_radii = get_par(set_zogy.apphot_radii,tel)
+
+    # use local or global background?
+    bkg_global = (get_par(set_zogy.bkg_phototype,tel) == 'global')
+
+    # background annulus radii, objmask and limiting fraction
+    bkg_radii = get_par(set_zogy.bkg_radii,tel)
+    bkg_objmask = get_par(set_zogy.bkg_objmask,tel)
+    bkg_limfrac = get_par(set_zogy.bkg_limfrac,tel)
+
+
+    # remove PSF after measuring?
+    remove_psf = False
 
 
     # aperture fluxes
@@ -9827,13 +10103,6 @@ def run_force_phot (fits_in, header, fits_gaia, obsdate, ra_center, dec_center,
     table_gaia['FLAGS_OPT'] = flags_opt.astype('uint8')
     table_gaia['FLAGS_MASK'] = flags_mask.astype('uint8')
     table_gaia['BACKGROUND'] = local_bkg_opt.astype('float32')
-
-
-    # source ID column is expected to be in capital letters
-    if 'source_id' in table_gaia.colnames:
-        table_gaia.rename_column('source_id', 'SOURCE_ID')
-        # sort by SOURCE_ID
-        table_gaia.sort('SOURCE_ID')
 
 
     if get_par(set_zogy.timing,tel):
@@ -10791,15 +11060,17 @@ def idx_matching_values (a, b):
 
 def remove_files (filelist, verbose=False):
 
-    # assume all files are either google cloud or not, so sufficient
-    # to only check the 1st file
-    google_cloud = (filelist[0][0:5]=='gs://')
 
     # make sure files exist
     filelist = [f for f in filelist if isfile(f)]
     if len(filelist)==0:
-        log.warning ('no existing file(s) to remove')
+        #log.warning ('no existing file(s) to remove')
         return
+
+
+    # assume all files are either google cloud or not, so sufficient
+    # to only check the 1st file
+    google_cloud = (filelist[0][0:5]=='gs://')
 
 
     if verbose:
@@ -12209,7 +12480,8 @@ def get_chi2red (res, err, sigma=0, axis=None):
 ################################################################################
 
 def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
-              zp_err=None, xcoords=None, ycoords=None, return_fnu=False):
+              zp_err=None, xcoords=None, ycoords=None, return_fnu=False,
+              absflux=True):
 
     """Function that converts the array [flux in e-] into calibrated
     magnitudes using [zp in mag] (a scalar or array with same size as
@@ -12248,8 +12520,15 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
 
     # instrumental magnitudes
     mag_inst = np.zeros_like(flux)
-    mask_pos = (flux > 0)
-    mag_inst[mask_pos] = -2.5*np.log10(flux[mask_pos]/exptime)
+    if not absflux:
+        # only calculating mags for positive fluxes
+        mask_use = (flux > 0)
+        mag_inst[mask_use] = -2.5*np.log10(flux[mask_use]/exptime)
+    else:
+        # instead calculate mags using absolute flux
+        mask_use = (flux != 0)
+        mag_inst[mask_use] = -2.5*np.log10(np.abs(flux[mask_use])/exptime)
+
 
 
     # convert the instrumental mags; N.B.: although an airmass of 1.2
@@ -12257,8 +12536,8 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
     # airmass was used for the (hypothetical) standard star, so
     # calibration magnitudes are for airmass of 0
     mag = zp + mag_inst - airmass * ext_coeff
-    # set magnitudes of sources with non-positive fluxes to 99
-    mag[~mask_pos] = 99
+    # set magnitudes of sources with non-positive or zero fluxes to 99
+    mag[~mask_use] = 99
 
 
     # start output list
@@ -12269,7 +12548,7 @@ def apply_zp (flux, zp, airmass, exptime, ext_coeff, fluxerr=None,
     if fluxerr is not None:
 
         magerr = np.zeros_like(flux)
-        magerr[mask_pos] = pogson * fluxerr[mask_pos] / flux[mask_pos]
+        magerr[mask_use] = pogson * fluxerr[mask_use] / np.abs(flux[mask_use])
         list2return.append(magerr)
 
 
