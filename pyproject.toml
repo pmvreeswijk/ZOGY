@@ -1,29 +1,29 @@
 
 [build-system]
-requires = ['setuptools>=80', 'setuptools-scm>=8']
-build-backend = 'setuptools.build_meta'
+requires = ["setuptools>=80", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = 'zogy'
+name = "zogy"
 authors = [
-  {name = 'Paul Vreeswijk', email = 'pmvreeswijk@gmail.com'},
-  {name = 'Kerry Paterson'},
-  {name = 'Danielle Pieterse'},
+  {name = "Paul Vreeswijk", email = "pmvreeswijk@gmail.com"},
+  {name = "Kerry Paterson"},
+  {name = "Danielle Pieterse"},
 ]
-description = 'a Python implementation of proper image subtraction (ZOGY 2016, ApJ, 830, 27)'
-readme = 'README.md'
-requires-python = '>=3.6'
-license = 'MIT'
+description = "a Python implementation of proper image subtraction (ZOGY 2016, ApJ, 830, 27)"
+readme = "README.md"
+requires-python = ">=3.6"
+license = "MIT"
 dependencies = [
-    'numpy', 'astropy', 'matplotlib', 'scipy', 'psutil',
-    'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
-    'tensorflow-cpu', 'fitsio', 'fsspec', 'gcsfs']
-dynamic = ['version']
+    "numpy", "astropy", "matplotlib", "scipy", "psutil",
+    "pyfftw", "lmfit", "sip_tpv", "scikit-image", "healpy",
+    "tensorflow-cpu", "fitsio", "fsspec", "gcsfs"]
+dynamic = ["version"]
 
 [project.urls]
-Homepage = 'https://github.com/pmvreeswijk/ZOGY'
+Homepage = "https://github.com/pmvreeswijk/ZOGY"
 
 [tool.setuptools.packages.find]
-where = ['.']
-include = ['Settings']
-exclude = ['Config']
+where = ["."]
+include = ["Settings"]
+exclude = ["Config"]
