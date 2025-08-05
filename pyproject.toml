@@ -5,9 +5,11 @@ build-backend = 'setuptools.build_meta'
 
 [project]
 name = 'zogy'
+dynamic = ['version']
 authors = [
   {name = 'Paul Vreeswijk', email = 'pmvreeswijk@gmail.com'},
   {name = 'Kerry Paterson'},
+  {name = 'Danielle Pieterse'},
 ]
 description = 'a Python implementation of proper image subtraction (ZOGY 2016, ApJ, 830, 27)'
 readme = 'README.md'
