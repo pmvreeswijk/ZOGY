@@ -29,6 +29,7 @@ from astropy.time import Time
 from astropy import units as u
 from astropy.wcs import WCS
 from astropy.stats import SigmaClip
+from astropy.io import ascii
 
 import zogy
 import set_zogy
@@ -41,7 +42,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.2.8'
+__version__ = '1.3.0'
 
 
 ################################################################################
@@ -697,35 +698,24 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
                             imtype='trans', tel=tel, ncpus=ncpus)
 
 
-
     # reference; determining optimal fluxes
     # -------------------------------------
     if ref:
 
-        if tel == 'ML1':
-            # infer path to ref folder from basename
-            ref_dir = '{}/ref'.format(basename.split('/red/')[0])
-        else:
-            # for BlackGEM, refer to GCP bucket; refer to the right
-            # one depending on the processing environment
-            # (test/staging/production)
-            bucket_env = filename.split('gs://')[-1].split('blackgem-red')[0]
-            ref_dir = 'gs://{}blackgem-ref'.format(bucket_env)
+
+        # infer reference image basename including full path
+        basename_ref = get_basename_ref (basename, filename, tel, header)
+        log.info ('basename_ref: {}'.format(basename_ref))
 
 
+        # if name of reference image could not be inferred, provide
+        # warning
+        if basename_ref is None:
 
-        # read field ID and reference image name from header
-        if 'Z-REF' not in header:
-            log.warning ('header keyword Z-REF with reference image name not '
-                         'found; skipping extraction of magnitudes for {}'
+            log.warning ('skipping extraction of magnitudes for {}'
                          .format(basename))
+
         else:
-
-            obj, ref_name = header['OBJECT'], header['Z-REF']
-
-
-            # reference image basename including full path
-            basename_ref = '{}/{}/{}'.format(ref_dir, obj, ref_name)
 
             # reference mask image; input parameter fits_mask refers to
             # the reduced image mask
@@ -798,6 +788,36 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
 ################################################################################
 
+def get_basename_ref (basename, filename, tel, header):
+
+    if tel == 'ML1':
+        # infer path to ref folder from basename
+        ref_dir = '{}/ref'.format(basename.split('/red/')[0])
+    else:
+        # for BlackGEM, refer to GCP bucket; refer to the right
+        # one depending on the processing environment
+        # (test/staging/production)
+        bucket_env = filename.split('gs://')[-1].split('blackgem-red')[0]
+        ref_dir = 'gs://{}blackgem-ref'.format(bucket_env)
+
+
+    # read field ID and reference image name from header
+    if 'Z-REF' not in header:
+        log.warning ('header keyword Z-REF with reference image name not '
+                     'found for {}; returning None for basename_ref'
+                     .format(basename))
+        basename_ref = None
+    else:
+        # reference image basename including full path
+        obj, ref_name = header['OBJECT'], header['Z-REF']
+        basename_ref = '{}/{}/{}'.format(ref_dir, obj, ref_name)
+
+
+    return basename_ref
+
+
+################################################################################
+
 def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch, keys2add,
                 add_keys, thumbnails, size_tn, imtype='new', remove_psf=False,
@@ -829,6 +849,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
     # define fits_red in any case
     fits_red = '{}.fits.fz'.format(basename)
+    if not google_cloud:
+        fits_red = add_drop_fz (fits_red)
 
 
     if trans:
@@ -840,7 +862,16 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         fits_Scorr = '{}_Scorr.fits.fz'.format(basename)
         fits_D = '{}_D.fits.fz'.format(basename)
 
-        list2check = [fits_Fpsf, fits_trans, fits_tlimmag, fits_Scorr]
+        if not google_cloud:
+            fits_Fpsf = add_drop_fz (fits_Fpsf)
+            fits_tlimmag = add_drop_fz (fits_tlimmag)
+            fits_Scorr = add_drop_fz (fits_Scorr)
+            fits_D = add_drop_fz (fits_D)
+
+
+        list2check = [fits_Fpsf, fits_trans, fits_tlimmag, fits_Scorr,
+                      fits_D]
+
 
     else:
 
@@ -850,8 +881,19 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         fits_objmask = '{}_objmask.fits.fz'.format(basename)
         fits_bkg_std_mini = '{}_bkg_std_mini.fits.fz'.format(basename)
 
+        if not google_cloud:
+            fits_limmag = add_drop_fz (fits_limmag)
+            fits_objmask = add_drop_fz (fits_objmask)
+            fits_bkg_std_mini = add_drop_fz (fits_bkg_std_mini)
+
+
         list2check = [fits_red, psfex_bintable, fits_bkg_std_mini]
+
+
         if fits_mask is not None:
+            if not google_cloud:
+                fits_mask = add_drop_fz (fits_mask)
+
             list2check += [fits_mask]
 
 
@@ -860,9 +902,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
     if not google_cloud:
 
         for fn in list2check:
-            if fn is None or not zogy.isfile (fn):
+            fn_tmp = add_drop_fz (fn)
+            if fn_tmp is None or not zogy.isfile (fn_tmp):
                 log.warning ('{} not found; skipping extraction of {} magnitudes '
-                             'for {}'.format(fn, label, basename))
+                             'for {}'.format(fn_tmp, label, basename))
                 return table
 
     else:
@@ -1118,17 +1161,16 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
     if not trans:
 
         # determine background standard deviation using [get_bkg_std]
-        data_bkg_std = get_bkg_std (basename, xcoords, ycoords, data_shape,
-                                    imtype, tel)
+        data_bkg_std = get_bkg_std (fits_bkg_std_mini, xcoords, ycoords,
+                                    data_shape, imtype, tel)
 
-        # object mask - not always available, so first check if it
+        # object mask may not be available, so first check if it
         # exists
         if (fits_objmask is not None and zogy.isfile(fits_objmask)
             and bkg_objmask):
             #objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
             with fits.open(fits_objmask) as hdulist:
                 objmask = hdulist[-1].data.astype(bool)
-
         else:
             # if it does not exist, or input parameter bkg_objmask is
             # False, create an all-False object mask
@@ -1427,10 +1469,11 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
 
-    else:
+    elif trans:
 
         # read flux values at xcoords, ycoords
-        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices)
+        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices,
+                                 dpix=1)
 
         # get transient limiting magnitude at xcoord, ycoord
         # and convert it back to Fpsferr
@@ -1454,7 +1497,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
         # read off transient S/N from Scorr image
         snr_zogy = get_pixel_values (fits_Scorr, google_cloud,
-                                     y_indices, x_indices)
+                                     y_indices, x_indices, dpix=1)
 
 
         if zp_coords is not None:
@@ -1490,6 +1533,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         table['FNU_ZOGY'] = fnu_zogy.astype('float32')
         table['FNUERR_ZOGY'] = fnuerr_zogy.astype('float32')
         table['FNUERRTOT_ZOGY'] = fnuerrtot_zogy.astype('float32')
+
 
 
         # add transient thumbnail images
@@ -1580,8 +1624,8 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
     if zogy.isfile(fits_limmag):
 
         # infer limiting magnitudes
-        limmags = get_pixel_values (fits_limmag, google_cloud,
-                                    y_indices, x_indices)
+        limmags = get_pixel_values (fits_limmag, google_cloud, y_indices,
+                                    x_indices, dpix=0, get_max=False)
 
         # convert limmag from number of sigma listed
         # in the image header to input [nsigma]
@@ -1617,7 +1661,13 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
 
 ################################################################################
 
-def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
+def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
+                      dpix=0, get_max=True):
+
+    """infer pixel values from [filename] at indices [y_indices,
+       x_indices]; if dpix > 0, the maximum value over a square block
+       of pixels with width 2*dpix+1 is returned
+    """
 
     t1 = time.time()
 
@@ -1641,19 +1691,28 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
                 # indices one by one instead of data[y_indices, x_indices]
                 nvalues = len(y_indices)
                 # determine dtype of data
-                value0 = hdulist[-1].section[y_indices[0]:y_indices[0]+1,
-                                             x_indices[0]:x_indices[0]+1]
+                vals_tmp = hdulist[-1].section[
+                    y_indices[0]-dpix:y_indices[0]+1+dpix,
+                    x_indices[0]-dpix:x_indices[0]+1+dpix]
+                if get_max:
+                    value0 = np.max(vals_tmp)
+                else:
+                    value0 = np.min(vals_tmp)
+
                 values = np.zeros(nvalues, dtype=value0.dtype)
-                values[0] = value0[0][0]
+                values[0] = value0 #[0][0]
 
                 log.info ('{} value(s) extracted from {}:'.format(nvalues,
                                                                   filename))
                 if nvalues > 1:
                     for i in range(1,nvalues):
-                        values[i] = hdulist[-1].section[
-                            y_indices[i]:y_indices[i]+1,
-                            x_indices[i]:x_indices[i]+1][0][0]
-
+                        vals_tmp = hdulist[-1].section[
+                            y_indices[i]-dpix:y_indices[i]+1+dpix,
+                            x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
+                        if get_max:
+                            values[i] = np.max(vals_tmp)
+                        else:
+                            values[i] = np.min(vals_tmp)
 
     else:
 
@@ -1672,8 +1731,12 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None):
                          x_indices[0]:x_indices[0]+1].dtype
             values = np.zeros(nvalues, dtype=dtype)
             for i in range(nvalues):
-                values[i] = data[y_indices[i]:y_indices[i]+1,
-                                 x_indices[i]:x_indices[i]+1][0][0]
+                vals_tmp = data[y_indices[i]-dpix:y_indices[i]+1+dpix,
+                                x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
+                if get_max:
+                    values[i] = np.max(vals_tmp)
+                else:
+                    values[i] = np.min(vals_tmp)
 
 
     log.info ('wall-time spent in get_pixel_values: {:.3f}s'
@@ -1702,9 +1765,11 @@ def get_keys (header, ra_in, dec_in, tel):
     __, zp_std, zp_err = zogy.get_zp_header(header, set_zogy=set_zogy)
 
 
-    # determine object airmass, unless input image is a combined
-    # image
-    if 'R-V' in header or 'R-COMB-M' in header:
+    # determine airmass for ra_in and dec_in; for older reference
+    # images, airmass of the combined image was forced to be unity, so
+    # in that case adopt airmass=1. Otherwise, infer airmass(es) using
+    # coordinates and obsdate
+    if 'AIRMASS' in header and header['AIRMASS']==1.0:
         airmass = 1.0
     else:
         lat = zogy.get_par(set_zogy.obs_lat,tel)
@@ -1722,10 +1787,9 @@ def get_keys (header, ra_in, dec_in, tel):
 
 ################################################################################
 
-def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
+def get_bkg_std (fits_bkg_std_mini, xcoords, ycoords, data_shape, imtype, tel):
 
     # create background STD from mini image
-    fits_bkg_std_mini = '{}_bkg_std_mini.fits.fz'.format(basename)
     with fits.open(fits_bkg_std_mini) as hdulist:
         data_bkg_std_mini = hdulist[-1].data.astype('float32')
         header_mini = hdulist[-1].header
@@ -1753,6 +1817,11 @@ def get_bkg_std (basename, xcoords, ycoords, data_shape, imtype, tel):
         chancorr = zogy.get_par(set_zogy.MLBG_chancorr,tel)
         interp_Xchan_std = zogy.get_Xchan_bool (tel, chancorr, imtype,
                                                 std=True)
+        # if shape different from single ML/BG image, also
+        # allow to do cross-channel interpolation
+        if data_shape != zogy.get_par(set_zogy.shape_new,tel):
+            interp_Xchan_std = True
+
         data_bkg_std = zogy.mini2back (
             data_bkg_std_mini, data_shape, order_interp=1,
             bkg_boxsize=bkg_size, interp_Xchan=interp_Xchan_std,
@@ -2871,8 +2940,24 @@ if __name__ == "__main__":
     log.info ('merging list of dictionaries from [index_images] into a single '
               'dictionary')
     index_images_dict = {}
-    for d in results:
+    for i, d in enumerate(results):
         index_images_dict.update(d)
+
+
+    if False:
+        for k in index_images_dict.keys():
+            log.info ('k: {}, len(index_images_dict[k]): {}'
+                      .format(k, len(index_images_dict[k])))
+            # write file with list of images
+            t_tmp = Table()
+            t_tmp['filenames'] = index_images_dict[k]
+            ascii.write (t_tmp, 'filenames_{}.dat'.format(k),
+                         format='fixed_width_no_header',
+                         delimiter=' ', overwrite=True)
+
+            raise SystemExit
+
+
 
     if False:
         for k in index_images_dict.keys():
