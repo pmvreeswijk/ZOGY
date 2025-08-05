@@ -5,7 +5,7 @@ build-backend = 'setuptools.build_meta'
 
 [project]
 name = 'zogy'
-dynamic = ['version']
+version =
 authors = [
   {name = 'Paul Vreeswijk', email = 'pmvreeswijk@gmail.com'},
   {name = 'Kerry Paterson'},
