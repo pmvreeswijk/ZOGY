@@ -1,10 +1,12 @@
 
 [build-system]
-requires = ['setuptools>=80', 'setuptools-scm>=8']
+requires = ['setuptools'] #, 'setuptools-scm']
 build-backend = 'setuptools.build_meta'
 
 [project]
 name = 'zogy'
+version = '1.6.4'
+#dynamic = ['version']
 authors = [
   {name = 'Paul Vreeswijk', email = 'pmvreeswijk@gmail.com'},
   {name = 'Kerry Paterson'},
@@ -17,8 +19,7 @@ license = 'MIT'
 dependencies = [
     'numpy', 'astropy', 'matplotlib', 'scipy', 'psutil',
     'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
-    'tensorflow-cpu', 'fitsio', 'fsspec', 'gcsfs']
-dynamic = ['version']
+    'tensorflow-cpu', 'protobuf<6', 'fitsio', 'fsspec', 'gcsfs']
 
 [project.urls]
 Homepage = 'https://github.com/pmvreeswijk/ZOGY'
@@ -27,5 +28,3 @@ Homepage = 'https://github.com/pmvreeswijk/ZOGY'
 where = ['.']
 include = ['Settings']
 exclude = ['Config']
-
-[tool.setuptools_scm]
