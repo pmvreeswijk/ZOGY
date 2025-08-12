@@ -2502,13 +2502,13 @@ def get_probability (events, model_file, normed_size = 40):
 
     # tensorflow
     import tensorflow as tf
-    from keras.layers import LeakyReLU
 
 
     # Import model and extract input shape
-    if False:
+    if True:
         model = tf.keras.models.load_model(model_file)
     else:
+        from keras.layers import LeakyReLU
         model = tf.keras.models.load_model(model_file, custom_objects={
             #'dice_BCE_loss': dice_BCE_loss,
             'LeakyReLU': LeakyReLU})
@@ -2716,13 +2716,13 @@ def get_probability_aug2024 (events, model_file):
 
     # tensorflow
     import tensorflow as tf
-    from keras.layers import LeakyReLU
 
 
     # Import model and extract input shape
-    if False:
+    if True:
         model = tf.keras.models.load_model(model_file)
     else:
+        from keras.layers import LeakyReLU
         model = tf.keras.models.load_model(model_file, custom_objects={
             #'dice_BCE_loss': dice_BCE_loss,
             'LeakyReLU': LeakyReLU})
@@ -11066,8 +11066,8 @@ def remove_files (filelist, verbose=False):
 
     if not google_cloud:
 
+        hostname = socket.gethostname()
         for f in filelist:
-            hostname = socket.gethostname()
             if 'coma' in hostname and 'astro11' in f:
                 cmd = ['ssh', 'astro11-srv', 'rm', f]
                 result = subprocess.run(cmd)
