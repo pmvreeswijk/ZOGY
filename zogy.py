@@ -18,6 +18,7 @@ import gc
 import numbers
 import psutil
 import inspect
+import socket
 
 
 import multiprocessing as mp
@@ -11064,8 +11065,15 @@ def remove_files (filelist, verbose=False):
 
 
     if not google_cloud:
+
         for f in filelist:
-            os.remove(f)
+            hostname = socket.gethostname()
+            if 'coma' in hostname and 'astro11' in f:
+                cmd = ['ssh', 'astro11-srv', 'rm', f]
+                result = subprocess.run(cmd)
+            else:
+                os.remove(f)
+
     else:
         # gsutil command (not actively supported anymore)
         cmd = ['gsutil', '-m', '-q', 'rm', '-I']
