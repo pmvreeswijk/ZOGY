@@ -2501,11 +2501,19 @@ def get_probability (events, model_file, normed_size = 40):
 
     # tensorflow
     import tensorflow as tf
+    from keras.layers import LeakyReLU
 
 
     # Import model and extract input shape
-    model = tf.keras.models.load_model(model_file)
+    if False:
+        model = tf.keras.models.load_model(model_file)
+    else:
+        model = tf.keras.models.load_model(model_file, custom_objects={
+            #'dice_BCE_loss': dice_BCE_loss,
+            'LeakyReLU': LeakyReLU})
+
     input_shape = model.layers[0].input_shape[0]
+
 
     # Run checks on inputs
     if input_shape[1] != input_shape[2]:
@@ -2707,11 +2715,19 @@ def get_probability_aug2024 (events, model_file):
 
     # tensorflow
     import tensorflow as tf
+    from keras.layers import LeakyReLU
 
 
     # Import model and extract input shape
-    model = tf.keras.models.load_model(model_file)
+    if False:
+        model = tf.keras.models.load_model(model_file)
+    else:
+        model = tf.keras.models.load_model(model_file, custom_objects={
+            #'dice_BCE_loss': dice_BCE_loss,
+            'LeakyReLU': LeakyReLU})
+
     input_shape = model.layers[0].input_shape[0]
+
 
     # Run checks on inputs
     if len(events.shape) != len(input_shape):
@@ -9864,11 +9880,6 @@ def run_force_phot_gaia (fits_in, header, fits_gaia, obsdate, ra_center,
         nthreads=nthreads)
 
 
-    # CHECK!!! - for debugging
-    log.info ('(after get_apflux) files in /dev/shm: {}'
-              .format(glob.glob('/dev/shm/*')))
-
-
     # add various aperture columns to table
     for i_rad, radius in enumerate(apphot_radii):
 
@@ -9906,16 +9917,6 @@ def run_force_phot_gaia (fits_in, header, fits_gaia, obsdate, ra_center,
     mask_fit_local_bkg = (local_bkg==0)
 
 
-    # CHECK!!! - for debugging
-    log.info ('(before get_psfoptflux_mp) files in /dev/shm: {}'
-              .format(glob.glob('/dev/shm/*')))
-
-
-    # CHECK!!! - try disabling the garbage collector
-    #log.info ('disabling gc')
-    #gc.disable()
-
-
     # determine optimal fluxes at pixel coordinates
     flux_opt, fluxerr_opt, local_bkg_opt, flags_opt, flags_mask = \
         get_psfoptflux_mp(
@@ -9924,18 +9925,6 @@ def run_force_phot_gaia (fits_in, header, fits_gaia, obsdate, ra_center,
             mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
             get_flags_opt=True, get_flags_mask_inner=True, set_zogy=set_zogy,
             tel=tel, nthreads=nthreads)
-
-
-    # CHECK!!! - for debugging
-    log.info ('(after get_psfoptflux_mp) files in /dev/shm: {}'
-              .format(glob.glob('/dev/shm/*')))
-
-
-    # CHECK!!! - try disabling the garbage collector
-    #log.info ('enabling gc')
-    #gc.enable()
-
-
 
 
     mem_use ('[run_force_phot_gaia] after executing [get_psfoptflux_mp]')
