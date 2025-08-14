@@ -18,7 +18,7 @@ requires-python = '>=3.6'
 license = 'MIT'
 dependencies = [
     'numpy', 'astropy', 'matplotlib', 'scipy', 'psutil',
-    'pyfftw', 'lmfit', 'sip_tpv', 'setuptools<81', 'scikit-image', 'healpy',
+    'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
     'tensorflow-cpu', 'protobuf<6', 'fitsio', 'fsspec', 'gcsfs']
 
 [project.urls]
