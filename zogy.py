@@ -10,6 +10,7 @@ import resource
 import traceback
 import warnings
 warnings.filterwarnings('ignore', '.*output shape of zoom.*')
+warnings.filterwarnings('ignore', category=UserWarning, module='pkg_resources')
 from functools import partial
 import math
 import collections
@@ -2505,14 +2506,7 @@ def get_probability (events, model_file, normed_size = 40):
 
 
     # Import model and extract input shape
-    if True:
-        model = tf.keras.models.load_model(model_file)
-    else:
-        from keras.layers import LeakyReLU
-        model = tf.keras.models.load_model(model_file, custom_objects={
-            #'dice_BCE_loss': dice_BCE_loss,
-            'LeakyReLU': LeakyReLU})
-
+    model = tf.keras.models.load_model(model_file)
     input_shape = model.layers[0].input_shape[0]
 
 
@@ -2719,14 +2713,7 @@ def get_probability_aug2024 (events, model_file):
 
 
     # Import model and extract input shape
-    if True:
-        model = tf.keras.models.load_model(model_file)
-    else:
-        from keras.layers import LeakyReLU
-        model = tf.keras.models.load_model(model_file, custom_objects={
-            #'dice_BCE_loss': dice_BCE_loss,
-            'LeakyReLU': LeakyReLU})
-
+    model = tf.keras.models.load_model(model_file)
     input_shape = model.layers[0].input_shape[0]
 
 
