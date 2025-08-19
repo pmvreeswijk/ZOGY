@@ -2507,7 +2507,12 @@ def get_probability (events, model_file, normed_size = 40):
 
     # Import model and extract input shape
     model = tf.keras.models.load_model(model_file)
-    input_shape = model.layers[0].input_shape[0]
+    if 'h5' in model_file:
+        # old tensorflow 2.13
+        input_shape = model.layers[0].input_shape[0]
+    elif 'keras' in model_file:
+        # tensorflow 2.19+
+        input_shape = model.input_shape
 
 
     # Run checks on inputs
@@ -2522,6 +2527,7 @@ def get_probability (events, model_file, normed_size = 40):
     if events.shape[1] < normed_size or events.shape[2] <normed_size:
         raise Exception(f"Input images too small, must be at least be size "
                         "defined by normed_size ({normed_size}x{normed_size})")
+
 
     # Norm events after cropping center to relevant size
     normed_events = robust_Z_norm(central_crop(events, normed_size))
@@ -2714,16 +2720,29 @@ def get_probability_aug2024 (events, model_file):
 
     # Import model and extract input shape
     model = tf.keras.models.load_model(model_file)
-    input_shape = model.layers[0].input_shape[0]
+    if 'h5' in model_file:
+        # old tensorflow 2.13
+        input_shape = model.layers[0].input_shape[0]
+    elif 'keras' in model_file:
+        # tensorflow 2.19+
+        input_shape = model.input_shape
 
 
     # Run checks on inputs
     if len(events.shape) != len(input_shape):
-        raise Exception(f"Incorrect number of input dimensions found shape {events.shape} (number of input dimensions should be ({len(input_shape)}). For single events use batch of size 1")
+        raise Exception(f"Incorrect number of input dimensions found shape "
+                        "{events.shape} (number of input dimensions should be "
+                        "({len(input_shape)}). For single events use batch of "
+                        "size 1")
     if events.shape[3] != input_shape[3]:
-        raise Exception(f"Incorrect number of image channels given. Expected {input_shape[3]} but found {events.shape[3]}")
+        raise Exception(f"Incorrect number of image channels given. Expected "
+                        "{input_shape[3]} but found {events.shape[3]}")
     if events.shape[1] < input_shape[1] or events.shape[2] < input_shape[2]:
-        raise Exception(f"Event images smaller than model input. Model requires at least size ({input_shape[1]},{input_shape[2]}) but found event images of size ({events.shape[1]},{events.shape[2]})")
+        raise Exception(f"Event images smaller than model input. Model requires "
+                        "at least size ({input_shape[1]},{input_shape[2]}) but "
+                        "found event images of size "
+                        "({events.shape[1]},{events.shape[2]})")
+
 
     # Norm events after cropping center to relevant size
     #normed_events = log_z_norm_super(central_crop_aug2024 (events, input_shape))
