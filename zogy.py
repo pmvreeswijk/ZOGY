@@ -9,8 +9,9 @@ import importlib
 import resource
 import traceback
 import warnings
-warnings.filterwarnings('ignore', '.*output shape of zoom.*')
-warnings.filterwarnings('ignore', category=UserWarning, module='pkg_resources')
+warnings.filterwarnings('ignore', message=r'.*output shape of zoom.*')
+warnings.filterwarnings('ignore', category=UserWarning, module=r'.*parallel*.')
+warnings.filterwarnings('ignore', category=UserWarning, module=r'.*sklearn*.')
 from functools import partial
 import math
 import collections
@@ -2507,6 +2508,7 @@ def get_probability (events, model_file, normed_size = 40):
 
     # Import model and extract input shape
     model = tf.keras.models.load_model(model_file)
+    log.info ('loaded model file {}'.format(model_file))
     if 'h5' in model_file:
         # old tensorflow 2.13
         input_shape = model.layers[0].input_shape[0]
@@ -2716,16 +2718,25 @@ def get_probability_aug2024 (events, model_file):
 
     # tensorflow
     import tensorflow as tf
+    from keras import Input
+    from keras.models import Model
+    from keras.layers import TFSMLayer
 
 
     # Import model and extract input shape
-    model = tf.keras.models.load_model(model_file)
     if 'h5' in model_file:
+        model = tf.keras.models.load_model(model_file)
+        log.info ('loaded model file {}'.format(model_file))
         # old tensorflow 2.13
         input_shape = model.layers[0].input_shape[0]
-    elif 'keras' in model_file:
+    else:
         # tensorflow 2.19+
+        smlayer = TFSMLayer(model_file, call_endpoint='serving_default')
+        inp = Input(shape=(30,30,4))
+        out = smlayer(inp)
+        model = Model(inputs=inp, outputs=out)
         input_shape = model.input_shape
+        log.info ('loaded model dir {}'.format(model_file))
 
 
     # Run checks on inputs
@@ -3192,7 +3203,9 @@ def list_files (path, search_str='', end_str='', start_str=None,
 
 
     #log.info ('files returned by [list_files]: {}'.format(files))
-    log.info ('number of files returned by [list_files]: {}'.format(len(files)))
+    nfiles = len(files)
+    if nfiles > 0:
+        log.info ('number of files returned by [list_files]: {}'.format(nfiles))
 
 
     return files
