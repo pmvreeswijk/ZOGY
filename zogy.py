@@ -4033,7 +4033,7 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
 
     # save light version of transient catalog before heavy
     # thumbnails are added
-    if cat_type == 'trans':
+    if cat_type == 'trans' and save_thumbnails:
 
         header['FORMAT-P'] = (True, 'successfully formatted catalog')
         header['DATEFILE'] = (Time.now().isot, 'UTC date of writing file')
