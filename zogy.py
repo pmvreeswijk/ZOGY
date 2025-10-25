@@ -6970,9 +6970,9 @@ def get_psfoptflux_loop (
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
-                log.exception('exception in [flux_optimal] for object at pixel '
-                              'coordinates: {:.0f}, {:.0f}; returning zero '
-                              'flux_opt and fluxerr_opt'.format(x,y))
+                log.error('exception in [flux_optimal] for object at pixel '
+                          'coordinates: {:.0f}, {:.0f}; returning zero '
+                          'flux_opt and fluxerr_opt'.format(x,y))
 
                 # update flags_opt
                 flags_opt[i] |= flags_opt_dict['exception']
@@ -7815,7 +7815,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
             # indicate that global sky background is adopted
             flags_opt |= flags_opt_dict['bkg_global']
 
-            if True:
+            if False:
                 log.warning ('local sky fit in flux_optimal not successful for '
                              'source at ({:.0f},{:.0f})'.format(x,y, sky_bkg))
                 #log.info (fit_report(result))
@@ -8005,7 +8005,7 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
         # abs(flux_opt_old-flux_opt)/fluxerr_opt)
 
         if fluxerr_opt==0:
-            log.warning ('fluxerr_opt = 0 in flux_optimal_iter()')
+            #log.warning ('fluxerr_opt = 0 in flux_optimal_iter()')
             break
 
 
@@ -8025,9 +8025,12 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
             # use [nsigma_inn] as the rejection criterium for the
             # inner region defined by [mask_inn]; outside of that
             # use [nsigma_out]
-            sigma2 = (D - flux_opt * P)**2
-            mask_pos = (V > 0)
-            sigma2[mask_pos] /= V[mask_pos]
+            try:
+                sigma2 = (D - flux_opt * P)**2
+                mask_pos = (V > 0)
+                sigma2[mask_pos] /= V[mask_pos]
+            except:
+                log.error ('issue calculating sigma2 in flux_optimal_iter()')
 
 
             # inner/outer masks with pixels to be rejected this
