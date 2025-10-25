@@ -123,7 +123,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.4'
+__version__ = '1.6.5'
 
 
 ################################################################################
@@ -4391,6 +4391,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # determine its detection threshold.
     nsigma_norm = get_par(set_zogy.transient_nsigma,tel) #/ std_Scorr
     mask_signif = np.abs(table_trans['SNR_ZOGY']) >= nsigma_norm
+    trans_rejected_position (table_trans, ~mask_signif, 'abs(SNR_ZOGY)<6')
     table_trans = table_trans[mask_signif]
     log.info ('transient detection threshold: {}'.format(nsigma_norm))
     log.info ('ntrans after threshold cut: {}'.format(len(table_trans)))
@@ -4420,6 +4421,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                      .format(val, np.sum(mask_discard)))
 
     if not keep_all:
+        trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK')
         table_trans = table_trans[~mask_flags]
 
     log.info ('ntrans after FLAGS_MASK cut: {}'.format(len(table_trans)))
@@ -4448,6 +4450,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                      .format(val, np.sum(mask_discard)))
 
     if not keep_all:
+        trans_rejected_position (table_trans, mask_flags, 'FLAGS')
         table_trans = table_trans[~mask_flags]
 
     log.info ('ntrans after FLAGS cut: {}'.format(len(table_trans)))
@@ -4466,6 +4469,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     mask_elong = (table_trans['ELONGATION'] <= 5)
     if not keep_all:
+        trans_rejected_position (table_trans, ~mask_elong, 'ELONGATION > 5')
         table_trans = table_trans[mask_elong]
 
     log.info ('ntrans after ELONGATION cut: {}'.format(len(table_trans)))
@@ -4562,7 +4566,6 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                  (np.abs(table_trans['SNR_ZOGY']) >= chi2_snr_limit))
 
 
-
     row_numbers = np.arange(len(table_trans))+1
     # discard rows where fit values are infinite or NaN
     for col in colnames:
@@ -4575,6 +4578,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                          .format(col, nbad, fits_new, row_numbers[~mask_finite]))
     # filter
     if not keep_all:
+        trans_rejected_position (table_trans, ~mask_keep, 'CHI2_PSF_D > {} or '
+                                 'infinite/NaN fit values (see above)'
+                                 .format(chi2_max))
         table_trans = table_trans[mask_keep]
 
     log.info('ntrans after PSF_D fit chi2 filter: {}'.format(len(table_trans)))
@@ -4604,6 +4610,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     nsigma = get_par(set_zogy.transient_nsigma,tel)
     mask_keep = (np.abs(s2n_psfD) >= nsigma) | ~mask_nonzero
     if not keep_all:
+        trans_rejected_position (table_trans, ~mask_keep, 'SNR(PSF_D) < {}'
+                                 .format(nsigma))
         table_trans = table_trans[mask_keep]
 
 
@@ -4617,6 +4625,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # require central flags to be zero
     mask_keep = (table_trans['FLAGS_CENTRAL'] == 0)
     if not keep_all:
+        trans_rejected_position (table_trans, ~mask_keep, 'FLAGS_CENTRAL != 0')
         table_trans = table_trans[mask_keep]
 
 
@@ -4675,6 +4684,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                              .format(col, nbad, fits_new))
         # filter
         if not keep_all:
+            trans_rejected_position (table_trans, ~mask_keep, 'CHI2_GAUSS_D > {} '
+                                     'or infinite/Nan fit values (see above)'
+                                     .format(chi2_max))
             table_trans = table_trans[mask_keep]
 
         log.info('ntrans after Gauss fit chi2 filter: {}'
@@ -4907,6 +4919,18 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     return table_trans
+
+
+################################################################################
+
+def trans_rejected_position (table, mask, reason):
+
+    nmask = np.sum(mask)
+    log.info ('{} transients rejected; reason: {}'.format(nmask, reason))
+    xpos = table[mask]['X_PEAK'].value
+    ypos = table[mask]['Y_PEAK'].value
+    for i in range(nmask):
+        log.info ('{}, {}'.format(x[i], y[i]))
 
 
 ################################################################################
