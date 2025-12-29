@@ -8808,6 +8808,8 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         zp_nsubs_shape = get_par(set_zogy.zp_nsubs_shape_ref,tel)
 
 
+    log.info ('zp_nsubs_shape: {}'.format(zp_nsubs_shape))
+
 
     # based on the settings parameter [force_phot_gaia], either
     # perform forced photometry on the coordinates from an input
@@ -10810,9 +10812,9 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
 
-        if tel[0:2] in ['ML', 'BG']:
+        if tel[0:2] in ['ML', 'BG'] and imtype != 'ref':
 
-            # apply statistics below for ML/BG images on 8x8
+            # apply statistics below for new ML/BG images on 8x8
             # subimages for backward compatibility
             zp_subs, zp_std_subs, zp_err_subs, ncal_used_subs, __ = calc_zp (
                 x_array, y_array, zp_array, zp_err_array,
@@ -10872,12 +10874,46 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
             # need to match positions of calibration stars with
             # positions in fits_cat, which does not contain the Gaia
             # source ID (catalog created by Source Extractor)
-            idx_cat, __ = get_matches_pix(
-                table_cat['X_POS'].value.astype('float32'),
-                table_cat['Y_POS'].value.astype('float32'),
-                table_cal['x_pos'].value,
-                table_cal['y_pos'].value,
-                dist_max=2*fwhm, return_offsets=False)
+
+            if False:
+                idx_cat, __ = get_matches_pix(
+                    table_cat['X_POS'].value.astype('float32'),
+                    table_cat['Y_POS'].value.astype('float32'),
+                    table_cal['x_pos'].value.astype('float32'),
+                    table_cal['y_pos'].value.astype('float32'),
+                    dist_max=2*fwhm, return_offsets=False)
+            else:
+
+                # get_matches_pix often leads to memory issue because
+                # of construction of large 2D matrix of type float64;
+                # use get_matches() instead
+
+                # convert 2*fwhm limit to arcseconds
+                if imtype == 'new':
+                    pixscale = pixscale_new
+                elif imtype == 'ref':
+                    pixscale = pixscale_ref
+
+                dist_max = 2 * fwhm * pixscale
+
+
+                # convert table_cat pixel positions to ra,dec
+                ra_cat, dec_cat = WCS(header).all_pix2world(
+                    table_cat['X_POS'].value,
+                    table_cat['Y_POS'].value, 1)
+
+
+                # now match
+                idx_cat, __ = get_matches (ra_cat, dec_cat,
+                                           table_cal['ra'].value,
+                                           table_cal['dec'].value,
+                                           dist_max=dist_max,
+                                           return_offsets=False)
+
+
+                log.info ('{} matches within {:.2f} arcsec between catalog '
+                          'entries and calibration stars'
+                          .format(len(idx_cat), dist_max))
 
 
 
@@ -10941,7 +10977,7 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
 
         # for MeerLICHT and BlackGEM only
-        if tel[0:2] in ['ML','BG']:
+        if tel[0:2] in ['ML','BG'] and imtype != 'ref':
 
             # calculate zeropoint for each channel
             zp_chan, zp_std_chan, zp_err_chan, ncal_chan, __ = calc_zp (
