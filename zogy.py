@@ -16520,7 +16520,7 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         # select configuration file closest to image epoch, replacing
         # the default one
         idx_min = np.argmin(np.abs(np.array(epochs_cfg) - epoch_img))
-        anet_cfg = '{}/{}'.format(anet_cfg_dir, cfg_list[idx_min])
+        anet_cfg = cfg_list[idx_min]
 
 
 
