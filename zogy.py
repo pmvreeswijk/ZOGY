@@ -16492,9 +16492,43 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
                  .replace('[','').replace(']','').replace(' ',''))
 
 
+    # default astrometry.net config file
+    anet_cfg = get_par(set_zogy.astronet_config,tel)
+
+
+    # to allow the use of index files at different (proper-motion)
+    # epochs, look for config files ending with
+    # "_epoch20??.[extension] or "_epoch20??p?.[extension] in the same
+    # folder as the main config file; those would need to point to the
+    # folder with the index files at that particular epoch.  N.B.: it
+    # is important that a possible fractional epoch is written using a
+    # "p" instead of ".", otherwise the fraction of the year is not
+    # taken into account. Also, the filename is assumed to contain at
+    # most one period.
+    anet_cfg_dir = os.path.dirname(anet_cfg)
+    cfg_list = list_files (anet_cfg_dir, search_str='_epoch')
+    if len(cfg_list) > 0:
+
+        # extract epoch in floating point from config filenames
+        epochs_cfg = [float(fn.split('epoch')[-1].split('.')[0]
+                            .replace('p','.')) for fn in cfg_list]
+
+        # infer current image epoch from header
+        obsdate = read_header (header, ['obsdate'])
+        epoch_img = Time(obsdate).decimalyear
+
+        # select configuration file closest to image epoch, replacing
+        # the default one
+        idx_min = np.argmin(np.abs(np.array(epochs_cfg) - epoch_img))
+        anet_cfg = '{}/{}'.format(anet_cfg_dir, cfg_list[idx_min])
+
+
+
+    log.info ('Astrometry.net config file to be used: {}'.format(anet_cfg))
+
     # solve-field command
     cmd = ['solve-field', '--no-plots',
-           '--config', get_par(set_zogy.astronet_config,tel),
+           '--config', anet_cfg,
            #'--no-fits2fits', cloud version of astrometry does not have this arg
            '--x-column', 'X_POS',
            '--y-column', 'Y_POS',
