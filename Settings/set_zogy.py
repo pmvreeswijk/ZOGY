@@ -64,14 +64,14 @@ orient_thumbnails = True # orient thumbnails in North up, East left orientation?
 
 
 # switch to use old or new (~June 2024) transient catalog definition
-use_new_transcat = {'ML1': False, 'BG': True}
+use_new_transcat = {'ML1': True, 'BG': True}
 
 
 # use "flattened" new image with subimage zeropoints (as defined with
 # zp_nsubs_shape_new below) in optimal image subraction; if reference
 # images have not been flattened (set with set_br.scale_zps), then
 # (probably) best to set scale_zps_sub to False as well
-scale_zps_sub = {'ML1': False, 'BG': True}
+scale_zps_sub = {'ML1': True, 'BG': True}
 
 
 #===============================================================================
@@ -246,6 +246,8 @@ astronet_depth_step = 50
 # new catalog based on DR3
 #cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_g10-17_HPfine12.fits'
 #           .format(cal_dir))
+# HP level 12 corresponds to ~13,000 tiles in one ML/BG pointing,
+# so picking 1 star for each tile leaves plenty of calstars
 cal_cat = ('{}/GaiaDR3_calcat_MLBG_HP3_highPM_HPfine12_npick1_q17.fits'
            .format(cal_dir))
 cal_epoch = 2016.0
@@ -276,7 +278,7 @@ ast_nbright = 1500       # brightest no. of objects in the field to
 # the significant sources detected by Source Extractor, where the
 # threshold can be adjusted in the configuration file (see sex_cfg
 # further below)
-force_phot_gaia = {'ML1': False, 'BG': True}
+force_phot_gaia = {'ML1': True, 'BG': True}
 gaia_cat = '{}/GaiaDR3_all_HP4_highPM.fits'.format(cal_dir)
 gaia_epoch = 2016.0
 
@@ -289,7 +291,7 @@ remove_psf = True
 
 # switch to record fluxes in microJy instead of AB mags in full-source
 # catalog; only relevant if force_phot_Gaia is True
-record_fnu = {'ML1': False, 'BG': True}
+record_fnu = {'ML1': True, 'BG': True}
 
 
 # aperture photometry radii in units of FWHM
@@ -376,7 +378,7 @@ zp_default = {'ML1': {'u':22.4, 'g':23.3, 'q':23.8, 'r':22.9, 'i':22.3, 'z':21.4
 # image with shape (1024,2048), the zeropoints are determined on
 # subimages with shape (512,512); the zeropoint subimage sizes should
 # fit integer times into the full image
-zp_nsubs_shape_new = {'ML1': (1,1), 'BG': (16,16)}
+zp_nsubs_shape_new = {'ML1': (16,16), 'BG': (16,16)}
 zp_nsubs_shape_ref = {'ML1': (1,1), 'BG': (1,1)}
 
 # minimum number of non-saturated stars required (after sigma
