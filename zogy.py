@@ -4888,6 +4888,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
         mask_neg = (((fnu_tot / fnuerr_tot) < 3) &
                     ((fnu_opt_ref / fnuerr_opt_ref) < -3))
+        trans_rejected_position (table_trans, mask_neg,
+                                 'negative flux in reference image')
         table_trans = table_trans[~mask_neg]
         log.info ('{} transients discarded whose flux can be explained '
                   'by a negative flux in reference image'
@@ -4896,8 +4898,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
         # also discard transients with nonzero flag in reference image?
         mask_nonzeroflag = (table_trans['FLAGS_MASK_REF'] != 0)
+        trans_rejected_position (table_trans, mask_nonzeroflag,
+                                 'non-zero flag in reference image')
         table_trans = table_trans[~mask_nonzeroflag]
-
         log.info ('{} transients discarded with nonzero flags in '
                   'reference image'.format(np.sum(mask_nonzeroflag)))
 
@@ -16523,8 +16526,6 @@ def run_wcs (image_in, ra, dec, pixscale, width, height, header, imtype):
         anet_cfg = cfg_list[idx_min]
 
 
-
-    log.info ('Astrometry.net config file to be used: {}'.format(anet_cfg))
 
     # solve-field command
     cmd = ['solve-field', '--no-plots',
