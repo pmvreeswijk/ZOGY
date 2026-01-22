@@ -123,7 +123,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.5'
+__version__ = '1.6.6'
 
 
 ################################################################################
@@ -1086,24 +1086,58 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         mem_use (label='just after run_ZOGY')
 
-        if 'data_Scorr_full' not in locals():
-            data_Scorr_full = read_hdulist('{}_Scorr.fits'.format(base_newref))
 
-        if 'data_Fpsferr_full' not in locals():
-            data_Fpsferr_full = read_hdulist('{}_Fpsferr.fits'.format(base_newref))
+        # define various fits names, mainly for the transient
+        # extraction
+        fits_names = define_fits_names(base_new, base_ref, base_newref,
+                                       new_fits, new_fits_mask,
+                                       ref_fits, ref_fits_mask)
+        base_remap, fits_new, fits_ref, fits_new_bkg_std, fits_ref_bkg_std, \
+            fits_Scorr, fits_D, fits_Fpsf, fits_Fpsferr, \
+            fits_new_mask, fits_ref_mask, fits_new_psf, fits_ref_psf, \
+            fits_new_cat, fits_ref_cat = fits_names
+
+
+        # combine new and remapped ref mask
+        data_new_mask = read_hdulist (fits_new_mask, dtype='uint8')
+        data_ref_mask = read_hdulist (fits_ref_mask, dtype='uint8')
+        data_newref_mask = (data_new_mask | data_ref_mask)
+        fits_newref_mask = '{}_mask_newref.fits'.format(base_newref)
+        fits.writeto (fits_newref_mask, data_newref_mask, overwrite=True)
+
 
         # compute statistics on Scorr image and show histogram
         # discarding the edge, and using a fraction of the total image
-        edge = 100
+        if 'data_Scorr_full' not in locals():
+            data_Scorr_full = read_hdulist('{}_Scorr.fits'.format(base_newref))
+
+
+        # infer first and last x- and y-indices that are not affected
+        # by the edge in the combined mask
+        x1, x2, y1, y2 = get_edge_indices (data_newref_mask)
+        # to use in get_trans()
+        xy_edge = (x1,x2,y1,y2)
+
+        # fraction of new image that is covered by ref image
+        frac_newref = (x2-x1) * (y2-y1) / (xsize_new * ysize_new)
+        log.info ('fraction of new image covered by ref: {:.3f}'
+                  .format(frac_newref))
+        header_trans['Z-REFCOV'] = (frac_newref,
+                                    'fraction of image covered by ref')
+
+
+        # do statistics on this region only
         nstat = int(0.1 * (xsize_new*ysize_new))
-        x_stat = (np.random.rand(nstat)*(xsize_new-2*edge)).astype(int) + edge
-        y_stat = (np.random.rand(nstat)*(ysize_new-2*edge)).astype(int) + edge
+        rng = np.random.default_rng()
+        x_stat = rng.integers(low=x1+10, high=x2-10, size=nstat)
+        y_stat = rng.integers(low=y1+10, high=y2-10, size=nstat)
         mean_Scorr, median_Scorr, std_Scorr = sigma_clipped_stats (
             data_Scorr_full[y_stat,x_stat].astype(float))
 
         if get_par(set_zogy.verbose,tel):
             log.info('Scorr mean: {:.3f}, median: {:.3f}, std: {:.3f}'
                      .format(mean_Scorr, median_Scorr, std_Scorr))
+
 
         # make histrogram plot if needed
         if get_par(set_zogy.make_plots,tel):
@@ -1114,13 +1148,18 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
 
 
-        # compute statistics on Fpsferr image
+        # compute statistics on Fpsferr image (on relevant region
+        # defined above)
+        if 'data_Fpsferr_full' not in locals():
+            data_Fpsferr_full = read_hdulist('{}_Fpsferr.fits'.format(base_newref))
+
         mean_Fpsferr, median_Fpsferr, std_Fpsferr = sigma_clipped_stats (
             data_Fpsferr_full[y_stat,x_stat].astype(float))
 
         if get_par(set_zogy.verbose,tel):
             log.info('Fpsferr mean: {:.3f}, median: {:.3f}, std: {:.3f}'
                      .format(mean_Fpsferr, median_Fpsferr, std_Fpsferr))
+
 
 
         # add header keyword(s):
@@ -1153,7 +1192,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
             create_limmag_image_trans (fits_tlimmag, header_tmp,
                                        data_Fpsferr_full, zp,
                                        airmass_center, exptime, ext_coeff,
-                                       zp_nsubs_shape, fn_zps)
+                                       zp_nsubs_shape, fn_zps, data_newref_mask)
 
 
             # infer and add transient limiting flux and mag to header_trans
@@ -1163,9 +1202,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                            zp_err, zp_nsubs_shape, trans=True)
 
 
-
-
-        del data_Scorr_full, data_Fpsferr_full
 
 
         # if [std_Scorr] is very large, do not bother to continue as
@@ -1178,53 +1214,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                        .format(std_Scorr_limit))
             return header_new, header_trans
 
-
-
-        # define fits files names
-        path, name = os.path.split(base_newref)
-        if len(path)>0:
-            dir_newref = path
-        else:
-            dir_newref = '.'
-
-        base_remap = '{}/{}'.format(dir_newref, base_ref.split('/')[-1])
-
-
-        if get_par(set_zogy.nfakestars,tel)>0:
-            fits_new = '{}_new.fits'.format(base_newref)
-        else:
-            # this fits_new is the same as the input new_fits
-            fits_new = '{}.fits'.format(base_newref)
-
-
-        # N.B.: fits_ref refers to the remapped reference image
-        fits_ref = '{}_remap.fits'.format(base_remap)
-        fits_new_bkg_std = '{}_bkg_std.fits'.format(base_newref)
-        fits_ref_bkg_std = '{}_bkg_std_remap.fits'.format(base_remap)
-        fits_Scorr = '{}_Scorr.fits'.format(base_newref)
-        fits_D = '{}_D.fits'.format(base_newref)
-        fits_Fpsf = '{}_Fpsf.fits'.format(base_newref)
-        fits_Fpsferr = '{}_Fpsferr.fits'.format(base_newref)
-
-
-        if new_fits_mask is not None:
-            fits_new_mask = new_fits_mask
-        else:
-            fits_new_mask = new_fits.replace('.fits', '_mask.fits')
-
-
-        if ref_fits_mask is not None:
-            fits_tmp = ref_fits_mask.replace('.fits', '_remap.fits')
-            fits_ref_mask = '{}/{}'.format(dir_newref, fits_tmp.split('/')[-1])
-        else:
-            fits_tmp = ref_fits.replace('.fits', '_mask.fits')
-            fits_ref_mask = '{}/{}'.format(dir_newref, fits_tmp.split('/')[-1])
-
-
-        fits_new_psf = '{}_psf.fits'.format(base_new)
-        fits_ref_psf = '{}_psf.fits'.format(base_ref)
-        fits_new_cat = '{}_cat.fits'.format(base_new)
-        fits_ref_cat = '{}_cat.fits'.format(base_ref)
 
 
         # if new transient columns need to be defined, but source
@@ -1253,11 +1242,11 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         table_trans = get_trans (
             fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
-            fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
+            fits_new_mask, fits_newref_mask, fits_new_bkg_std, fits_ref_bkg_std,
             header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
-            # these are the original ref image and its mask, i.e. not
-            # remapped
-            ref_fits, ref_fits_mask, fits_ref_cat, sexcat_new, nthreads=nthreads)
+            # these are the original ref image and its mask, not remapped
+            ref_fits, ref_fits_mask,
+            fits_ref_cat, sexcat_new, xy_edge, nthreads=nthreads)
 
 
         mem_use (label='just after get_trans')
@@ -1403,8 +1392,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
     if new:
         exptime_new = read_header(header_new, ['exptime'])
         cat_new = '{}_cat.fits'.format(base_new)
-
-
         cat_new_out = cat_new
         header_new_cat = read_hdulist(cat_new, get_data=False, get_header=True)
         if not ('FORMAT-P' in header_new_cat and header_new_cat['FORMAT-P']):
@@ -1434,7 +1421,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
     # trans catalogue
     if new and ref:
-        cat_trans = '{}.transcat'.format(base_newref)
+        cat_trans = '{}_trans_init.fits'.format(base_newref)
         cat_trans_out = '{}_trans.fits'.format(base_newref)
 
 
@@ -1500,6 +1487,64 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         return header_ref
 
 
+
+################################################################################
+
+def define_fits_names(base_new, base_ref, base_newref,
+                      new_fits, new_fits_mask, ref_fits, ref_fits_mask):
+
+
+    # define fits files names
+    path, name = os.path.split(base_newref)
+    if len(path)>0:
+        dir_newref = path
+    else:
+        dir_newref = '.'
+
+    base_remap = '{}/{}'.format(dir_newref, base_ref.split('/')[-1])
+
+
+    if get_par(set_zogy.nfakestars,tel)>0:
+        fits_new = '{}_new.fits'.format(base_newref)
+    else:
+        # this fits_new is the same as the input new_fits
+        fits_new = '{}.fits'.format(base_newref)
+
+
+    # N.B.: fits_ref refers to the remapped reference image
+    fits_ref = '{}_remap.fits'.format(base_remap)
+    fits_new_bkg_std = '{}_bkg_std.fits'.format(base_newref)
+    fits_ref_bkg_std = '{}_bkg_std_remap.fits'.format(base_remap)
+    fits_Scorr = '{}_Scorr.fits'.format(base_newref)
+    fits_D = '{}_D.fits'.format(base_newref)
+    fits_Fpsf = '{}_Fpsf.fits'.format(base_newref)
+    fits_Fpsferr = '{}_Fpsferr.fits'.format(base_newref)
+
+
+    if new_fits_mask is not None:
+        fits_new_mask = new_fits_mask
+    else:
+        fits_new_mask = new_fits.replace('.fits', '_mask.fits')
+
+
+    if ref_fits_mask is not None:
+        fits_tmp = ref_fits_mask.replace('.fits', '_remap.fits')
+        fits_ref_mask = '{}/{}'.format(dir_newref, fits_tmp.split('/')[-1])
+    else:
+        fits_tmp = ref_fits.replace('.fits', '_mask.fits')
+        fits_ref_mask = '{}/{}'.format(dir_newref, fits_tmp.split('/')[-1])
+
+
+    fits_new_psf = '{}_psf.fits'.format(base_new)
+    fits_ref_psf = '{}_psf.fits'.format(base_ref)
+    fits_new_cat = '{}_cat.fits'.format(base_new)
+    fits_ref_cat = '{}_cat.fits'.format(base_ref)
+
+
+    return (base_remap, fits_new, fits_ref, fits_new_bkg_std, fits_ref_bkg_std,
+            fits_Scorr, fits_D, fits_Fpsf, fits_Fpsferr,
+            fits_new_mask, fits_ref_mask, fits_new_psf, fits_ref_psf,
+            fits_new_cat, fits_ref_cat)
 
 
 ################################################################################
@@ -2327,7 +2372,7 @@ def extract_fakestars_orig (table_fake, table_trans, data_Fpsf, data_Fpsferr,
 
 
     # overwrite output fits catalog created in [get_trans]
-    table_trans.write('{}.transcat'.format(base_newref), format='fits',
+    table_trans.write('{}_trans_init.fits'.format(base_newref), format='fits',
                       overwrite=True)
 
 
@@ -4193,10 +4238,10 @@ def get_index_around_xy (ysize, xsize, ycoord, xcoord, size):
 ################################################################################
 
 def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
-               fits_new_mask, fits_ref_mask, fits_new_bkg_std, fits_ref_bkg_std,
+               fits_new_mask, fits_newref_mask, fits_new_bkg_std, fits_ref_bkg_std,
                header_new, header_ref, header_trans, fits_new_psf, fits_ref_psf,
-               ref_fits, ref_fits_mask, fits_ref_cat, sexcat_new,
-               nthreads=1, keep_all=False):
+               ref_fits, ref_fits_mask, fits_ref_cat, sexcat_new, xy_edge,
+               trim_image=True, nthreads=1, keep_all=False):
 
 
     """Function that selects transient candidates from the significance
@@ -4233,19 +4278,33 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     base = base_newref
 
 
-    # combine new and remapped ref mask
-    data_new_mask = read_hdulist (fits_new_mask, dtype='uint8')
-    data_ref_mask = read_hdulist (fits_ref_mask, dtype='uint8')
-    data_newref_mask = (data_new_mask | data_ref_mask)
-    fits_newref_mask = '{}_mask_newref.fits'.format(base)
-    fits.writeto (fits_newref_mask, data_newref_mask, overwrite=True)
-    del data_new_mask, data_ref_mask
-
-
-
     # read Scorr image and its header
     data_Scorr, header = read_hdulist (fits_Scorr, get_header=True,
                                        dtype='float32')
+
+
+    # keep a copy of the original Scorr image if keep_tmp is True
+    if get_par(set_zogy.keep_tmp,tel):
+        fits_Scorr_orig = '{}_Scorr_orig.fits'.format(base)
+        shutil.copy2 (fits_Scorr, fits_Scorr_orig)
+
+
+    if trim_image:
+        # trim_image: write smaller relevant section of Scorr and the
+        # combined mask and run SExtractor on those. If overlap of new
+        # and ref image is limited, with the non-overlapping region
+        # being zero, source extractor will underestimate the image
+        # scatter and find many spurious objects.
+        x1,x2,y1,y2 = xy_edge
+        fits.writeto (fits_Scorr, data_Scorr[y1:y2+1,x1:x2+1], header,
+                      overwrite=True)
+
+        # same for mask, but save original
+        fits_newref_mask_orig = '{}_newref_mask_orig.fits'.format(base)
+        shutil.copy2 (fits_newref_mask, fits_newref_mask_orig)
+        data_newref_mask = read_hdulist (fits_newref_mask, dtype='uint8')
+        fits.writeto (fits_newref_mask, data_newref_mask[y1:y2+1,x1:x2+1],
+                      overwrite=True)
 
 
     # read a few header keywords
@@ -4269,13 +4328,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # extractor) from 'initial' run above
     fits_Scorr_bkgsub = '{}_Scorr_bkgsub.fits'.format(base)
     data_Scorr_bkgsub = read_hdulist (fits_Scorr_bkgsub, dtype='float32')
-    del data_Scorr
 
-
-    # keep a copy of the original Scorr image if keep_tmp is True
-    if get_par(set_zogy.keep_tmp,tel):
-        fits_Scorr_orig = '{}_Scorr_orig.fits'.format(base)
-        shutil.copy2 (fits_Scorr, fits_Scorr_orig)
 
     # overwrite Scorr image with the background-subtracted Scorr
     # image
@@ -4285,11 +4338,11 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # determine statistics on background-subtracted Scorr image (done
     # already before, but possibly the background subtraction will
     # change the result slightly)
-    edge = 100
     ysize, xsize = data_Scorr_bkgsub.shape
     nstat = int(0.1 * (xsize*ysize))
-    x_stat = (np.random.rand(nstat)*(xsize-2*edge)).astype(int) + edge
-    y_stat = (np.random.rand(nstat)*(ysize-2*edge)).astype(int) + edge
+    rng = np.random.default_rng()
+    x_stat = rng.integers(low=10, high=xsize-10, size=nstat)
+    y_stat = rng.integers(low=10, high=ysize-10, size=nstat)
     log.info ('calculating Scorr statistics in [get_trans]')
     #mean, median, std = sigma_clipped_stats (data_Scorr)
     #print ('mean: {}, median: {}, std: {}'
@@ -4345,6 +4398,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         remove_files ([fits_Scorr_bkgsub_neg], verbose=True)
 
 
+    if trim_image:
+        # insert smaller Scorr image used up to now into original as
+        # it still needs to be used, e.g. for thumbnail extraction
+        data_Scorr[y1:y2+1,x1:x2+1] = data_Scorr_bkgsub
+        fits.writeto (fits_Scorr, data_Scorr, header, overwrite=True)
+
+
+
     # read positive table
     table_trans_pos = Table.read(sexcat_pos, memmap=True)
     # read off values at indices of X_PEAK and Y_PEAK
@@ -4366,6 +4427,13 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     log.info ('total number of transients (pos+neg): {}'
               .format(len(table_trans)))
 
+
+    if trim_image:
+        # need to update x- and y-positions in table
+        table_trans['X_POS'] += x1
+        table_trans['Y_POS'] += y1
+        table_trans['X_PEAK'] += x1
+        table_trans['Y_PEAK'] += y1
 
 
     # add channels to table
@@ -4391,7 +4459,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # determine its detection threshold.
     nsigma_norm = get_par(set_zogy.transient_nsigma,tel) #/ std_Scorr
     mask_signif = np.abs(table_trans['SNR_ZOGY']) >= nsigma_norm
-    trans_rejected_position (table_trans, ~mask_signif, 'abs(SNR_ZOGY)<6')
+    #trans_rejected_position (table_trans, ~mask_signif, 'abs(SNR_ZOGY)<6')
     table_trans = table_trans[mask_signif]
     log.info ('transient detection threshold: {}'.format(nsigma_norm))
     log.info ('ntrans after threshold cut: {}'.format(len(table_trans)))
@@ -4525,6 +4593,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # (2) improve the estimate of the peak value in Scorr, Fpsf
     #     and Fpsferr, which should be possible as the PSF is
     #     better sampled than the image pixels
+    if trim_image:
+        data_newref_mask = read_hdulist (fits_newref_mask_orig, dtype='uint8')
 
     results = get_psfoptflux_mp (
         fits_new_psf, data_D, data_D_var, data_newref_mask,
@@ -4913,7 +4983,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
 
     # write table_trans to fits
-    cat_trans = '{}.transcat'.format(base)
+    cat_trans = '{}_trans_init.fits'.format(base)
     table_trans.write(cat_trans, format='fits', overwrite=True)
 
 
@@ -4932,8 +5002,9 @@ def trans_rejected_position (table, mask, reason):
     log.info ('{} transients rejected; reason: {}'.format(nmask, reason))
     xpos = table[mask]['X_PEAK'].value
     ypos = table[mask]['Y_PEAK'].value
+    log.info ('X_PEAK, Y_PEAK:')
     for i in range(nmask):
-        log.info ('{}, {}'.format(x[i], y[i]))
+        log.info ('{:5}, {:5}'.format(xpos[i], ypos[i]))
 
 
 ################################################################################
@@ -5050,12 +5121,12 @@ def get_thumbnails (table_trans, fits_new, fits_ref, fits_D, fits_Scorr_bkgsub,
 
 ################################################################################
 
-def get_edge_coords (data_mask):
+def get_edge_indices (data_mask, minmax=True):
 
-    """function to extract x- and y-coordinates (not indices!) of the
-    inner pixels of the edge pixels in the input boolean mask; returns
-    two numpy arrays, one for x and one for y. If no edge pixels are
-    present in the input mask, the arrays will be empty.
+    """function to extract x- and y-indices (not pixel coordinates!)
+    of the inner pixels of the edge pixels in the input boolean mask;
+    returns two numpy arrays, one for x and one for y. If no edge
+    pixels are present in the input mask, the arrays will be empty.
 
     """
 
@@ -5069,11 +5140,37 @@ def get_edge_coords (data_mask):
 
     # convert the resulting mask into x- and y-coordinates
     ysize, xsize = data_mask.shape
-    x = np.arange(xsize)+1
-    y = np.arange(ysize)+1
+    x = np.arange(xsize)
+    y = np.arange(ysize)
     xx, yy = np.meshgrid(x, y)
 
-    return xx[mask_edge_inner], yy[mask_edge_inner]
+    # select relevant ones
+    xx = xx[mask_edge_inner]
+    yy = yy[mask_edge_inner]
+
+
+    if not minmax:
+        # return all
+        return xx, yy
+
+    else:
+        # infer first and last x- and y-indices that are not affected
+        # by the edge
+        if len(xx)==0:
+            x1 = 0
+            x2 = xsize-1
+        else:
+            x1 = np.min(xx)
+            x2 = min(np.max(xx), xsize-1)
+
+        if len(yy)==0:
+            y1 = 0
+            y2 = ysize-1
+        else:
+            y1 = np.min(yy)
+            y2 = min(np.max(yy), ysize-1)
+
+        return x1, x2, y1, y2
 
 
 ################################################################################
@@ -9587,7 +9684,7 @@ def infer_satmag (table_cat, header):
 
 def create_limmag_image_trans (fits_limmag, header, data_err, zp,
                                airmass_center, exptime, ext_coeff,
-                               zp_nsubs_shape, fn_zps):
+                               zp_nsubs_shape, fn_zps, data_newref_mask):
 
 
     # replace any zero values with a large value
@@ -9621,9 +9718,9 @@ def create_limmag_image_trans (fits_limmag, header, data_err, zp,
 
 
     # set limiting magnitudes at edges to zero
-    #value_edge = get_par(set_zogy.mask_value['edge'],tel)
-    #mask_edge = (data_mask & value_edge == value_edge)
-    #data_limmag[mask_edge] = 0
+    value_edge = get_par(set_zogy.mask_value['edge'],tel)
+    mask_edge = (data_newref_mask & value_edge == value_edge)
+    data_limmag[mask_edge] = 0
 
 
     # write limiting magnitude image
