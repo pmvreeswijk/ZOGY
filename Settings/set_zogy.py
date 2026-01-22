@@ -113,13 +113,13 @@ fakestar_s2n = 10.       # required signal-to-noise ratio of the fake stars
 #===============================================================================
 ML_calc_prob = True
 # version to use: '1'=Zafiirah (obsolete); '2'=Diederik; '3'=Diederik August 2024
-ML_version = '3'
+ML_version = '2'
 # dictionary of ML_models corresponding to ML_version
 ML_models = {
     #'1': '{}/meerCRAB_model/NET3_threshold_9_NRD'
     #.format(os.environ['MEERCRABHOME']),
-    '2': '{}/model270123.h5'.format(cal_dir),
-    '3': '{}/supervised_CNN.h5'.format(cal_dir)}
+    '2': '{}/model270123.keras'.format(cal_dir),
+    '3': '{}/supervised_CNN.keras'.format(cal_dir)}
 
 
 #===============================================================================
