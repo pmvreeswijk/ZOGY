@@ -38,7 +38,7 @@ fratio_local = False     # determine flux ratio (Fn/Fr) from subimage (T) or
 fratio_optflux = True    # use optimal flux (T) or FLUX_AUTO (F) for flux ratio
 dxdy_local = False       # determine dx,dy from subimage (T) or full frame (F)
 transient_nsigma = 6     # required Scorr significance for transient detection
-chi2_max = 10            # maximum reduced chi2 in PSF/Gauss fit to D to filter
+chi2_max = float('inf')  # maximum reduced chi2 in PSF/Gauss fit to D to filter
                          # transients; float('inf') for infinity
 chi2_snr_limit = 50      # transient signal-to-noise ratio limit above
                          # which the reduced chi2 cut is not applied
