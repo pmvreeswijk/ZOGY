@@ -123,7 +123,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.6.6'
+__version__ = '1.7.0'
 
 
 ################################################################################
@@ -4337,12 +4337,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     # determine statistics on background-subtracted Scorr image (done
     # already before, but possibly the background subtraction will
-    # change the result slightly)
-    ysize, xsize = data_Scorr_bkgsub.shape
-    nstat = int(0.1 * (xsize*ysize))
+    # change the result slightly); N.B. with trim_image is True, ysize
+    # and xsize will be smaller than the usual new image size,
+    # therefore the _tmp addition
+    ysize_tmp, xsize_tmp = data_Scorr_bkgsub.shape
+    nstat = int(0.1 * (xsize_tmp * ysize_tmp))
     rng = np.random.default_rng()
-    x_stat = rng.integers(low=10, high=xsize-10, size=nstat)
-    y_stat = rng.integers(low=10, high=ysize-10, size=nstat)
+    x_stat = rng.integers(low=10, high=xsize_tmp-10, size=nstat)
+    y_stat = rng.integers(low=10, high=ysize_tmp-10, size=nstat)
     log.info ('calculating Scorr statistics in [get_trans]')
     #mean, median, std = sigma_clipped_stats (data_Scorr)
     #print ('mean: {}, median: {}, std: {}'
@@ -4832,6 +4834,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     fn_zps = '{}_zps.npy'.format(base)
     xcoords = table_trans['X_PEAK'].value
     ycoords = table_trans['Y_PEAK'].value
+    ysize, xsize = data_Scorr.shape
     zp_coords, zp_std_coords, zp_err_coords = infer_zp_highres (
         xcoords, ycoords, zp, zp_std, zp_err, ysize, xsize,
         zp_nsubs_shape, fn_zps)
@@ -5002,9 +5005,11 @@ def trans_rejected_position (table, mask, reason):
     log.info ('{} transients rejected; reason: {}'.format(nmask, reason))
     xpos = table[mask]['X_PEAK'].value
     ypos = table[mask]['Y_PEAK'].value
+    # sort in xpos
+    idx_sort = np.argsort(xpos)
     log.info ('X_PEAK, Y_PEAK:')
     for i in range(nmask):
-        log.info ('{:5}, {:5}'.format(xpos[i], ypos[i]))
+        log.info ('{:5}, {:5}'.format(xpos[idx_sort[i]], ypos[idx_sort[i]]))
 
 
 ################################################################################
@@ -5488,6 +5493,10 @@ def get_apflux_loop (idx, xcoords, ycoords, data, data_mask, objmask,
                      apphot_radii, bkg_radii, bkg_limfrac, fzoom, bkg_std_coords,
                      verbose=False):
 
+    # worker process logging
+    logging.basicConfig(level='INFO', format=logfmt, datefmt=datefmt)
+    logFormatter = logging.Formatter(logfmt, datefmt)
+
 
     # limit coordinates to idx
     xpos = xcoords[idx]
@@ -5790,7 +5799,7 @@ def count_fainter_neighbours (xcoords, ycoords, sep_max_pix=30, nthreads=1):
 
     # log number of sources with/without fainter neighbours
     mask_with = (n_neighbours > 0)
-    log.info ('{}/{} sources with/without fainter neighbours'
+    log.info ('{} sources with and {} without fainter neighbours'
               .format(np.sum(mask_with), np.sum(~mask_with)))
 
 
@@ -5807,8 +5816,14 @@ def count_fainter_neighbours (xcoords, ycoords, sep_max_pix=30, nthreads=1):
 
 def count_loop (idx, xcoords, ycoords, sep_max_pix):
 
+    # worker process logging
+    logging.basicConfig(level='INFO', format=logfmt, datefmt=datefmt)
+    logFormatter = logging.Formatter(logfmt, datefmt)
+
+
     # initialize output list with neighbours
     list_i_neighbours = []
+
 
     # loop coordinates
     sep_max_pix2 = sep_max_pix**2
@@ -5828,9 +5843,11 @@ def count_loop (idx, xcoords, ycoords, sep_max_pix):
         idx_use = np.nonzero((xfainter >= x-sep_max_pix) &
                              (xfainter <= x+sep_max_pix))[0]
 
+
         # calculate separation for remaining entries
         sep2 = ((xfainter[idx_use] - x)**2 +
                 (yfainter[idx_use] - y)**2)
+
 
         # count the nearby neighbours and update output list
         mask_neighbours = (sep2 <= sep_max_pix2)
@@ -5839,7 +5856,6 @@ def count_loop (idx, xcoords, ycoords, sep_max_pix):
 
 
     log.info ('finished counting neighbours for indices {}'.format(idx))
-
     return list_i_neighbours
 
 
@@ -5858,6 +5874,7 @@ def prep_indices (xcoords, nthreads, mask=None, x_sort=False):
     # indices to return are with respect to xcoords before any mask is
     # applied
     idx_orig = np.arange(len(xcoords))
+
 
     # the relevant indices according to the input mask
     idx_use = idx_orig[mask_use]
@@ -6090,11 +6107,9 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
               .format(fname, psf_size, imtype))
 
 
-    # split input coordinates into nthreads roughly-equal lists
+    # number of coordinates
     ncoords = len(xcoords)
-    idx_list = prep_indices (xcoords, nthreads)
     log.info ('{} coordinates to process'.format(ncoords))
-
 
 
     # set_zogy parameters that were previously inferred in
@@ -6186,12 +6201,17 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
     else:
 
+        # split input coordinates into nthreads roughly-equal lists
+        idx_list = prep_indices (xcoords, nthreads)
+
         # these input parameters to get_psfoptflux_loop need to be
         # defined
         lock = None
         pid_list = None
         n_fainter_neighbours = None
         x_borders = None
+
+
 
 
 
@@ -6251,10 +6271,20 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
 
+        # boolean to consider low S/N sources (with lowsnr sigma) that
+        # have nearby neighbours as neighbourless in the first pass,
+        # to speed up reductions of shallow images on crowded fields
+        filter_lowsnr = True
+        nsigma_lowsnr = 2
+        log.info ('filter_lowsnr: {} ({} sigma)'
+                  .format(filter_lowsnr, nsigma_lowsnr))
+
+
         npass = 0
         while True:
 
             npass += 1
+            log.info ('npass: {}'.format(npass))
 
             # in case of remove_psf, execute get_psfoptflux_loop
             # multiple times, so that nearby neighbours are removed
@@ -6267,12 +6297,12 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # objects. Could perhaps also arrange this inside
             # get_psfoptflux_loop.
             #
-            # for the zero-neighbour objects, need to keep a
-            # shared-memory data array with the zero-neighbour
-            # PSFs * their fluxes added to it, which can be
-            # used in the next iteration to subtract from the
-            # original input data array; the 2nd iteration needs
-            # to work on that image
+            # for the objects with neighbours, need to keep a
+            # shared-memory data array with their PSFs * their fluxes
+            # added to it, which can be used to put those objects back
+            # before the next iteration; the objects are being removed
+            # from the image for both neighbourless objects and
+            # objects with neighbours
             #
             # once both iterations are done, subtract 1 from
             # n_fainter_neighbours
@@ -6282,12 +6312,34 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
             for source_type in ['with', 'without']:
 
+                log.info ('source_type: {}'.format(source_type))
+
                 if source_type == 'with':
                     # 1st iteration: pick objects with neighbours
                     mask = (n_fainter_neighbours > 0)
+                    # define mask_with
+                    mask_with = mask.copy()
                 else:
                     # 2nd iteration: pick zero-neighbour objects
                     mask = (n_fainter_neighbours == 0)
+
+
+                    # add sources with SNR < nsigma_lowsnr to mask in
+                    # first pass only
+                    if npass == 1 and filter_lowsnr:
+                        snr_opt = np.zeros_like(flux_opt) + 10
+                        mnz = (fluxerr_opt != 0)
+                        snr_opt[mnz] = flux_opt[mnz] / fluxerr_opt[mnz]
+                        # absolute value
+                        mask_lowsnr = (np.abs(snr_opt) < nsigma_lowsnr)
+                        #mask_lowsnr = (snr_opt < nsigma_lowsnr)
+                        mask |= mask_lowsnr
+                        # need to update mask_with accordingly
+                        mask_with[mask_lowsnr] = False
+                        # also update n_fainter_neighbours used inside
+                        # get_psfoptflux_loop
+                        n_fainter_neighbours[mask_lowsnr] = 0
+
 
 
                 # list number and type of sources to process
@@ -6328,6 +6380,8 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     pars[13] = D_shared
                     pars[-1] = 1
                     pars[-4] = None
+                    # update pars with x_borders
+                    pars[-3] = None
 
 
                     # need to keep track of the sources with
@@ -6336,21 +6390,27 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         D_shared_orig = np.copy(D_shared)
 
 
-
                     # do not bother to multiprocess
                     results = get_psfoptflux_loop (idx_list[0], *pars)
                     # convert to same list as the multiprocess list2return
-                    list2return = np.concatenate([results], axis=1)
+                    list2return_iter = np.concatenate([results], axis=1)
 
 
                     # save PSFs of sources with neighbours that were
-                    # subtracted from D_shared in tmp_shared; if
-                    # nthreads>1, that is done inside
-                    # get_psfoptflux_loop; tmp_shared is added to
-                    # D_shared below to create image without the
-                    # neighbourless sources to be used in the next
-                    # pass
+                    # subtracted from D_shared in tmp_shared in order
+                    # to be able to put them back. If nthreads>1, the
+                    # sources with neighbours are put back inside
+                    # get_psfoptflux_loop automatically, but not in
+                    # case of a single thread where all sources, with
+                    # or without neighbours, are subtracted.
+                    #
+                    # tmp_shared is added to D_shared below to create
+                    # image with only the sources with neighbours to
+                    # be used in the next pass
                     if source_type == 'with':
+                        # D_shared_orig includes the sources, D_shared
+                        # does not, so tmp_shared contains just the
+                        # sources
                         tmp_shared[:] = D_shared_orig - D_shared
 
 
@@ -6381,7 +6441,35 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                                          nproc=nthreads)
                     # results is a list of output arrays; need to
                     # concatenate these into single arrays
-                    list2return = np.concatenate(results, axis=1)
+                    list2return_iter = np.concatenate(results, axis=1)
+
+
+
+                # idx are indices that refer to the sources with or
+                # without neighbours; the same sources are indicated
+                # with mask (_with or _without), but not in the same
+                # order (mask is ordered by brightness, while idx is
+                # ordered by xcoords and brightness! This updating of
+                # fluxes is in principle only necessary to do for the
+                # neighbourless sources, except for the 1st pass, when
+                # the fluxes of sources with neighbours are used to
+                # determine their SNR and if low they are added to the
+                # neighbourless bunch
+                idx = list(itertools.chain.from_iterable(idx_list))
+                if len(idx) > 0:
+
+                    if get_flags_opt and get_flags_mask_inner:
+                        flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx], \
+                            flags_opt[idx], flags_mask_inner[idx] = \
+                                list2return_iter
+
+                    elif get_flags_mask_inner:
+                        flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx], \
+                            flags_mask_inner[idx] = list2return_iter
+
+                    else:
+                        flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx] = \
+                            list2return_iter
 
 
 
@@ -6396,42 +6484,12 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
 
 
 
-            # need to update the output fluxes of the
-            # neighbourless measurements in list2return; these are
-            # indices of the zero-neighbour objects, which is
-            # idx_list since the objects without neighbours are
-            # done in the 2nd iteration
-
-            #if npass > 90:
-            #    log.info ('list2return: {}'.format(list2return))
-            #    log.info ('xcoords[idx]: {}'.format(xcoords[idx]))
-            #    log.info ('ycoords[idx]: {}'.format(ycoords[idx]))
-
-
-            # if there are no sources without neighbours this pass,
-            # idx will be an empty list
-            idx = list(itertools.chain.from_iterable(idx_list))
-            if len(idx) > 0:
-
-                if get_flags_opt and get_flags_mask_inner:
-                    flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx], \
-                        flags_opt[idx], flags_mask_inner[idx] = list2return
-
-                elif get_flags_mask_inner:
-                    flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx], \
-                        flags_mask_inner[idx] = list2return
-
-                else:
-                    flux_opt[idx], fluxerr_opt[idx], local_bkg_opt[idx] = \
-                        list2return
-
-
 
             # number of objects done and still left to process
             ndone = np.sum(n_fainter_neighbours <= 0)
             nleft = np.sum(n_fainter_neighbours > 0)
-            log.info ('{} sources done, {} sources left to process after '
-                      'pass {}'.format(ndone, nleft, npass))
+            log.info ('{} (out of {})  sources done, {} sources left to process '
+                      'after pass {}'.format(ndone, ncoords, nleft, npass))
 
 
             # if none left, break out of while True loop
@@ -6439,10 +6497,12 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 break
 
 
-            # before going to the nex pass, add the tmp_shared
-            # image that contains the PSFs of the sources with
-            # neighbours; they were subtracted from D_shared and
-            # need to be added back in for the next pass
+            # before going to the nex pass, add the tmp_shared image
+            # that contains the PSFs of the sources with neighbours;
+            # they were subtracted from D_shared and need to be added
+            # back in for the next pass (both for nthreads=1 and >1;
+            # only difference is that for nthreads=1 the tmp_shared is
+            # not created inside get_psfoptflux_loop)
             D_shared += tmp_shared
 
 
@@ -6450,9 +6510,35 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             tmp_shared[:] = 0
 
 
-            # update n_fainter_neighbours, so currently
-            # neighbourless objects will go negative
+            # update n_fainter_neighbours, so currently neighbourless
+            # objects will go negative
             n_fainter_neighbours -= 1
+
+
+            # for 1st pass, redetermine n_fainter_neighbours for
+            # the sources with neighbours because during this pass
+            # low S/N objects have been added to (deleted from)
+            # the sources without (with) neighbours, messing up
+            # the original fainter_neighbours determination
+            if npass == 1 and filter_lowsnr:
+                n_fainter_neighbours[mask_with] = count_fainter_neighbours (
+                    xcoords[mask_with], ycoords[mask_with],
+                    sep_max_pix=sep_max_pix, nthreads=nthreads)
+
+
+            if False:
+                # CHECK!!! - temporarily write D_shared to disk for every
+                # pass, for debugging
+                if nleft > 1000:
+                    basename = psfex_bintable.split('_psf.fits')[0]
+                    # in local folder where zogy is run
+                    #basename = psfex_bintable.split('_psf.fits')[0].split('/')[-1]
+                    fits_psf_removed = ('{}_psf_removed_pass{}.fits'
+                                        .format(basename, npass))
+                    log.info ('writing {}'.format(fits_psf_removed))
+                    fits.writeto (fits_psf_removed, D_shared, overwrite=True)
+
+
 
 
 
@@ -6559,6 +6645,10 @@ def get_psfoptflux_loop (
         x_borders=None, tel=None, nthreads=None):
 
 
+    # worker process logging
+    logging.basicConfig(level='INFO', format=logfmt, datefmt=datefmt)
+    logFormatter = logging.Formatter(logfmt, datefmt)
+
 
     # function name
     fname = inspect.currentframe().f_code.co_name
@@ -6653,7 +6743,6 @@ def get_psfoptflux_loop (
 
     if shm_names is not None:
 
-
         # check if shared memories still exist:
         if False:
             for name in shm_names.values():
@@ -6682,6 +6771,7 @@ def get_psfoptflux_loop (
         # or without neighbours
         neighbourless = (np.sum(n_fainter_neighbours[idx]) == 0)
         log.info ('neighbourless?: {}'.format(neighbourless))
+
 
         if not neighbourless:
             # attach shared memory array tmp_shared
@@ -7112,15 +7202,20 @@ def get_psfoptflux_loop (
             # if psffit=True, perform PSF fitting
             if psffit:
 
+                # CHECK!!!
                 if i==0:
                     show=True
                 else:
                     show=False
 
+                #for coords in [(3594, 8546), (3288, 8984), (3663,8391)]:
+                #    if np.sqrt((x-coords[0])**2 + (y-coords[1])**2) < 10:
+                #        show=True
+                #        break
 
-                # CHECK!!! - switched on for testing
-                #disk_use(label='in {}'.format(fname))
-                #log.info ('i: {}, (x,y)=({:.0f},{:.0f})'.format(i, x, y))
+                if show:
+                    log.info ('i: {}, (x,y)=({:.0f},{:.0f})'.format(i, x, y))
+
 
                 try:
                     xshift_psf[i], xerr_psf[i], yshift_psf[i], yerr_psf[i], \
@@ -12925,7 +13020,7 @@ def coords2subs (xcoords, ycoords, image_shape, nsubimages_shape):
     is applied) with e.g. ds9.
 
     Should the coordinates be off the image, i.e. lower than 0.5 or
-    greater than or equal to 10560.5, an indices of -1 are returned.
+    greater than or equal to 10560.5, an index of -1 is returned.
 
     """
 
@@ -14979,6 +15074,18 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
             result = run_psfex(sexcat_ldac, get_par(set_zogy.psfex_cfg,tel),
                                psfexcat, imtype, poldeg, nsnap=nsnap,
                                limit_ldac=True, nthreads=nthreads)
+
+
+            # check distribution of PSF stars across the image
+            x_psf, y_psf, norm_psf = read_psfcat(psfexcat)
+            log.info ('median normalized x-coord. of PSF stars in FOV: '
+                      '{:.2f} +- {:.2f}'
+                      .format(np.median(x_psf)/xsize, np.std(x_psf)/xsize))
+            log.info ('median normalized y-coord. of PSF stars in FOV: '
+                      '{:.2f} +- {:.2f}'
+                      .format(np.median(y_psf)/ysize, np.std(y_psf)/ysize))
+
+
 
         except Exception as e:
             PSFEx_processed = False
@@ -17597,8 +17704,9 @@ def get_fwhm (fits_cat, fraction, class_sort=False, get_elong=False, nmin=5):
     # set values to zero if too few stars are selected or values
     # just determined are non-finite
     if (len(fwhm_select) < nmin or
-        not (np.isfinite(fwhm_median) and np.isfinite(fwhm_std))):
-        fwhm_median, fwhm_std = [0] * 2
+        not (np.isfinite(fwhm_median) and np.isfinite(fwhm_std)) or
+        fwhm_median < 0):
+        fwhm_median, fwhm_std = 0, 0
 
     if get_par(set_zogy.verbose,tel):
         log.info('catalog: {}'.format(fits_cat))
@@ -17614,7 +17722,7 @@ def get_fwhm (fits_cat, fraction, class_sort=False, get_elong=False, nmin=5):
         # just determined are non-finite
         if (len(elong_select) < nmin or
             not (np.isfinite(elong_median) and np.isfinite(elong_std))):
-            elong_median, elong_std = [0] * 2
+            elong_median, elong_std = 0, 0
 
         if get_par(set_zogy.verbose,tel):
             log.info('elong_median: {:.3f}, elong_std: {:.3f}'
@@ -18576,11 +18684,12 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
         raise Exception (msg)
 
 
+
     # record psf stars used in ds9 regions file
     if get_par(set_zogy.make_plots,tel):
-        #result = prep_ds9regions('{}_psfstars_used_ds9regions.txt'.format(base),
         psfexcat = '{}_psfex.cat'.format(base)
         x_psf, y_psf, norm_psf = read_psfcat(psfexcat)
+        #result = prep_ds9regions('{}_psfstars_used_ds9regions.txt'.format(base),
         result = prep_ds9regions(
             '{}_psfstars_used_ds9regions.txt'.format(base),
             x_psf, y_psf, radius=7., width=2, color='green')
