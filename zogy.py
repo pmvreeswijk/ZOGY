@@ -6330,9 +6330,9 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                         snr_opt = np.zeros_like(flux_opt) + 10
                         mnz = (fluxerr_opt != 0)
                         snr_opt[mnz] = flux_opt[mnz] / fluxerr_opt[mnz]
+                        mask_lowsnr = (snr_opt < nsigma_lowsnr)
                         # absolute value
-                        mask_lowsnr = (np.abs(snr_opt) < nsigma_lowsnr)
-                        #mask_lowsnr = (snr_opt < nsigma_lowsnr)
+                        #mask_lowsnr = (np.abs(snr_opt) < nsigma_lowsnr)
                         mask |= mask_lowsnr
                         # need to update mask_with accordingly
                         mask_with[mask_lowsnr] = False
