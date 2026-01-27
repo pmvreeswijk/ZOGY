@@ -19,7 +19,7 @@ license = 'MIT'
 dependencies = [
     'numpy', 'astropy', 'matplotlib', 'scipy', 'psutil',
     'pyfftw', 'lmfit', 'sip_tpv', 'scikit-image', 'healpy',
-    'tensorflow-cpu', 'protobuf<6', 'fitsio', 'fsspec', 'gcsfs']
+    'tensorflow-cpu', 'protobuf', 'fitsio', 'fsspec', 'gcsfs']
 
 [project.urls]
 Homepage = 'https://github.com/pmvreeswijk/ZOGY'
