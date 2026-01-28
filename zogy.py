@@ -8245,17 +8245,26 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
             # inner region defined by [mask_inn]; outside of that
             # use [nsigma_out]
             try:
-                sigma2 = (D - flux_opt * P)**2
+                # old way
+                #sigma2 = (D - flux_opt * P)**2
+                #mask_pos = (V > 0)
+                #sigma2[mask_pos] /= V[mask_pos]
+                # new way trying to avoid overflow warning when squaring
+                sigma = np.abs(D - flux_opt * P)
                 mask_pos = (V > 0)
-                sigma2[mask_pos] /= V[mask_pos]
-            except:
-                log.error ('issue calculating sigma2 in flux_optimal_iter()')
+                sigma[mask_pos] /= np.sqrt(V[mask_pos])
+
+            except RuntimeWarning as e:
+                log.error ('issue calculating sigma2 in flux_optimal_iter() '
+                           'for object at (x,y):({},{})'.format(x,y))
 
 
             # inner/outer masks with pixels to be rejected this
             # iteration
-            mask_rej[mask_inn] = (sigma2[mask_inn] > nsigma_inn**2)
-            mask_rej[mask_out] = (sigma2[mask_out] > nsigma_out**2)
+            #mask_rej[mask_inn] = (sigma2[mask_inn] > nsigma_inn**2)
+            #mask_rej[mask_out] = (sigma2[mask_out] > nsigma_out**2)
+            mask_rej[mask_inn] = (sigma[mask_inn] > nsigma_inn)
+            mask_rej[mask_out] = (sigma[mask_out] > nsigma_out)
 
 
             # try nsigma_inn based on SNR of object
@@ -8277,8 +8286,9 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
                 # mask of inner pixels rejected based on S/N that were
                 # not already marked as bad/saturated etc.
                 mask_use_inn = mask_use[mask_inn]
-                mask_rej_inn = ((sigma2[mask_inn] > nsigma_inn_snr**2)
-                                & mask_use_inn)
+                #mask_rej_inn = ((sigma2[mask_inn] > nsigma_inn_snr**2)
+                #                & mask_use_inn)
+                mask_rej_inn = (sigma[mask_inn] > nsigma_inn_snr) & mask_use_inn
 
 
                 # reject up to limiting fraction of
@@ -8302,7 +8312,8 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
 
                     # indices of all inner rejected pixels sorted by
                     # decreasing sigma2
-                    idx_sort = np.argsort(sigma2[mask_inn])[::-1]
+                    #idx_sort = np.argsort(sigma2[mask_inn])[::-1]
+                    idx_sort = np.argsort(sigma[mask_inn])[::-1]
 
                     # keep indices that do not match bad/saturated pixels
                     # and pick npix_limfrac with the highest sigma2
@@ -8320,14 +8331,15 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
                             .format(i, nrej_inn, x, y, npix_limfrac,
                                     np.sum(~mask_use_inn)))
 
-                        log.info ('sigma2[mask_inn][idx_limfrac]: {}'
-                                  .format(sigma2[mask_inn][idx_limfrac]))
+                        log.info ('sigma[mask_inn][idx_limfrac]: {}'
+                                  .format(sigma[mask_inn][idx_limfrac]))
 
 
                 elif nrej_inn > 0:
 
                     # update inner mask_rej
-                    mask_rej[mask_inn] = (sigma2[mask_inn] > nsigma_inn_snr**2)
+                    #mask_rej[mask_inn] = (sigma2[mask_inn] > nsigma_inn_snr**2)
+                    mask_rej[mask_inn] = (sigma[mask_inn] > nsigma_inn_snr)
 
                     if False:
                         log.warning (
@@ -8353,14 +8365,16 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
 
         log.info('# rejected inner pixels: {}'.format(np.sum(~m_u[mask_inn])))
         log.info('# rejected outer pixels: {}'.format(np.sum(~m_u[mask_out])))
-        log.info('np.amax((D - flux_opt * P)**2 / V):{}'.format(np.amax(sigma2)))
+        #log.info('np.amax((D - flux_opt * P)**2 / V):{}'.format(np.amax(sigma2)))
+        log.info('np.amax((D - flux_opt * P) / sqrt(V)):{}'
+                 .format(np.amax(sigma)))
         log.info('flux_opt: {:.1f} +- {:.1f}'.format(flux_opt, fluxerr_opt))
 
         label = '_{:.0f}_{:.0f}'.format(x, y)
         ds9_arrays(data=D, psf=P, bkg_var=bkg_var, variance=V,
                    fluxoptP=flux_opt*P, data_min_fluxoptP=(D - flux_opt * P),
                    #data_min_fluxoptP_squared_div_variance=sigma2,
-                   sigma=np.sqrt(sigma2), m_u=m_u.astype(int),
+                   sigma=sigma, m_u=m_u.astype(int),
                    mask_inn=mask_inn.astype(int), mask_use=mask_use.astype(int),
                    label=label)
 
