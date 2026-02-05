@@ -1082,8 +1082,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         header, table['RA_IN'], table['DEC_IN'], tel)
 
 
-    # infer zeropoint nsubimages shape for either ref or new/trans
-    if ref:
+    # infer zeropoint nsubimages shape for either ref or new/trans; if
+    # image shape is not as expected for a new image, it is assumed to
+    # be a reference image
+    if ref or data_shape != zogy.get_par(set_zogy.shape_new,tel):
         zp_nsubs_shape = zogy.get_par(set_zogy.zp_nsubs_shape_ref,tel)
     else:
         zp_nsubs_shape = zogy.get_par(set_zogy.zp_nsubs_shape_new,tel)
@@ -1471,9 +1473,19 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
     elif trans:
 
+        # read off transient S/N from Scorr image; by setting dpix>0
+        # and update_indices to True, the y_ and x_indices will be
+        # updated to point to the indices with the (absolute) maximum
+        # of a (2*dpix+1)**2 area around the original index, which are
+        # used below when inferring Fpsf and transient limmags
+        snr_zogy = get_pixel_values (fits_Scorr, google_cloud,
+                                     y_indices, x_indices, dpix=1,
+                                     update_indices=True)
+
+
         # read flux values at xcoords, ycoords
-        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices,
-                                 dpix=1)
+        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices)
+
 
         # get transient limiting magnitude at xcoord, ycoord
         # and convert it back to Fpsferr
@@ -1495,9 +1507,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                    * exptime / nsigma)
 
 
-        # read off transient S/N from Scorr image
-        snr_zogy = get_pixel_values (fits_Scorr, google_cloud,
-                                     y_indices, x_indices, dpix=1)
 
 
         if zp_coords is not None:
@@ -1625,7 +1634,7 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
 
         # infer limiting magnitudes
         limmags = get_pixel_values (fits_limmag, google_cloud, y_indices,
-                                    x_indices, dpix=0, get_max=False)
+                                    x_indices)
 
         # convert limmag from number of sigma listed
         # in the image header to input [nsigma]
@@ -1662,11 +1671,13 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
 ################################################################################
 
 def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
-                      dpix=0, get_max=True):
+                      dpix=0, update_indices=False):
 
     """infer pixel values from [filename] at indices [y_indices,
        x_indices]; if dpix > 0, the maximum value over a square block
-       of pixels with width 2*dpix+1 is returned
+       of pixels with width 2*dpix+1 is returned and if update_indices
+       is True, the input indices will be updated to that of the
+       maximum
     """
 
     t1 = time.time()
@@ -1674,45 +1685,36 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
     if google_cloud:
 
         # use astropy.io.fits for google_cloud bucket files
-        if False:
-            #data = zogy.read_hdulist(filename)
-            with fits.open(filename) as hdulist:
-                data = hdulist[-1].data
+        with fits.open(filename) as hdulist:
 
-            if y_indices is None or x_indices is None:
-                values = data
+            # section indices must be slices, so need to extract
+            # indices one by one instead of data[y_indices, x_indices]
+            nvalues = len(y_indices)
+            # determine dtype of data
+            vals_tmp = hdulist[-1].section[
+                y_indices[0]-dpix:y_indices[0]+1+dpix,
+                x_indices[0]-dpix:x_indices[0]+1+dpix]
+            if get_max:
+                value0 = np.max(vals_tmp)
             else:
-                values = data[y_indices, x_indices]
+                value0 = np.min(vals_tmp)
 
-        else:
-            with fits.open(filename) as hdulist:
+            values = np.zeros(nvalues, dtype=value0.dtype)
+            values[0] = value0 #[0][0]
 
-                # section indices must be slices, so need to extract
-                # indices one by one instead of data[y_indices, x_indices]
-                nvalues = len(y_indices)
-                # determine dtype of data
-                vals_tmp = hdulist[-1].section[
-                    y_indices[0]-dpix:y_indices[0]+1+dpix,
-                    x_indices[0]-dpix:x_indices[0]+1+dpix]
-                if get_max:
-                    value0 = np.max(vals_tmp)
-                else:
-                    value0 = np.min(vals_tmp)
+            log.info ('{} value(s) extracted from {}:'.format(nvalues,
+                                                              filename))
+            if nvalues > 1:
+                for i in range(1,nvalues):
+                    vals_tmp = hdulist[-1].section[
+                        y_indices[i]-dpix:y_indices[i]+1+dpix,
+                        x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
 
-                values = np.zeros(nvalues, dtype=value0.dtype)
-                values[0] = value0 #[0][0]
-
-                log.info ('{} value(s) extracted from {}:'.format(nvalues,
-                                                                  filename))
-                if nvalues > 1:
-                    for i in range(1,nvalues):
-                        vals_tmp = hdulist[-1].section[
-                            y_indices[i]-dpix:y_indices[i]+1+dpix,
-                            x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
-                        if get_max:
-                            values[i] = np.max(vals_tmp)
-                        else:
-                            values[i] = np.min(vals_tmp)
+                    # if dpix is greater than zero, determine the
+                    # absolute maximum
+                    if dpix>0:
+                        values[i] = get_max (vals_tmp, update_indices,
+                                             y_indices, x_indices, i, dpix)
 
     else:
 
@@ -1733,10 +1735,13 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
             for i in range(nvalues):
                 vals_tmp = data[y_indices[i]-dpix:y_indices[i]+1+dpix,
                                 x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
-                if get_max:
-                    values[i] = np.max(vals_tmp)
-                else:
-                    values[i] = np.min(vals_tmp)
+
+                # if dpix is greater than zero, determine the
+                # absolute maximum
+                if dpix>0:
+                    values[i] = get_max (vals_tmp, update_indices,
+                                         y_indices, x_indices, i, dpix)
+
 
 
     log.info ('wall-time spent in get_pixel_values: {:.3f}s'
@@ -1744,6 +1749,23 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
 
 
     return values
+
+
+################################################################################
+
+def get_max (vals_tmp, update_indices, y_indices, x_indices, i, dpix):
+
+    # 2d indices of maximum
+    idx_max = np.unravel_index(np.argmax(
+        np.abs(vals_tmp), vals_tmp.shape))
+
+    # update indices if needed
+    if update_indices:
+        y_indices[i] += idx_max[0] - dpix
+        x_indices[i] += idx_max[1] - dpix
+
+
+    return vals_tmp[idx_max]
 
 
 ################################################################################
@@ -2316,12 +2338,12 @@ if __name__ == "__main__":
                         help='consider images in these filters only; '
                         'default=ugqriz')
 
-    parser.add_argument('--date_start', type=str, default=None,
+    parser.add_argument('--date_start', type=str2None, default=None,
                         help='starting UTC date of observation in format '
                         '[date_format] for measurements to consider; '
                         'default=None')
 
-    parser.add_argument('--date_end', type=str, default=None,
+    parser.add_argument('--date_end', type=str2None, default=None,
                         help='ending UTC date of observation in format '
                         '[date_format] for measurements to consider; '
                         'default=None')
@@ -3148,41 +3170,45 @@ if __name__ == "__main__":
 
 
 
-        # read header of trans table for description of keywords
-        #header_transtable = zogy.read_hdulist(
-        #    fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
-        #    get_data=False, get_header=True)
-        fn_tmp = fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits')
-        with fits.open(fn_tmp) as hdulist:
-            header_transtable = hdulist[-1].header
+
+        if '.fits' in args.file_out:
+
+            # read header of trans table for description of keywords
+            #header_transtable = zogy.read_hdulist(
+            #    fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits'),
+            #    get_data=False, get_header=True)
+            fn_tmp = fits_hdrtable_list[0].replace('_cat.fits', '_trans.fits')
+            with fits.open(fn_tmp) as hdulist:
+                header_transtable = hdulist[-1].header
 
 
+            col_descr_dict = create_col_descr (keys2add, header_transtable,
+                                               args.ra_col, args.dec_col)
 
-        col_descr_dict = create_col_descr (keys2add, header_transtable,
-                                           args.ra_col, args.dec_col)
-        with fits.open(args.file_out, mode='update') as hdulist:
-            for i, col0 in enumerate(table_out.colnames):
-                ncol = i + 1
-                # edit aperture names
-                if 'APER' in col0:
-                    col = '_'.join(col0.split('_')[:2])
-                    if 'REF' in col0:
-                        col += '_REF'
-                    if 'RED' in col0:
-                        col += '_RED'
-                else:
-                    col = col0
 
-                # check if col is present in col_descr_dict
-                if col in col_descr_dict:
-                    descr = col_descr_dict[col]
-                else:
-                    log.warning ('{} not in column description dictionary'
-                                 .format(col))
-                    descr = ''
+            with fits.open(args.file_out, mode='update') as hdulist:
+                for i, col0 in enumerate(table_out.colnames):
+                    ncol = i + 1
+                    # edit aperture names
+                    if 'APER' in col0:
+                        col = '_'.join(col0.split('_')[:2])
+                        if 'REF' in col0:
+                            col += '_REF'
+                        if 'RED' in col0:
+                            col += '_RED'
+                    else:
+                        col = col0
 
-                # update relevant header keyword COMM
-                hdulist[-1].header['TCOMM{}'.format(ncol)] = descr
+                    # check if col is present in col_descr_dict
+                    if col in col_descr_dict:
+                        descr = col_descr_dict[col]
+                    else:
+                        log.warning ('{} not in column description dictionary'
+                                     .format(col))
+                        descr = ''
+
+                    # update relevant header keyword COMM
+                    hdulist[-1].header['TCOMM{}'.format(ncol)] = descr
 
 
     else:
