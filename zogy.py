@@ -381,14 +381,6 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         satlevel_new *= gain_new
         gain_new = 1.0
 
-        # if gain and/or satlevel is defined in set_zogy, remove them
-        if 'gain' in dir(set_zogy) and set_zogy.gain != 1:
-            del set_zogy.gain
-
-        if 'satlevel' in dir(set_zogy):
-            del set_zogy.satlevel
-
-
 
     if ref:
         # read in header of ref_fits
@@ -404,12 +396,21 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         satlevel_ref *= gain_ref
         gain_ref = 1.0
 
-        # if gain and/or satlevel is defined in set_zogy, remove them
-        if 'gain' in dir(set_zogy) and set_zogy.gain != 1:
-            del set_zogy.gain
 
-        if 'satlevel' in dir(set_zogy):
-            del set_zogy.satlevel
+
+    # update the gain and satlevel values in set_zogy if they were
+    # defined, since they are now different; N.B.: this assumes that
+    # they were the same for the new and ref image, but since the
+    # values were set in set_zogy and not in the header, they should
+    # be the same
+    if 'gain' in dir(set_zogy) and set_zogy.gain != 1:
+        set_zogy.gain = 1.0
+
+    if 'satlevel' in dir(set_zogy):
+        if 'satlevel_new' in locals():
+            set_zogy.satlevel = satlevel_new
+        else:
+            set_zogy.satlevel = satlevel_ref
 
 
 
@@ -556,22 +557,40 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                 if not get_par(set_zogy.skip_wcs,tel):
                     # delete some keywords that astrometry.net does
                     # not appear to overwrite
-                    for key in ['CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2',
-                                'CUNIT1', 'CUNIT2',
-                                'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
-                                'PROJP1', 'PROJP3',
-                                'PV1_1', 'PV1_2', 'PV2_1', 'PV2_2']:
+                    keys2remove = ['CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2',
+                                   'CUNIT1', 'CUNIT2',
+                                   'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
+                                   'PROJP1', 'PROJP3']
+
+                    # PV keys
+                    keys2remove.extend(['PV{}_{}'.format(i,j)
+                                        for i in range(1,3)
+                                        for j in range(0,41)])
+
+                    # SIP keys
+                    for str_tmp in ['A', 'B', 'AP', 'BP']:
+                        keys2remove.extend(['{}_ORDER'.format(str_tmp)])
+                        keys2remove.extend(['{}_{}_{}'.format(str_tmp,i,j)
+                                            for i in range(6)
+                                            for j in range(6)])
+
+                    # remove if they exist in the header
+                    for key in keys2remove:
                         if key in header:
                             del header[key]
+
+
                     WCS_processed = False
                     fits_base = '{}.fits'.format(base)
                     run_wcs(fits_base, ra, dec, pixscale, xsize, ysize, header,
                             imtype)
 
+
             except Exception as e:
                 #log.exception(traceback.format_exc())
                 log.exception('exception was raised during [run_wcs]: {}'
                               .format(e))
+
             else:
                 WCS_processed = True
                 # update pixscale_new or pixscale_ref
@@ -1584,13 +1603,15 @@ def prep_fits (fits_in, header, gain, satlevel, str2add):
             # multiply by gain
             data *= gain
 
-            # update gain keyword value in header
-            key_gain = get_par(set_zogy.key_gain,tel)
-            header[key_gain] = 1.0
+            # update gain keyword value in header - if it exists
+            if 'key_gain' in dir(set_zogy):
+                key_gain = get_par(set_zogy.key_gain,tel)
+                header[key_gain] = 1.0
 
             # update satlevel keyword value in header
-            key_satlevel = get_par(set_zogy.key_satlevel,tel)
-            header[key_satlevel] = gain * satlevel
+            if 'key_satlevel' in dir(set_zogy):
+                key_satlevel = get_par(set_zogy.key_satlevel,tel)
+                header[key_satlevel] = gain * satlevel
 
 
         # save image to fits with
@@ -10933,9 +10954,9 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
                 filt_subscript = ''
             else:
                 # new catalog contains _ML and _BG subscripts
-                if tel == 'Mkd':
+                if tel in ['Mkd', 'TJO']:
                     filt_subscript = '_{}'.format(tel)
-                elif tel == 'TJO' or tel == 'PS':
+                elif tel == 'PS':
                     # use the BG calibration for now
                     filt_subscript = '_BG'
                 else:
@@ -10950,6 +10971,12 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
         # extract calibration magnitudes
         col_filt = '{}{}'.format(filt, filt_subscript)
+        if tel=='TJO':
+            # remove SDSS from filter names as defined in TJO header,
+            # e.g. u-band is defined as 'SDSS u' in the header
+            col_filt = col_filt.replace('SDSS','').strip()
+
+
         mag_cal = table_cal[col_filt].value
 
 
