@@ -8573,10 +8573,10 @@ def read_header(header, keywords):
         if key=='filter':
             value = str(value)
 
-        if tel=='TJO':
-            # remove SDSS from filter names as defined in TJO header,
-            # e.g. u-band is defined as 'SDSS u' in the header
-            value = value.replace('SDSS','').strip()
+            if tel=='TJO':
+                # remove SDSS from filter names as defined in TJO header,
+                # e.g. u-band is defined as 'SDSS u' in the header
+                value = value.replace('SDSS','').strip()
 
         values.append(value)
 
