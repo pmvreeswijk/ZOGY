@@ -555,6 +555,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
         if ('CTYPE1' not in header and 'CTYPE2' not in header) or redo:
             try:
                 if not get_par(set_zogy.skip_wcs,tel):
+
+                    log.info ('removing existing WCS header keywords')
+
                     # delete some keywords that astrometry.net does
                     # not appear to overwrite
                     keys2remove = ['CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2',
@@ -8569,7 +8572,14 @@ def read_header(header, keywords):
         value = get_keyvalue(key, header)
         if key=='filter':
             value = str(value)
+
+        if tel=='TJO':
+            # remove SDSS from filter names as defined in TJO header,
+            # e.g. u-band is defined as 'SDSS u' in the header
+            value = value.replace('SDSS','').strip()
+
         values.append(value)
+
 
     if len(values)==1:
         return values[0]
@@ -10971,10 +10981,11 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
 
         # extract calibration magnitudes
         col_filt = '{}{}'.format(filt, filt_subscript)
-        if tel=='TJO':
-            # remove SDSS from filter names as defined in TJO header,
-            # e.g. u-band is defined as 'SDSS u' in the header
-            col_filt = col_filt.replace('SDSS','').strip()
+        #if tel=='TJO':
+        #    # remove SDSS from filter names as defined in TJO header,
+        #    # e.g. u-band is defined as 'SDSS u' in the header
+        #    now done inside read_header
+        #    col_filt = col_filt.replace('SDSS','').strip()
 
 
         mag_cal = table_cal[col_filt].value
