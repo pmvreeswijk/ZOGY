@@ -123,7 +123,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.7.0'
+__version__ = '1.7.1'
 
 
 ################################################################################
@@ -551,42 +551,49 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
                              '{}.fits'.format(base)))
 
 
-        # determine WCS solution
-        if ('CTYPE1' not in header and 'CTYPE2' not in header) or redo:
+        # determine WCS solution, unless already present or redo
+        # or set_zogy.skip_wcs is set to False
+        if (('CTYPE1' not in header and 'CTYPE2' not in header) or redo
+            or not get_par(set_zogy.skip_wcs,tel)):
+
             try:
-                if not get_par(set_zogy.skip_wcs,tel):
+                log.info ('removing existing WCS header keywords')
 
-                    log.info ('removing existing WCS header keywords')
+                # delete some keywords that astrometry.net does
+                # not appear to overwrite
+                keys2remove = ['CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2',
+                               'CUNIT1', 'CUNIT2',
+                               'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
+                               'PROJP1', 'PROJP3']
 
-                    # delete some keywords that astrometry.net does
-                    # not appear to overwrite
-                    keys2remove = ['CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2',
-                                   'CUNIT1', 'CUNIT2',
-                                   'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
-                                   'PROJP1', 'PROJP3']
+                # PV keys
+                keys2remove.extend(['PV{}_{}'.format(i,j)
+                                    for i in range(1,3)
+                                    for j in range(0,41)])
 
-                    # PV keys
-                    keys2remove.extend(['PV{}_{}'.format(i,j)
-                                        for i in range(1,3)
-                                        for j in range(0,41)])
+                # SIP keys
+                for str_tmp in ['A', 'B', 'AP', 'BP']:
+                    keys2remove.extend(['{}_ORDER'.format(str_tmp)])
+                    keys2remove.extend(['{}_{}_{}'.format(str_tmp,i,j)
+                                        for i in range(6)
+                                        for j in range(6)])
 
-                    # SIP keys
-                    for str_tmp in ['A', 'B', 'AP', 'BP']:
-                        keys2remove.extend(['{}_ORDER'.format(str_tmp)])
-                        keys2remove.extend(['{}_{}_{}'.format(str_tmp,i,j)
-                                            for i in range(6)
-                                            for j in range(6)])
-
-                    # remove if they exist in the header
-                    for key in keys2remove:
-                        if key in header:
-                            del header[key]
+                # remove if they exist in the header
+                for key in keys2remove:
+                    if key in header:
+                        log.info ('deleting header keyword {}'.format(key))
+                        del header[key]
 
 
-                    WCS_processed = False
-                    fits_base = '{}.fits'.format(base)
-                    run_wcs(fits_base, ra, dec, pixscale, xsize, ysize, header,
-                            imtype)
+                # update fits file with updated header
+                fits_wcs_in = '{}.fits'.format(base)
+                update_imcathead (fits_wcs_in, header)
+
+
+                # run_wcs
+                WCS_processed = False
+                run_wcs(fits_wcs_in, ra, dec, pixscale, xsize, ysize,
+                        header, imtype)
 
 
             except Exception as e:
@@ -4502,6 +4509,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # filter on FLAGS_MASK values
     # ===========================
 
+    # N.B.: FLAGS_MASK contains the flagged pixels over the isophotal
+    # area in the Scorr positive/negative images, where the input mask
+    # is a combination of both the new and ref image
     mask_flags = np.zeros(len(table_trans), dtype=bool)
     masktype_discard =  get_par(set_zogy.transient_flagsmask_discard,tel)
     mask_value = get_par(set_zogy.mask_value,tel)
@@ -4518,7 +4528,9 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK')
         table_trans = table_trans[~mask_flags]
 
-    log.info ('ntrans after FLAGS_MASK cut: {}'.format(len(table_trans)))
+    # FLAGS_MASK is renamed to FLAGS_MASK_SCORR below
+    log.info ('ntrans after FLAGS_MASK_SCORR cut: {}'.format(len(table_trans)))
+
 
     if get_par(set_zogy.make_plots,tel):
         ds9_rad += 2
@@ -4527,6 +4539,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
             table_trans['X_POS'], table_trans['Y_POS'],
             radius=ds9_rad, width=2, color='blue',
             value=table_trans['FLAGS'])
+
 
 
     # filter on FLAGS values (all = 2**8 - 1 = 255)
@@ -4547,7 +4560,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         trans_rejected_position (table_trans, mask_flags, 'FLAGS')
         table_trans = table_trans[~mask_flags]
 
-    log.info ('ntrans after FLAGS cut: {}'.format(len(table_trans)))
+    log.info ('ntrans after Source-Extractor FLAGS cut: {}'
+              .format(len(table_trans)))
 
     if get_par(set_zogy.make_plots,tel):
         ds9_rad += 2
@@ -4636,7 +4650,8 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
 
     # add results as columns to table_trans
     colnames = ['X_PSF_D', 'XERR_PSF_D', 'Y_PSF_D', 'YERR_PSF_D',
-                'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D', 'FLAGS_CENTRAL']
+                'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D',
+                'FLAGS_MASK_INNER']
     table_trans.add_columns(results, names=colnames)
 
     log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
@@ -4651,7 +4666,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         result = prep_ds9regions(
             '{}_ds9regions_trans_filt3_elong.txt'.format(base),
             table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='blue',
+            radius=ds9_rad, width=2, color='green',
             value=table_trans['CHI2_PSF_D'])
 
 
@@ -4714,18 +4729,63 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     log.info('ntrans after PSF_D fit S/N filter: {}'.format(len(table_trans)))
 
 
+    if get_par(set_zogy.make_plots,tel):
+        ds9_rad += 2
+        result = prep_ds9regions(
+            '{}_ds9regions_trans_filt5_s2n_PSF_D.txt'.format(base),
+            table_trans['X_POS'], table_trans['Y_POS'],
+            radius=ds9_rad, width=2, color='cyan',
+            value=table_trans['FLAGS_MASK_INNER'])
 
-    # filter on FLAGS_CENTRAL (determined while performing PSF fit to D above)
-    # =======================
 
-    # require central flags to be zero
-    mask_keep = (table_trans['FLAGS_CENTRAL'] == 0)
+
+    # filter on FLAGS_MASK_INNER
+    # ==========================
+    #
+    # this flags_mask_inner is determined while performing the PSF fit
+    # to D above, where the input mask is the combined new+ref mask,
+    # and so it includes masked pixels in the ref image. FLAGS_MASK
+    # also concerns both images, but that is using the object
+    # footprint as determined by Source Extractor (isophotal area?).
+
+    # require inner flags to follow transient_flagsmask_discard
+    mask_flags = np.zeros(len(table_trans), dtype=bool)
+    masktype_discard =  get_par(set_zogy.transient_flagsmask_discard,tel)
+    mask_value = get_par(set_zogy.mask_value,tel)
+    # iterate over mask values
+    for val in mask_value.values():
+        # check if this one is to be discarded
+        if masktype_discard & val == val:
+            mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
+            mask_flags[mask_discard] = True
+            log.info('discarding FLAGS_MASK_INNER value {}; no. of objects: {}'
+                     .format(val, np.sum(mask_discard)))
+
     if not keep_all:
-        trans_rejected_position (table_trans, ~mask_keep, 'FLAGS_CENTRAL != 0')
-        table_trans = table_trans[mask_keep]
+        trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK_INNER')
+        table_trans = table_trans[~mask_flags]
+
+    log.info ('ntrans after FLAGS_MASK_INNER cut: {}'.format(len(table_trans)))
 
 
-    log.info('ntrans after FLAGS_CENTRAL filter: {}'.format(len(table_trans)))
+    if get_par(set_zogy.make_plots,tel):
+        ds9_rad += 2
+        result = prep_ds9regions(
+            '{}_ds9regions_trans_filt7_flagsmaskinner.txt'.format(base),
+            table_trans['X_POS'], table_trans['Y_POS'],
+            radius=ds9_rad, width=2, color='blue')
+
+
+
+    if False:
+        # decided not to replace FLAGS_MASK with FLAGS_MASK_INNER,
+        # because the same FLAGS_MASK information is available
+        # separately in FLAGS_MASK_RED and FLAGS_MASK_REF, i.e.  over
+        # the inner profile of the red and ref image. Whereas
+        # FLAGS_MASK(_SCORR) is over the isophotal area according to
+        # source extractor
+        log.warning ('adopting FLAGS_MASK_INNER as FLAGS_MASK(_SCORR)')
+        table_trans['FLAGS_MASK'] = table_trans['FLAGS_MASK_INNER']
 
 
 
@@ -4735,6 +4795,12 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # add Gauss parameters in case of original transient catalog
     use_new_transcat = get_par(set_zogy.use_new_transcat,tel)
     if not use_new_transcat:
+
+        # Gauss fit is done for the old transient extraction, but
+        # since it is done on the convolved D image, i.e. a
+        # combination of the PSFs of the new and ref image, its output
+        # results are not very interesting and skipped in the new
+        # transient extraction
 
         # fit Gauss to D using get_psfoptflux_mp
         results = get_psfoptflux_mp (
@@ -4759,7 +4825,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         if get_par(set_zogy.make_plots,tel):
             ds9_rad += 2
             result = prep_ds9regions(
-                '{}_ds9regions_trans_filt5_s2n_PSF_D.txt'.format(base),
+                '{}_ds9regions_trans_filt7_flagsmaskinner.txt'.format(base),
                 table_trans['X_POS'], table_trans['Y_POS'],
                 radius=ds9_rad, width=2, color='blue',
                 value=table_trans['CHI2_GAUSS_D'])
@@ -4792,7 +4858,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         if get_par(set_zogy.make_plots,tel):
             ds9_rad += 2
             result = prep_ds9regions(
-                '{}_ds9regions_trans_filt6_chi2_GAUSS.txt'.format(base),
+                '{}_ds9regions_trans_filt7_chi2_GAUSS.txt'.format(base),
                 table_trans['X_POS'], table_trans['Y_POS'],
                 radius=ds9_rad, width=2, color='green')
 
@@ -4957,6 +5023,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # in case of new transient catalog columns, execute block below
     if get_par(set_zogy.use_new_transcat,tel):
 
+        # force_phot module is using the _hdr.fits files of the new
+        # and ref catalog; make sure they are created already for
+        # telescopes other than BlackGEM/MeerLICHT (for which they are
+        # prepared in blackbox.py)
+        update_imcathead (fits_new, header_new, create_hdrfile=True)
+        update_imcathead (fits_ref, header_ref, create_hdrfile=True)
+
+
         # add some additional columns to transient catalog, by crossmatching
         # with Gaia and reference catalogs, and performing forced photometry
         # at transients positions in new and ref image
@@ -4977,11 +5051,6 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         fnu_tot = fnu_zogy + fnu_opt_ref
         fnuerr_tot = np.sqrt(fnuerr_zogy**2 + fnuerr_opt_ref**2)
 
-        #log.info ('fnu_tot.shape: {}'.format(fnu_tot.shape))
-        #log.info ('fnuerr_tot.shape: {}'.format(fnuerr_tot.shape))
-        #log.info ('fnu_opt_ref.shape: {}'.format(fnu_opt_ref.shape))
-        #log.info ('fnuerr_opt_ref.shape: {}'.format(fnuerr_opt_ref.shape))
-
 
         mask_neg = (((fnu_tot / fnuerr_tot) < 3) &
                     ((fnu_opt_ref / fnuerr_opt_ref) < -3))
@@ -4993,13 +5062,12 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                   .format(np.sum(mask_neg)))
 
 
-        # also discard transients with nonzero flag in reference image?
-        mask_nonzeroflag = (table_trans['FLAGS_MASK_REF'] != 0)
-        trans_rejected_position (table_trans, mask_nonzeroflag,
-                                 'non-zero flag in reference image')
-        table_trans = table_trans[~mask_nonzeroflag]
-        log.info ('{} transients discarded with nonzero flags in '
-                  'reference image'.format(np.sum(mask_nonzeroflag)))
+        if get_par(set_zogy.make_plots,tel):
+            ds9_rad += 2
+            result = prep_ds9regions(
+                '{}_ds9regions_trans_filt7_negfluxref.txt'.format(base),
+                table_trans['X_POS'], table_trans['Y_POS'],
+                radius=ds9_rad, width=2, color='green')
 
 
 
@@ -6041,7 +6109,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         nthreads = 1
 
 
-    # when creating mask of objects' psf central footprints, force
+    # when creating mask of objects' psf inner footprints, force
     # nthreads=1
     if get_psf_footprint:
         nthreads = 1
@@ -7016,11 +7084,11 @@ def get_psfoptflux_loop (
 
 
 
-        # define central mask of object using the PSF
+        # define inner mask of object using the PSF
         mask_inner = (P_shift >= inner_psflim * np.amax(P_shift))
 
         # if flags_mask_inner is specified, calculate the combined
-        # flags_mask (bitwise OR!) of the central object area
+        # flags_mask (bitwise OR!) of the inner object area
         if get_flags_mask_inner:
             flags_mask_inner[i] = np.bitwise_or.reduce(D_mask_sub[mask_inner])
 
@@ -7325,7 +7393,7 @@ def get_psfoptflux_loop (
                         log.info('nsat: {}, np.sum(mask_inner & mask_region): {}'
                                  .format(nsat, np.sum(mask_inner & mask_region)))
 
-                    # check if there is overlap with central PSF region
+                    # check if there is overlap with inner PSF region
                     if (np.sum(mask_inner & mask_region) > 0 and
                         nsat > 0 and nsat <= replace_sat_nmax):
 
@@ -7427,7 +7495,7 @@ def get_psfoptflux_loop (
         list2return += [flags_opt]
 
 
-    # if specified, add combined flags_mask of central PSF area
+    # if specified, add combined flags_mask of inner PSF area
     if get_flags_mask_inner:
         list2return += [flags_mask_inner]
 
