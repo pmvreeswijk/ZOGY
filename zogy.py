@@ -587,7 +587,9 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
                 # update fits file with updated header
                 fits_wcs_in = '{}.fits'.format(base)
-                update_imcathead (fits_wcs_in, header)
+                with fits.open(fits_wcs_in, mode='update',
+                               memmap=True) as hdulist:
+                    hdulist[-1].header = header
 
 
                 # run_wcs
@@ -3573,7 +3575,7 @@ def update_imcathead (filename, header, create_hdrfile=False, use_fitsio=False):
     else:
 
         # using astropy, open fits file in update mode
-        with fits.open(filename, 'update', memmap=True,
+        with fits.open(filename, mode='update', memmap=True,
                        output_verify='warn') as hdulist:
 
 
@@ -18847,7 +18849,7 @@ def run_psfex (cat_in, file_config, cat_out, imtype, poldeg, nsnap=8,
                 mask_psfstars = table['SOURCE_NUMBER']-1
 
             # overwrite the input catalog with these selected stars
-            with fits.open(cat_in, mode='update') as hdulist:
+            with fits.open(cat_in, mode='update', memmap=True) as hdulist:
                 hdulist[2].data = hdulist[2].data[mask_psfstars]
 
 
