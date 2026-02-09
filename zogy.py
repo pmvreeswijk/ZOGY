@@ -4636,6 +4636,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     if trim_image:
         data_newref_mask = read_hdulist (fits_newref_mask_orig, dtype='uint8')
 
+
     results = get_psfoptflux_mp (
         fits_new_psf, data_D, data_D_var, data_newref_mask,
         table_trans['X_PEAK'], table_trans['Y_PEAK'], psffit=True,
@@ -4748,32 +4749,42 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # also concerns both images, but that is using the object
     # footprint as determined by Source Extractor (isophotal area?).
 
-    # require inner flags to follow transient_flagsmask_discard
-    mask_flags = np.zeros(len(table_trans), dtype=bool)
-    masktype_discard =  get_par(set_zogy.transient_flagsmask_discard,tel)
-    mask_value = get_par(set_zogy.mask_value,tel)
-    # iterate over mask values
-    for val in mask_value.values():
-        # check if this one is to be discarded
-        if masktype_discard & val == val:
-            mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
-            mask_flags[mask_discard] = True
-            log.info('discarding FLAGS_MASK_INNER value {}; no. of objects: {}'
-                     .format(val, np.sum(mask_discard)))
+    if False:
 
-    if not keep_all:
-        trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK_INNER')
-        table_trans = table_trans[~mask_flags]
-
-    log.info ('ntrans after FLAGS_MASK_INNER cut: {}'.format(len(table_trans)))
+        # CHECK!!! - somehow this is not working yet; Gerard gets an
+        # exception for the following line (see todo.log for details),
+        # as if
+        #
+        # mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
 
 
-    if get_par(set_zogy.make_plots,tel):
-        ds9_rad += 2
-        result = prep_ds9regions(
-            '{}_ds9regions_trans_filt7_flagsmaskinner.txt'.format(base),
-            table_trans['X_POS'], table_trans['Y_POS'],
-            radius=ds9_rad, width=2, color='blue')
+        # require inner flags to follow transient_flagsmask_discard
+        mask_flags = np.zeros(len(table_trans), dtype=bool)
+        masktype_discard =  get_par(set_zogy.transient_flagsmask_discard,tel)
+        mask_value = get_par(set_zogy.mask_value,tel)
+        # iterate over mask values
+        for val in mask_value.values():
+            # check if this one is to be discarded
+            if masktype_discard & val == val:
+                mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
+                mask_flags[mask_discard] = True
+                log.info('discarding FLAGS_MASK_INNER value {}; no. of objects: {}'
+                         .format(val, np.sum(mask_discard)))
+
+
+        if not keep_all:
+            trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK_INNER')
+            table_trans = table_trans[~mask_flags]
+
+        log.info ('ntrans after FLAGS_MASK_INNER cut: {}'.format(len(table_trans)))
+
+
+        if get_par(set_zogy.make_plots,tel):
+            ds9_rad += 2
+            result = prep_ds9regions(
+                '{}_ds9regions_trans_filt7_flagsmaskinner.txt'.format(base),
+                table_trans['X_POS'], table_trans['Y_POS'],
+                radius=ds9_rad, width=2, color='blue')
 
 
 
@@ -6279,7 +6290,6 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
         idx_list, x_borders = prep_indices (xcoords, nthreads, x_sort=True)
 
 
-
         # using [count_fainter_neighbours], determine integer array
         # with same length and order as input coordinates, that
         # indicates number of fainter neighbours for each source
@@ -6746,7 +6756,7 @@ def get_psfoptflux_loop (
     fname = inspect.currentframe().f_code.co_name
     log.info('executing {} with {} thread(s) ...'.format(fname, nthreads))
     t = time.time()
-    #log_timing_memory (t0=t, label='at start of get_psfoptflux_mp_loop')
+    #log_timing_memory (t0=t, label='at start of get_psfoptflux_loop')
     #log.info ('nthreads: {}, globals(): {}'.format(nthreads, globals()))
 
 
