@@ -50,10 +50,12 @@ chi2_snr_limit = 50      # transient signal-to-noise ratio limit above
 # further down below) contained in transient_mask_discard are
 # discarded; e.g. 63 implies that any transient containing at least
 # one pixel in its inner profile with FLAGS_MASK 1 | 2 | 4 | 8 | 16 |
-# 32 (=63) does not appear in transient catalog
+# 32 (=63) does not appear in transient catalog. This considers
+# flagged pixels in both the new and in the reference image.
 transient_flagsmask_discard = 63 # = 1 | 2 | 4 | 8 | 16 | 32; allow crosstalk
 # same for FLAGS; 255 implies discard transients with any non-zero
-# Source Extractor FLAGS
+# Source Extractor FLAGS when it is applied to the Scorr image; these
+# FLAGS are recorded as FLAGS_SCORR in the transient catalog
 transient_flags_discard = 255 # = 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128
 
 
@@ -219,7 +221,7 @@ psf_stars_nmax = 15000   # maximum number of stars to provide as input to PSFEx,
 # Astrometry
 #===============================================================================
 # WCS
-skip_wcs = False         # skip Astrometry.net step if image already
+skip_wcs = True          # skip Astrometry.net step if image already
                          # contains a reliable WCS solution
 # Astrometry.net's tweak order
 astronet_tweak_order = 3
