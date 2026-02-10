@@ -587,6 +587,7 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
                 # update fits file with updated header
                 fits_wcs_in = '{}.fits'.format(base)
+                log.info ('writing updated header to {}'.format(fits_wcs_in))
                 with fits.open(fits_wcs_in, mode='update',
                                memmap=True) as hdulist:
                     hdulist[-1].header = header
@@ -626,8 +627,8 @@ def optimal_subtraction(new_fits=None,      ref_fits=None,
 
         else:
             log.info('WCS solution (CTYPE1 and CTYPE2 keywords) present in '
-                     'header of {}; skipping astrometric calibration'
-                     .format('{}.fits'.format(base)))
+                     'header of {} and set_zogy.skip_wcs is True; skipping '
+                     'astrometric calibration'.format('{}.fits'.format(base)))
 
         return True
 
@@ -4333,7 +4334,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                       overwrite=True)
 
         # same for mask, but save original
-        fits_newref_mask_orig = '{}_newref_mask_orig.fits'.format(base)
+        fits_newref_mask_orig = '{}_mask_newref_orig.fits'.format(base)
         shutil.copy2 (fits_newref_mask, fits_newref_mask_orig)
         data_newref_mask = read_hdulist (fits_newref_mask, dtype='uint8')
         fits.writeto (fits_newref_mask, data_newref_mask[y1:y2+1,x1:x2+1],
@@ -4656,8 +4657,14 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                 'E_FLUX_PSF_D', 'E_FLUXERR_PSF_D', 'CHI2_PSF_D',
                 'FLAGS_MASK_INNER']
     table_trans.add_columns(results, names=colnames)
+    # make sure dtype of FLAGS is uint8; np.concatenate within
+    # get_psfoptflux_mp changes its dtype to that of other columns
+    col_flags = 'FLAGS_MASK_INNER'
+    table_trans[col_flags] = table_trans[col_flags].astype('uint8')
 
-    log.info ('[get_trans] time after PSF fit to D: {}'.format(time.time()-t))
+
+    log.info ('[get_trans] time after PSF fit to D: {:.2f}'
+              .format(time.time()-t))
 
 
 
@@ -4751,42 +4758,33 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     # also concerns both images, but that is using the object
     # footprint as determined by Source Extractor (isophotal area?).
 
-    if False:
-
-        # CHECK!!! - somehow this is not working yet; Gerard gets an
-        # exception for the following line (see todo.log for details),
-        # as if
-        #
-        # mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
-
-
-        # require inner flags to follow transient_flagsmask_discard
-        mask_flags = np.zeros(len(table_trans), dtype=bool)
-        masktype_discard =  get_par(set_zogy.transient_flagsmask_discard,tel)
-        mask_value = get_par(set_zogy.mask_value,tel)
-        # iterate over mask values
-        for val in mask_value.values():
-            # check if this one is to be discarded
-            if masktype_discard & val == val:
-                mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
-                mask_flags[mask_discard] = True
-                log.info('discarding FLAGS_MASK_INNER value {}; no. of objects: {}'
-                         .format(val, np.sum(mask_discard)))
+    # require inner flags to follow transient_flagsmask_discard
+    mask_flags = np.zeros(len(table_trans), dtype=bool)
+    masktype_discard =  get_par(set_zogy.transient_flagsmask_discard,tel)
+    mask_value = get_par(set_zogy.mask_value,tel)
+    # iterate over mask values
+    for val in mask_value.values():
+        # check if this one is to be discarded
+        if masktype_discard & val == val:
+            mask_discard = (table_trans['FLAGS_MASK_INNER'] & val == val)
+            mask_flags[mask_discard] = True
+            log.info('discarding FLAGS_MASK_INNER value {}; no. of objects: {}'
+                     .format(val, np.sum(mask_discard)))
 
 
-        if not keep_all:
-            trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK_INNER')
-            table_trans = table_trans[~mask_flags]
+    if not keep_all:
+        trans_rejected_position (table_trans, mask_flags, 'FLAGS_MASK_INNER')
+        table_trans = table_trans[~mask_flags]
 
-        log.info ('ntrans after FLAGS_MASK_INNER cut: {}'.format(len(table_trans)))
+    log.info ('ntrans after FLAGS_MASK_INNER cut: {}'.format(len(table_trans)))
 
 
-        if get_par(set_zogy.make_plots,tel):
-            ds9_rad += 2
-            result = prep_ds9regions(
-                '{}_ds9regions_trans_filt7_flagsmaskinner.txt'.format(base),
-                table_trans['X_POS'], table_trans['Y_POS'],
-                radius=ds9_rad, width=2, color='blue')
+    if get_par(set_zogy.make_plots,tel):
+        ds9_rad += 2
+        result = prep_ds9regions(
+            '{}_ds9regions_trans_filt7_flagsmaskinner.txt'.format(base),
+            table_trans['X_POS'], table_trans['Y_POS'],
+            radius=ds9_rad, width=2, color='blue')
 
 
 
@@ -4831,7 +4829,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
         table_trans.add_columns(results, names=colnames)
 
 
-        log.info ('[get_trans] time after Gauss fit to D: {}'
+        log.info ('[get_trans] time after Gauss fit to D: {:.2f}'
                   .format(time.time()-t))
 
 
@@ -4990,7 +4988,7 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
                                     return_fnu=True, zp_err=zp_std_coords)
 
 
-    log.info ('[get_trans] time after converting flux to mag: {}'
+    log.info ('[get_trans] time after converting flux to mag: {:.2f}'
               .format(time.time()-t))
 
     # adding magnitudes and also flux_peak to table
@@ -5108,13 +5106,15 @@ def trans_rejected_position (table, mask, reason):
 
     nmask = np.sum(mask)
     log.info ('{} transients rejected; reason: {}'.format(nmask, reason))
-    xpos = table[mask]['X_PEAK'].value
-    ypos = table[mask]['Y_PEAK'].value
-    # sort in xpos
-    idx_sort = np.argsort(xpos)
-    log.info ('X_PEAK, Y_PEAK:')
-    for i in range(nmask):
-        log.info ('{:5}, {:5}'.format(xpos[idx_sort[i]], ypos[idx_sort[i]]))
+
+    if nmask > 0:
+        xpos = table[mask]['X_PEAK'].value
+        ypos = table[mask]['Y_PEAK'].value
+        # sort in xpos
+        idx_sort = np.argsort(xpos)
+        log.info ('X_PEAK, Y_PEAK:')
+        for i in range(nmask):
+            log.info ('{:5}, {:5}'.format(xpos[idx_sort[i]], ypos[idx_sort[i]]))
 
 
 ################################################################################
@@ -6351,6 +6351,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # convert to same list as the multiprocess list2return
             list2return = np.concatenate([results], axis=1)
 
+
         else:
 
             # multiprocess (without shared memory)
@@ -6359,6 +6360,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # results is a list of output arrays; need to concatenate these
             # into single arrays
             list2return = np.concatenate(results, axis=1)
+
 
     else:
 
@@ -7062,6 +7064,7 @@ def get_psfoptflux_loop (
 
         # extract index_P
         P_shift = psf_ima[index_P]
+
 
         # extract subsection from D, D_mask
         D_sub = D[index]
@@ -9232,8 +9235,9 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # read single zp, zp_std and zp_err from header
             zp, zp_std, zp_err = get_zp_header(header, set_zogy=set_zogy)
 
-            log.warning ('zeropoint present in header; skipping photometric '
-                         'calibration for {}'.format(base))
+            log.warning ('zeropoint present in header and/or zeropoint file {} '
+                         'exists; skipping photometric calibration for {}'
+                         .format(fn_zps, base))
 
         else:
 
@@ -9513,9 +9517,13 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
         # infer and add limiting flux and magnitude to header using
         # infer_limflux
-        infer_limflux (header, base, data_wcs, airmass_center, exptime,
-                       ext_coeff, zp, zp_std, zp_err, zp_nsubs_shape,
-                       data_bkg_std, data_mask, imtype, trans=False)
+        if 'LIMFNU' not in header or 'LIMMAG' not in header or redo:
+            infer_limflux (header, base, data_wcs, airmass_center, exptime,
+                           ext_coeff, zp, zp_std, zp_err, zp_nsubs_shape,
+                           data_bkg_std, data_mask, imtype, trans=False)
+        else:
+            log.warning ('LIMFNU and LIMMAG already present in header; skipping '
+                         'limiting flux/mag determination for {}'.format(base))
 
 
 
@@ -9526,16 +9534,18 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
         # create limiting magnitude image; no need to do so for ML/BG
         # reference images except when zogy is run on reference image
         # only, i.e. remap=False
-        if not (imtype=='ref' and remap):
+        fits_limmag = '{}_limmag.fits'.format(base)
+        if (not (imtype=='ref' and remap) and
+            (not os.path.exists(fits_limmag) or redo)):
 
-            fits_limmag = '{}_limmag.fits'.format(base)
             fn_zps = '{}_zps.npy'.format(base)
-
             create_limmag_image (fits_limmag, header, exptime, filt,
                                  data_wcs, data_bkg_std, data_mask, nsubs,
                                  psf_orig, remap, zp, airmass_center,
                                  zp_nsubs_shape, fn_zps)
-
+        else:
+            log.warning ('{} already exists; skipping its re-creation'
+                         .format(fits_limmag))
 
 
 
@@ -9547,7 +9557,6 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
     # ---------------------------------
     # zeropoint flattening of new image
     # ---------------------------------
-
 
     if imtype=='new':
 
