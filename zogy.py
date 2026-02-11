@@ -5035,11 +5035,11 @@ def get_trans (fits_new, fits_ref, fits_D, fits_Scorr, fits_Fpsf, fits_Fpsferr,
     if get_par(set_zogy.use_new_transcat,tel):
 
         # force_phot module is using the _hdr.fits files of the new
-        # and ref catalog; make sure they are created already for
-        # telescopes other than BlackGEM/MeerLICHT (for which they are
-        # prepared in blackbox.py)
+        # and ref catalog or image; make sure they are created already
+        # for telescopes other than BlackGEM/MeerLICHT (for which they
+        # are prepared in blackbox.py)
         update_imcathead (fits_new, header_new, create_hdrfile=True)
-        update_imcathead (fits_ref, header_ref, create_hdrfile=True)
+        update_imcathead (ref_fits, header_ref, create_hdrfile=True)
 
 
         # add some additional columns to transient catalog, by crossmatching
