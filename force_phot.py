@@ -407,7 +407,7 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
     pars = [table_in, trans, ref, fullsource, nsigma, apphot_radii,
             bkg_global, bkg_radii, bkg_objmask, bkg_limfrac, pm_epoch,
             keys2add, add_keys, names, dtypes, thumbnails, size_thumbnails,
-            remove_psf]
+            remove_psf, tel]
 
 
     if nimages == 1:
@@ -546,7 +546,7 @@ def add_drop_fz (filename):
 def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
               apphot_radii, bkg_global, bkg_radii, bkg_objmask, bkg_limfrac,
               pm_epoch, keys2add, add_keys, names, dtypes, thumbnails,
-              size_thumbnails, remove_psf, ncpus=None):
+              size_thumbnails, remove_psf, tel, ncpus=None):
 
 
     # extract filenames and table indices from input list
@@ -561,10 +561,6 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
     log.info ('processing {}'.format(filename))
     zogy.mem_use ('[force_phot.get_rows] at start')
-
-
-    # infer telescope name from basename
-    tel = filename.split('/')[-1][0:3]
 
 
     # create a zero-valued table with shape ncoords x number of column
