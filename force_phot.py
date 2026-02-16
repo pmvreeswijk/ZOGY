@@ -1072,8 +1072,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
     y_indices = (ycoords-0.5).astype(int)
 
 
-    # determine several other header keyword values; NB: use of
-    # mask_ok, which narrows the table down to valid coordinates
+    # determine several other header keyword values
     exptime, filt, zp, zp_std, zp_err, airmass, ext_coeff = get_keys (
         header, table['RA_IN'], table['DEC_IN'], tel)
 
@@ -1148,9 +1147,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
     if False:
+        log.info ('zp_coords: {}'.format(zp_coords))
+        log.info ('zp:        {}'.format(zp))
         log.info ('exptime:   {}'.format(exptime))
         log.info ('filt:      {}'.format(filt))
-        log.info ('zp:        {}'.format(zp))
         log.info ('airmass:   {}'.format(airmass))
         log.info ('ext_coeff: {}'.format(ext_coeff))
 
@@ -1304,12 +1304,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                         zp_err=zp_std_coords)
 
 
-                mask_pos = (flux_ap > 0)
-                mag_ap[~mask_pos] = 99
-                #magerr_ap[~mask_pos] = 99
-                #magerrtot_ap[~mask_pos] = 99
-
-
                 col_tmp = 'MAG_APER_R{}xFWHM{}'.format(radius, s2add)
                 table[col_tmp] = mag_ap.astype('float32')
                 col_tmp = 'MAGERR_APER_R{}xFWHM{}'.format(radius, s2add)
@@ -1407,11 +1401,6 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 fnuerrtot_opt = zogy.apply_zp (
                     flux_opt, zp_coords, airmass, exptime, ext_coeff,
                     fluxerr=fluxerr_opt, return_fnu=True, zp_err=zp_std_coords)
-
-
-            mask_pos = (flux_opt > 0)
-            mag_opt[~mask_pos] = 99
-            #magerr_opt[~mask_pos] = 99
 
         else:
             log.warning ('keyword PC-ZP not in header; unable to infer {} '
@@ -1511,11 +1500,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             mag_zogy, magerr_zogy, magerrtot_zogy, fnu_zogy, fnuerr_zogy, \
                 fnuerrtot_zogy = zogy.apply_zp (
                     Fpsf, zp_coords, airmass, exptime, ext_coeff,
-                    fluxerr=Fpsferr, return_fnu=True, zp_err=zp_std_coords)
-
-            mask_zero = (Fpsf==0)
-            mag_zogy[mask_zero] = 99
-            #magerr_zogy[mask_zero] = 99
+                    fluxerr=Fpsferr, return_fnu=True, zp_err=zp_std_coords,
+                    absmag=True)
 
         else:
 
@@ -1771,6 +1757,7 @@ def get_keys (header, ra_in, dec_in, tel):
     # infer the image zeropoint
     keys = ['EXPTIME', 'FILTER', 'DATE-OBS']
     exptime, filt, obsdate = [header[key] for key in keys]
+
 
     # get zeropoint from [header]
     if 'PC-ZP' in header:
