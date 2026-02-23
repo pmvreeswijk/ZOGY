@@ -1997,8 +1997,6 @@ def trans_force_phot (table_trans, ra_trans, dec_trans, fits_image, fits_mask,
     # aperture fluxes
     # ---------------
 
-    mem_use ('[trans_force_phot] before executing [get_apflux]')
-
     # if [bkg_global] is True, set [bkg_radii] to None so that
     # a zero background flux will be adopted in [get_apflux]
     if bkg_global:
@@ -2046,8 +2044,6 @@ def trans_force_phot (table_trans, ra_trans, dec_trans, fits_image, fits_mask,
     # optimal fluxes
     # --------------
 
-    mem_use ('[trans_force_phot] before executing [get_psfoptflux_mp]')
-
     # fit local background in get_psfoptflux_mp() if sky value was
     # not successfully determined by get_apflux, i.e. it is zero
     mask_fit_local_bkg = (local_bkg==0)
@@ -2062,8 +2058,6 @@ def trans_force_phot (table_trans, ra_trans, dec_trans, fits_image, fits_mask,
             get_flags_opt=True, get_flags_mask_inner=True, set_zogy=set_zogy,
             tel=tel, nthreads=nthreads)
 
-
-    mem_use ('[trans_force_phot] after executing [get_psfoptflux_mp]')
 
 
     # calculate signal-to-noise ratio; applies to either the SNR
@@ -7491,8 +7485,8 @@ def get_psfoptflux_loop (
                     mask_region = (regions==ir+1)
                     nsat = np.sum(mask_sat_sub & mask_region)
 
-                    if np.sqrt((x-2500)**2 +
-                               (y-9450)**2) < 100:
+                    if False and np.sqrt((x-2500)**2 +
+                                         (y-9450)**2) < 100:
                         log.info('x: {}, y: {}'.format(x, y))
                         log.info('nsat: {}, np.sum(mask_inner & mask_region): {}'
                                  .format(nsat, np.sum(mask_inner & mask_region)))
@@ -7629,7 +7623,7 @@ def get_psfoptflux_loop (
                           .format(name, exists, atime, mtime, files))
 
 
-    log_timing_memory (t0=t, label='at end of {}'.format(fname))
+    #log_timing_memory (t0=t, label='at end of {}'.format(fname))
 
     return list2return
 
@@ -8232,7 +8226,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
 
             if False:
                 log.warning ('local sky fit in flux_optimal not successful for '
-                             'source at ({:.0f},{:.0f})'.format(x,y, sky_bkg))
+                             'source at ({:.0f},{:.0f})'.format(x,y))
                 #log.info (fit_report(result))
 
 
