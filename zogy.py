@@ -1731,7 +1731,7 @@ def strip_hdrkeys (header, keys2strip=None):
 ################################################################################
 
 def trans_crossmatch (table_trans, ra_trans, dec_trans, fits_red, sexcat_new,
-                      fits_ref_cat, header_new, header_ref, nthreads=1):
+                      fits_ref_cat, header_new, header_ref):
 
 
     """Cross match entries in transient catalog with the Gaia DR3
@@ -4623,7 +4623,7 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
         get_flags_mask_inner=True,
         # CHECK!!! - setting nthreads to at most 1 temporarily, as
         # multiple threads leads to memory error in some cases
-        nthreads=min(nthreads,1), tel=tel)
+        nthreads=1, tel=tel)
 
 
     # add results as columns to table_trans
@@ -5003,9 +5003,9 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
         # add additional columns to transient catalog, by
         # crossmatching with Gaia and reference catalogs
         sexcat_new = '{}_sexcat.fits'.format(base)
-        table_trans = trans_crossmatch (
-            table_trans, ra_trans, dec_trans, fits_new, sexcat_new, fits_ref_cat,
-            header_new, header_ref, nthreads=nthreads)
+        table_trans = trans_crossmatch (table_trans, ra_trans, dec_trans,
+                                        fits_new, sexcat_new, fits_ref_cat,
+                                        header_new, header_ref)
 
 
         # performing forced photometry in new image
@@ -5021,7 +5021,10 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
             table_trans, ra_trans, dec_trans, fits_new, fits_new_mask,
             fits_new_objmask, fits_new_bkg_std, fits_new_psf, header_new,
             fwhm_new, zp_coords, zp_std_coords, airmass_trans, exptime,
-            ext_coeff, imtype='new', nthreads=nthreads)
+            ext_coeff, imtype='new',
+            # CHECK!!! - setting nthreads to at most 1 temporarily, as
+            # multiple threads leads to memory error in some cases
+            nthreads=1)
 
 
 
@@ -5087,7 +5090,10 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
             table_trans, ra_trans, dec_trans, ref_fits, ref_fits_mask,
             ref_fits_objmask, ref_fits_bkg_std, fits_ref_psf, header_ref,
             fwhm_ref, zp_coords_ref, zp_std_coords_ref, airmass_trans_ref,
-            exptime_ref, ext_coeff_ref, imtype='ref', nthreads=nthreads)
+            exptime_ref, ext_coeff_ref, imtype='ref',
+            # CHECK!!! - setting nthreads to at most 1 temporarily, as
+            # multiple threads leads to memory error in some cases
+            nthreads=1)
 
 
 
