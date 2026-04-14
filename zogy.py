@@ -8157,7 +8157,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
 
 
     # CHECK!!!
-    sky_bkg_init = sky_bkg
+    #sky_bkg_init = sky_bkg
 
 
     if add_V_ast:
@@ -11100,13 +11100,14 @@ def phot_calibrate (fits_cal, header, exptime, filt, obsdate, base, ra_center,
     source_ids_used = []
     if ncalstars>0:
 
-        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd', 'TJO', 'PS']:
+        if tel in ['ML1', 'BG2', 'BG3', 'BG4', 'BG', 'Mkd', 'TJO', 'PS',
+                   'Flash']:
             if '20181115' in fits_cal:
                 # old calibration catalog lacks _ML subscripts
                 filt_subscript = ''
             else:
                 # new catalog contains _ML and _BG subscripts
-                if tel in ['Mkd', 'TJO']:
+                if tel in ['Mkd', 'TJO', 'Flash']:
                     filt_subscript = '_{}'.format(tel)
                 elif tel == 'PS':
                     # use the BG calibration for now
