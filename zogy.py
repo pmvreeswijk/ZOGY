@@ -12,6 +12,9 @@ import warnings
 warnings.filterwarnings('ignore', message=r'.*output shape of zoom.*')
 warnings.filterwarnings('ignore', category=UserWarning, module=r'.*parallel*.')
 warnings.filterwarnings('ignore', category=UserWarning, module=r'.*sklearn*.')
+#CHECK!!!
+#warnings.filterwarnings('error')
+
 from functools import partial
 import math
 import collections
@@ -123,7 +126,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.8.0'
+__version__ = '1.8.1'
 
 
 ################################################################################
@@ -5131,9 +5134,9 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
         trans_rejected_position (table_trans, mask_neg,
                                  'negative flux in reference image')
         table_trans = table_trans[~mask_neg]
-        log.info ('{} transients discarded whose flux can be explained '
-                  'by a negative flux in reference image'
-                  .format(np.sum(mask_neg)))
+        log.info ('ntrans after negative flux in ref image cut: {}'
+                  .format(len(table_trans)))
+
 
 
         if get_par(set_zogy.make_plots,tel):
@@ -6198,6 +6201,12 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        get_psf_footprint=False, nthreads=1):
 
 
+
+
+    # CHECK!!!
+    #warnings.filterwarnings('error')
+
+
     # function name
     fname = inspect.currentframe().f_code.co_name
 
@@ -6678,6 +6687,21 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                 #fits.writeto (fits_tmp, D_shared, overwrite=True)
 
 
+                if False and get_par(set_zogy.keep_tmp,tel):
+
+                    # CHECK!!! - temporarily write D_shared to disk for every
+                    # pass, for debugging
+                    nleft = np.sum(n_fainter_neighbours > 0)
+                    if nleft > 1000:
+                        basename = psfex_bintable.split('_psf.fits')[0]
+                        # in local folder where zogy is run
+                        #basename = psfex_bintable.split('_psf.fits')[0].split('/')[-1]
+                        fits_psf_removed = ('{}_psf_removed_pass{}_{}.fits'
+                                            .format(basename, npass, source_type))
+                        log.info ('writing {}'.format(fits_psf_removed))
+                        fits.writeto (fits_psf_removed, D_shared, overwrite=True)
+
+
 
 
             # number of objects done and still left to process
@@ -6690,6 +6714,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             # if none left, break out of while True loop
             if nleft == 0:
                 break
+
 
 
             # before going to the nex pass, add the tmp_shared image
@@ -6721,7 +6746,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                     sep_max_pix=sep_max_pix, nthreads=nthreads)
 
 
-            if False:
+            if False and get_par(set_zogy.keep_tmp,tel):
                 # CHECK!!! - temporarily write D_shared to disk for every
                 # pass, for debugging
                 if nleft > 1000:
@@ -7380,15 +7405,18 @@ def get_psfoptflux_loop (
 
             except Exception as e:
                 #log.exception(traceback.format_exc())
-                log.error('exception in [flux_optimal] for object at pixel '
-                          'coordinates: {:.0f}, {:.0f}; returning zero '
-                          'flux_opt and fluxerr_opt'.format(x,y))
+                log.error('exception in [flux_optimal] for object at: '
+                          '{:.0f},{:.0f}; returning zero flux_opt and '
+                          'fluxerr_opt: {}'.format(x, y, e))
+
 
                 # update flags_opt
                 flags_opt[i] |= flags_opt_dict['exception']
 
+
                 if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                 continue
+
 
 
             # infer error image used in psffit and gauss/moffat fits below
@@ -7424,9 +7452,9 @@ def get_psfoptflux_loop (
                 except Exception as e:
                     #log.exception(traceback.format_exc())
                     log.exception('exception in [flux_psffit] for object at '
-                                  'pixel coordinates: {:.0f}, {:.0f}; returning '
-                                  'zero (x,y) shifts and errors, flux_psf, '
-                                  'fluxerr_psf and chi2'.format(x,y))
+                                  '{:.0f},{:.0f}; returning zero (x,y) shifts '
+                                  'and errors, flux_psf, fluxerr_psf and chi2'
+                                  .format(x,y))
                     if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
 
@@ -7456,8 +7484,8 @@ def get_psfoptflux_loop (
                 except Exception as e:
                     #log.exception(traceback.format_exc())
                     log.exception('exception in [fit_moffat_single] for '
-                                  'object at pixel coordinates: {:.0f}, '
-                                  '{:.0f}; returning zeros'.format(x, y))
+                                  'object at: {:.0f},{:.0f}; returning zeros'
+                                  .format(x, y))
                     if remove_psf and nthreads > 1: xy_shared[:,p_idx] = (0,0)
                     continue
 
@@ -7899,7 +7927,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
         # adding the model flux would be too much
         var = D_err**2
         if not diff:
-            var += np.abs(model) + np.max(par['sky'], 0)
+            var += np.abs(model) + np.maximum(par['sky'], 0)
 
         # sigma
         err = np.sqrt(var)
@@ -8014,7 +8042,7 @@ def flux_psffit (P, D, D_err, flux_opt, mask_use=None, max_nfev=100, show=False,
 
 ################################################################################
 
-def get_optflux (P, D, V):
+def get_optflux (P, D, V, get_chi2red=False):
 
     """Function that calculates optimal flux and corresponding error based
     on the PSF [P], sky-subtracted data [D] and variance [V].  All are
@@ -8030,14 +8058,24 @@ def get_optflux (P, D, V):
 
     optflux = 0
     optfluxerr = 0
+    chi2red = 0
     if np.sum(~mask_V0 != 0):
         denominator = np.sum(P[~mask_V0]**2/V[~mask_V0])
         if denominator > 0:
             optflux = np.sum((P[~mask_V0]*D[~mask_V0]/V[~mask_V0])) / denominator
             optfluxerr = 1./np.sqrt(denominator)
 
+        if get_chi2red:
+            # reduced chi2
+            chi2 = np.sum((D[~mask_V0] - optflux * P[~mask_V0])**2 / V[~mask_V0])
+            chi2red = chi2 / max(np.sum(~mask_V0)-1, 1)
 
-    return optflux, optfluxerr
+
+    if get_chi2red:
+        return optflux, optfluxerr, chi2red
+    else:
+        return optflux, optfluxerr
+
 
 
     if False:
@@ -8118,6 +8156,10 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
     flags_opt = 0
 
 
+    # CHECK!!!
+    sky_bkg_init = sky_bkg
+
+
     if add_V_ast:
         # calculate astrometric variance
         dDdy = D - np.roll(D,1,axis=0)
@@ -8131,10 +8173,26 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
 
 
     # iteratively determine optimal flux
-    flux_opt, fluxerr_opt, flags_opt_iter = flux_optimal_iter (
+    flux_opt, fluxerr_opt, flags_opt_iter, chi2red = flux_optimal_iter (
         P, D-sky_bkg, bkg_var+np.maximum(sky_bkg,0), mask_use, nsigma_inner,
         nsigma_outer, max_iters, epsilon, V_ast, mask_inner, show, x, y,
         source_minpixfrac, flags_opt_dict)
+
+
+
+    if False:
+        # CHECK!!!
+        if np.abs(flux_opt) > 1e10:
+            snr_opt = np.abs(flux_opt / fluxerr_opt)
+            log.error ('before fit_sky: abs(flux_opt) > 1e10 in flux_optimal() '
+                       'for object at (x,y):({:.0f},{:.0f}) '
+                       'with chi2red: {:.2f}, snr_opt={:.2f}, '
+                       'sky_bkg_init={:.2f}, sky_bkg={:.2f}, fit_sky={}, '
+                       'np.sum(mask_inner & mask_use)={}'
+                       'np.sum(mask_outer & mask_use)={}'
+                       .format(x, y, chi2red, snr_opt, sky_bkg_init,
+                               sky_bkg, fit_sky, np.sum(mask_inner & mask_use),
+                               np.sum(~mask_inner & mask_use)))
 
 
 
@@ -8143,6 +8201,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
     # pixels (m_u) of the entire footprint
     if fit_sky:
 
+        # CHECK!!!
         #log.info ('fitting sky for source at x,y={:.0f},{:.0f}'.format(x,y))
 
         # fit parameters
@@ -8167,11 +8226,14 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
         for i in range(coeffs.size):
             if i==0:
                 mask_outer = ~mask_inner
-                value = np.median(D[mask_outer & mask_use])
+                value = max(np.median(D[mask_outer & mask_use]), 0)
+                # restrict c0 to be >= 0
+                params.add('c{}'.format(i), value=value, min=0,
+                           vary=mask_coeff_fit[i])
             else:
                 value = 0
+                params.add('c{}'.format(i), value=0, vary=mask_coeff_fit[i])
 
-            params.add('c{}'.format(i), value=value, vary=mask_coeff_fit[i])
 
 
         # create mesh to fit sky
@@ -8192,9 +8254,10 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
         # adopt fit value if fit was successful, indicated by
         # result.success boolean; if not, the flux_opt and fluxerr_opt
         # values from the determination before this fit_sky block,
-        # done with sky value of zero, would be adopted
+        # done with input sky_bkg value, would be adopted
 
-        if result.success:
+        chi2red_skyfit = result.redchi
+        if result.success and chi2red_skyfit < chi2red:
 
             # indicate that local sky is successfully fit
             flags_opt |= flags_opt_dict['bkg_localfit']
@@ -8218,10 +8281,14 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
             sky_bkg = sky_2d[mask_inner][i_max]
 
 
+            # CHECK!!!
             if False:
                 log.info ('local sky fit in flux_optimal successful for source '
-                          'at ({:.0f},{:.0f}) with sky_bkg at peak of P: {}'
-                          .format(x,y, sky_bkg))
+                          'at ({:.0f},{:.0f}) with sky_bkg at peak of P: {:.2f}, '
+                          'chi2red optflux: {:.2f}, chi2red skyfit: {:.2f}, '
+                          'sky_bkg_init: {:.2f}'
+                          .format(x, y, sky_bkg, chi2red, chi2red_skyfit,
+                                  sky_bkg_init))
                 log.info (fit_report(result))
 
 
@@ -8230,28 +8297,60 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
             # indicate that global sky background is adopted
             flags_opt |= flags_opt_dict['bkg_global']
 
+            # CHECK!!!
             if False:
                 log.warning ('local sky fit in flux_optimal not successful for '
-                             'source at ({:.0f},{:.0f})'.format(x,y))
-                #log.info (fit_report(result))
+                             'source at ({:.0f},{:.0f}) with '
+                             'chi2red optflux: {:.2f}, chi2red skyfit: {:.2f}, '
+                             'sky_bkg_init: {:.2f}'
+                             .format(x, y, chi2red, chi2red_skyfit, sky_bkg_init))
+                log.info (fit_report(result))
 
 
 
-        #flux_opt_fit = par['flux_opt'].value
-        #fluxerr_opt_fit = par['flux_opt'].stderr
-        #chi2red = result.redchi
-        #log.info ('flux_opt: {}, fluxerr_opt: {}, flux_opt_fit: {}, '
-        #          'fluxerr_opt_fit: {}, chi2red: {:.4f}'
-        #          .format(flux_opt, fluxerr_opt, flux_opt_fit, fluxerr_opt_fit,
-        #                  chi2red))
-        #log.info (fit_report(result))
-
-
+        if False:
+            # CHECK!!!
+            if np.abs(flux_opt) > 1e10:
+                snr_opt = np.abs(flux_opt / fluxerr_opt)
+                log.error ('after fit_sky: abs(flux_opt) > 1e10 in flux_optimal() '
+                           'for object at (x,y):({:.0f},{:.0f}) '
+                           'with chi2red_skyfit: {:.2f}, snr_opt={:.2f}, '
+                           'sky_bkg_init={:.2f}, sky_bkg={:.2f}, fit_sky={}, '
+                           'np.sum(mask_inner & mask_use)={}'
+                           'np.sum(mask_outer & mask_use)={}'
+                           .format(x, y, chi2red_skyfit, snr_opt, sky_bkg_init,
+                                   sky_bkg, fit_sky, np.sum(mask_inner & mask_use),
+                                   np.sum(~mask_inner & mask_use)))
 
 
 
     # update flags_opt with those returned by flux_optimal_iter()
     flags_opt |= flags_opt_iter
+
+
+    # mark entry with unreasonable values for flux_opt as overflows
+    # CHECK!!!
+    if np.abs(flux_opt) > 1e10 or np.abs(sky_bkg) > 1e5:
+        log.error('overflow in [flux_optimal] for object at: {:.0f},{:.0f}; '
+                  'returning zero flux_opt and fluxerr_opt'.format(x,y))
+        flux_opt = 0.0
+        fluxerr_opt = 0.0
+        sky_bkg = 0.0
+        flags_opt |= flags_opt_dict['overflow']
+
+
+    # mark entry with signficantly negative flux (5-sigma)
+    # CHECK!!!
+    if fluxerr_opt != 0:
+        snr_opt = flux_opt / fluxerr_opt
+        if snr_opt < -5:
+            log.error('significantly negative flux in [flux_optimal] for object '
+                      'at: {:.0f},{:.0f}; flux_opt={:.2f}, fluxerr_opt={:.2f}, '
+                      'snr_opt={:.1f}; returning zero flux_opt and fluxerr_opt'
+                      .format(x, y, flux_opt, fluxerr_opt, snr_opt))
+            flux_opt = 0.0
+            fluxerr_opt = 0.0
+            flags_opt |= flags_opt_dict['negative']
 
 
 
@@ -8288,6 +8387,7 @@ def sky2min (params, P, D, bkg_var, x_norm, y_norm, poldeg, mask_use,
     resid[~m_nz] = 0
     resid[~mask_use] = 0
 
+
     # reduced chi-square
     #chi2red = np.sum(resid**2) / (P.size - len(par))
 
@@ -8297,7 +8397,7 @@ def sky2min (params, P, D, bkg_var, x_norm, y_norm, poldeg, mask_use,
         # (size of output array is not allowed to change between
         # function calls in lmfit), but at most [frac_max_rej] for
         # each of inner and outer regions, using [nsigma_inn] and
-        # [sigma_out]
+        # [nsigma_out]
         mask_out = ~mask_inn
         sky2min_resid0 (mask_use, mask_inn, resid, nsigma_inn, frac_max_rej)
         sky2min_resid0 (mask_use, mask_out, resid, nsigma_out, frac_max_rej)
@@ -8413,14 +8513,14 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
 
 
         # optimal flux
-        flux_opt, fluxerr_opt = get_optflux (P[m_u], D[m_u], V[m_u])
+        flux_opt, fluxerr_opt, chi2red = get_optflux (P[m_u], D[m_u], V[m_u],
+                                                      get_chi2red=True)
 
-        #print ('i, flux_opt, fluxerr_opt', i, flux_opt, fluxerr_opt,
-        #       abs(flux_opt_old-flux_opt)/flux_opt,
-        # abs(flux_opt_old-flux_opt)/fluxerr_opt)
+
 
         if fluxerr_opt==0:
-            #log.warning ('fluxerr_opt = 0 in flux_optimal_iter()')
+            # CHECK!!! - when does this happen? Provide flag?
+            log.warning ('fluxerr_opt = 0 in flux_optimal_iter()')
             break
 
 
@@ -8440,25 +8540,25 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
             # use [nsigma_inn] as the rejection criterium for the
             # inner region defined by [mask_inn]; outside of that
             # use [nsigma_out]
-            try:
-                # old way
-                #sigma2 = (D - flux_opt * P)**2
-                #mask_pos = (V > 0)
-                #sigma2[mask_pos] /= V[mask_pos]
+
+            # old way
+            oldsig = False
+            if oldsig:
+                sigma2 = (D - flux_opt * P)**2
+                mask_pos = (V > 0)
+                sigma2[mask_pos] /= V[mask_pos]
+                # also create sigma, to avoid replacing sigma2 with
+                # sigma below
+                sigma = np.sqrt(sigma2)
+            else:
                 # new way trying to avoid overflow warning when squaring
                 sigma = np.abs(D - flux_opt * P)
                 mask_pos = (V > 0)
                 sigma[mask_pos] /= np.sqrt(V[mask_pos])
 
-            except RuntimeWarning as e:
-                log.error ('issue calculating sigma2 in flux_optimal_iter() '
-                           'for object at (x,y):({},{})'.format(x,y))
-
 
             # inner/outer masks with pixels to be rejected this
             # iteration
-            #mask_rej[mask_inn] = (sigma2[mask_inn] > nsigma_inn**2)
-            #mask_rej[mask_out] = (sigma2[mask_out] > nsigma_out**2)
             mask_rej[mask_inn] = (sigma[mask_inn] > nsigma_inn)
             mask_rej[mask_out] = (sigma[mask_out] > nsigma_out)
 
@@ -8466,24 +8566,23 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
             # try nsigma_inn based on SNR of object
             snr_opt = np.abs(flux_opt / fluxerr_opt)
 
+
             # avoid higher S/N sources, because good pixels of
             # bright sources are easily rejected even with high
             # nsigma
-            if snr_opt <= 100:
+            if snr_opt <= 100 and np.abs(flux_opt) < 1e10:
 
                 # nsigma values:
                 # ~7 up to S/N=12
                 # ~10 at S/N=25
                 # ~15 at S/N=50
                 # ~20 at S/N=100
-                nsigma_inn_snr = np.max([2*np.sqrt(snr_opt), 7])
+                nsigma_inn_snr = max(2*np.sqrt(snr_opt), 7)
 
 
                 # mask of inner pixels rejected based on S/N that were
                 # not already marked as bad/saturated etc.
                 mask_use_inn = mask_use[mask_inn]
-                #mask_rej_inn = ((sigma2[mask_inn] > nsigma_inn_snr**2)
-                #                & mask_use_inn)
                 mask_rej_inn = (sigma[mask_inn] > nsigma_inn_snr) & mask_use_inn
 
 
@@ -8507,12 +8606,11 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
                     flags |= flags_opt_dict['source_minpixfrac']
 
                     # indices of all inner rejected pixels sorted by
-                    # decreasing sigma2
-                    #idx_sort = np.argsort(sigma2[mask_inn])[::-1]
+                    # decreasing sigma
                     idx_sort = np.argsort(sigma[mask_inn])[::-1]
 
                     # keep indices that do not match bad/saturated pixels
-                    # and pick npix_limfrac with the highest sigma2
+                    # and pick npix_limfrac with the highest sigma
                     idx_limfrac = idx_sort[mask_use_inn][:npix_limfrac]
 
                     # update inner mask_rej
@@ -8522,7 +8620,7 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
                         log.warning (
                             'i={}: pixels to be rejected ({}) greater than allowed '
                             'for source at (x,y)=({:.0f},{:.0f}); rejecting {} '
-                            'pixels with highest deviation (sigma2); {} inner '
+                            'pixels with highest deviation (sigma); {} inner '
                             'pixels already marked as bad/saturated etc.'
                             .format(i, nrej_inn, x, y, npix_limfrac,
                                     np.sum(~mask_use_inn)))
@@ -8534,8 +8632,8 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
                 elif nrej_inn > 0:
 
                     # update inner mask_rej
-                    #mask_rej[mask_inn] = (sigma2[mask_inn] > nsigma_inn_snr**2)
                     mask_rej[mask_inn] = (sigma[mask_inn] > nsigma_inn_snr)
+
 
                     if False:
                         log.warning (
@@ -8561,9 +8659,9 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
 
         log.info('# rejected inner pixels: {}'.format(np.sum(~m_u[mask_inn])))
         log.info('# rejected outer pixels: {}'.format(np.sum(~m_u[mask_out])))
-        #log.info('np.amax((D - flux_opt * P)**2 / V):{}'.format(np.amax(sigma2)))
         log.info('np.amax((D - flux_opt * P) / sqrt(V)):{}'
                  .format(np.amax(sigma)))
+
         log.info('flux_opt: {:.1f} +- {:.1f}'.format(flux_opt, fluxerr_opt))
 
         label = '_{:.0f}_{:.0f}'.format(x, y)
@@ -8576,7 +8674,7 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
 
 
 
-    return flux_opt, fluxerr_opt, flags
+    return flux_opt, fluxerr_opt, flags, chi2red
 
 
 ################################################################################
@@ -9637,9 +9735,10 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
 
 
 
-    # add estimate of saturation magnitude to the header
-    infer_satmag (table_cat, header)
-
+    # add estimate of saturation magnitude to the header if not
+    # already present
+    if 'MAG-SAT' not in header:
+        infer_satmag (table_cat, header)
 
 
     # ---------------------------------
@@ -9964,10 +10063,10 @@ def infer_satmag (table_cat, header):
 
     if 'FLAGS_MASK' in colnames:
         col_mask = 'FLAGS_MASK'
-    elif 'MASK' in colnames:
-        col_mask = 'MASK'
+    elif 'FLAGS' in colnames:
+        col_mask = 'FLAGS'
     else:
-        log.warning ('FLAGS_MASK and MASK not in column names; not able to '
+        log.warning ('FLAGS_MASK and FLAGS not in column names; not able to '
                      'estimate the flux of the brightest non-saturated source')
         return 99.0
 
@@ -9980,10 +10079,13 @@ def infer_satmag (table_cat, header):
     # also exclude mag=99 values
     mask_sat |= (table_cat['MAG_OPT'] >= 99)
 
+
     # magnitude of brightest remaining star, making sure
     # at least 1 entry is left
     if np.sum(~mask_sat) > 0:
         satmag = np.sort(table_cat[~mask_sat]['MAG_OPT'])[0]
+        if not np.isfinite(satmag):
+            satmag = 99.0
     else:
         # if no entries left, return 99
         satmag = 99.0
@@ -12719,7 +12821,7 @@ def find_sigma (res, err, axis=None, maxiter=15, epsilon=1e-2):
 
 
 
-    # determined reduced chi-square with respect to the median at
+    # determine reduced chi-square with respect to the median at
     # beginning of interval
     chi2red = get_chi2red (res, err, err1, axis=axis)
     #log.info ('chi2red begin interval: {}'.format(chi2red))
@@ -12740,7 +12842,7 @@ def find_sigma (res, err, axis=None, maxiter=15, epsilon=1e-2):
         mask1 = (chi2red <= 1)
 
 
-    # determined reduced chi-square with respect to the median at end
+    # determine reduced chi-square with respect to the median at end
     # of interval
     chi2red = get_chi2red (res, err, err2, axis=axis)
     #log.info ('chi2red end interval: {}'.format(chi2red))
