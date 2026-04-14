@@ -2902,6 +2902,12 @@ if __name__ == "__main__":
     basenames = ['{}_red'.format(fn.split('_red')[0]) for fn in filenames]
 
 
+    if np.sum(mask_keep)==0:
+        log.error ('no input files; exiting')
+        logging.shutdown()
+        raise SystemExit
+
+
     # if [radecs_cntr] is not defined yet because the default fits
     # header was not used as args.filenames, exit
     if radecs_cntr is None:
