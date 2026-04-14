@@ -417,6 +417,8 @@ flags_opt_dict = {
     'calstar':            4, # entry in catalog is a calibration star
     'source_minpixfrac':  8, # too few inner PSF pixels to infer flux_opt
     'exception':         16, # exception occurred in flux_opt determination
+    'overflow':          32, # overflow occurred in flux_opt determination
+    'negative':          64, # sigificantly negative flux_opt determination
 }
 
 
