@@ -7564,6 +7564,7 @@ def get_psfoptflux_loop (
                 else:
                     flux_tmp = flux_opt[i]
 
+
                 # avoid subtracting a negative source
                 if flux_tmp > 0:
                     # lock needed??
@@ -8257,7 +8258,8 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
         # done with input sky_bkg value, would be adopted
 
         chi2red_skyfit = result.redchi
-        if result.success and chi2red_skyfit < chi2red:
+        if (result.success and chi2red_skyfit < chi2red and
+            fluxerr_opt is not None):
 
             # indicate that local sky is successfully fit
             flags_opt |= flags_opt_dict['bkg_localfit']
@@ -8344,12 +8346,14 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
     if fluxerr_opt != 0:
         snr_opt = flux_opt / fluxerr_opt
         if snr_opt < -5:
-            log.error('significantly negative flux in [flux_optimal] for object '
-                      'at: {:.0f},{:.0f}; flux_opt={:.2f}, fluxerr_opt={:.2f}, '
-                      'snr_opt={:.1f}; returning zero flux_opt and fluxerr_opt'
-                      .format(x, y, flux_opt, fluxerr_opt, snr_opt))
-            flux_opt = 0.0
-            fluxerr_opt = 0.0
+            #log.error('significantly negative flux in [flux_optimal] for object '
+            #          'at: {:.0f},{:.0f}; flux_opt={:.2f}, fluxerr_opt={:.2f}, '
+            #          'snr_opt={:.1f}; returning zero flux_opt and fluxerr_opt'
+            #          .format(x, y, flux_opt, fluxerr_opt, snr_opt))
+            # leave the values be; negative sources are not subtracted
+            # from the image in any case (see around l.7569)
+            #flux_opt = 0.0
+            #fluxerr_opt = 0.0
             flags_opt |= flags_opt_dict['negative']
 
 
