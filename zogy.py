@@ -15240,7 +15240,8 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
     # psf_size_config or larger, then skip run_psfex
     skip_psfex=False
     psfex_bintable = '{}_psf.fits'.format(base)
-    if isfile(psfex_bintable) and not redo:
+    psfexcat = '{}_psfex.cat'.format(base)
+    if isfile(psfex_bintable) and isfile(psfexcat) and not redo:
         header_psf = read_hdulist (psfex_bintable, get_data=False,
                                    get_header=True)
         psf_samp, psf_size_config = get_samp_PSF_config_size(imtype)
@@ -15255,7 +15256,6 @@ def get_psf (image, header, nsubs, imtype, fwhm, pixscale, remap, fits_mask,
 
 
     if not skip_psfex:
-        psfexcat = '{}_psfex.cat'.format(base)
         log.info('psfexcat: {}'.format(psfexcat))
         sexcat_ldac = '{}_cat_ldac.fits'.format(base)
         log.info('sexcat_ldac: {}'.format(sexcat_ldac))
