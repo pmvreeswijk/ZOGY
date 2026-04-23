@@ -6198,8 +6198,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
                        set_zogy=None, tel=None, fwhm=None, diff=True,
                        get_flags_opt=False, get_flags_mask_inner=False,
                        local_bkg=None, mask_fit_local_bkg=None,
-                       get_psf_footprint=False, nthreads=1):
-
+                       get_psf_footprint=False, xy_orig=None, nthreads=1):
 
 
 
@@ -6433,7 +6432,7 @@ def get_psfoptflux_mp (psfex_bintable, D, bkg_var, D_mask, xcoords, ycoords,
             get_flags_mask_inner, psf_clean_factor,
             source_minpixfrac, inner_psflim, mask_value,
             flags_opt_dict, local_bkg, mask_fit_local_bkg,
-            get_psf_footprint, lock, pid_list,
+            get_psf_footprint, xy_orig, lock, pid_list,
             n_fainter_neighbours, shm_names, x_borders, tel, nthreads]
 
 
@@ -6860,7 +6859,7 @@ def get_psfoptflux_loop (
         get_flags_mask_inner=False, psf_clean_factor=None,
         source_minpixfrac=None, inner_psflim=None, mask_value=None,
         flags_opt_dict=None, local_bkg=None, mask_fit_local_bkg=None,
-        get_psf_footprint=False, lock=None, pid_list=None,
+        get_psf_footprint=False, xy_orig=None, lock=None, pid_list=None,
         n_fainter_neighbours=None, shm_names=None,
         x_borders=None, tel=None, nthreads=None):
 
@@ -7048,15 +7047,20 @@ def get_psfoptflux_loop (
         # shorthand
         x, y = xpos[i], ypos[i]
 
-
         # using function [get_psf_ima], construct the PSF image with
         # shape (psf_size, psf_size) at x, y; this image is at the
         # original pixel scale psf_clean_factor =
         # get_par(set_zogy.psf_clean_factor,tel)
+        if xy_orig is not None:
+            x_psf, y_psf = xy_orig
+            log.info ('x_psf: {}, y_psf: {}'.format(x_psf, y_psf))
+        else:
+            x_psf, y_psf = x, y
+
         psf_ima, __ = get_psf_ima (
-            data_psf, x, y, psf_size, psf_samp, polzero1, polscal1, polzero2,
-            polscal2, poldeg, imtype=imtype, psf_clean_factor=psf_clean_factor,
-            tel=tel)
+            data_psf, x_psf, y_psf, psf_size, psf_samp, polzero1, polscal1,
+            polzero2, polscal2, poldeg, imtype=imtype,
+            psf_clean_factor=psf_clean_factor, tel=tel)
 
 
         #if i % 1000 == 0:
@@ -8250,22 +8254,25 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
         result = minimize (sky2min, params, method='leastsq', args=(
             P, D, bkg_var, x_norm, y_norm, poldeg, mask_use, mask_inner,
             nsigma_inner, nsigma_outer,), max_nfev=200)
+        par = result.params
 
 
         # adopt fit value if fit was successful, indicated by
         # result.success boolean; if not, the flux_opt and fluxerr_opt
         # values from the determination before this fit_sky block,
-        # done with input sky_bkg value, would be adopted
+        # done with input sky_bkg value, would be adopted; N.B.: even
+        # if fit was successful, it is possible for the errors to be
+        # absent, so check if the parameter fluxerr_opt is not None
 
         chi2red_skyfit = result.redchi
         if (result.success and chi2red_skyfit < chi2red and
-            fluxerr_opt is not None):
+            par['flux_opt'].stderr is not None):
 
             # indicate that local sky is successfully fit
             flags_opt |= flags_opt_dict['bkg_localfit']
 
 
-            par = result.params
+            # replace flux_opt and fluxerr_opt with fit parameters
             flux_opt = par['flux_opt'].value
             fluxerr_opt = par['flux_opt'].stderr
 
@@ -8343,7 +8350,7 @@ def flux_optimal (P, D, bkg_var, mask_use, nsigma_inner=np.inf, nsigma_outer=5,
 
     # mark entry with signficantly negative flux (5-sigma)
     # CHECK!!!
-    if fluxerr_opt != 0:
+    if fluxerr_opt != 0 and fluxerr_opt is not None:
         snr_opt = flux_opt / fluxerr_opt
         if snr_opt < -5:
             #log.error('significantly negative flux in [flux_optimal] for object '
@@ -8522,9 +8529,11 @@ def flux_optimal_iter (P, D, bkg_var, mask_use, nsigma_inn, nsigma_out,
 
 
 
-        if fluxerr_opt==0:
+        if fluxerr_opt==0 or fluxerr_opt is None:
             # CHECK!!! - when does this happen? Provide flag?
-            log.warning ('fluxerr_opt = 0 in flux_optimal_iter()')
+            msg = ('fluxerr_opt = {} in flux_optimal_iter()'
+                   .format(fluxerr_opt))
+            log.error (msg)
             break
 
 
