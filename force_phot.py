@@ -1516,22 +1516,26 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
     elif trans:
 
-        # read off transient S/N from Scorr image; by setting dpix>0
-        # and update_indices to True, the y_ and x_indices will be
-        # updated to point to the indices with the (absolute) maximum
-        # of a (2*dpix+1)**2 area around the original index, which are
-        # used below when inferring Fpsf and transient limmags
+        # read off transient S/N from Scorr image; by setting dpix>0,
+        # the y_ and x_indices will be updated to point to the indices
+        # with the (absolute) maximum of a (2*dpix+1)**2 area around
+        # the original index, as input position might be off a pixel
         snr_zogy = get_pixel_values (fits_Scorr, google_cloud,
                                      y_indices, x_indices, dpix=1,
-                                     update_indices=True)
+                                     update_indices=False)
 
 
-        # read flux values at xcoords, ycoords
-        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices)
+        # N.B.: the peak pixel in Scorr is not necessarily the same as
+        # the peak in Fpsf! So read flux values also in 3x3 box
+        # centered at y_indices, x_indices; by setting update_indices
+        # to True, the indices are updated so the same indices are
+        # read off for the corresponding error
+        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices,
+                                 dpix=1, update_indices=True)
 
 
-        # get transient limiting magnitude at xcoord, ycoord
-        # and convert it back to Fpsferr
+        # get transient limiting magnitude at xcoord, ycoord and
+        # convert it back to Fpsferr
 
         # read limiting magnitude at pixel coordinates
         nsigma_trans_orig = 6
