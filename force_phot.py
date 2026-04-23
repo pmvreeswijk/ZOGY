@@ -22,7 +22,7 @@ log = logging.getLogger()
 
 import numpy as np
 
-import astropy.io.fits as fits
+from astropy.io import fits
 from astropy.coordinates import Angle, SkyOffsetFrame, SkyCoord
 from astropy.table import Table, hstack, vstack, unique
 from astropy.time import Time
@@ -42,7 +42,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.3.0'
+__version__ = '1.4.0'
 
 
 ################################################################################
@@ -1066,6 +1066,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
 
 
+    # number of coordinates
+    ncoords = len(xcoords)
+
+
     # indices of pixel coordinates; need to be defined after
     # discarding coordinates off the image
     x_indices = (xcoords-0.5).astype(int)
@@ -1155,20 +1159,53 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         log.info ('ext_coeff: {}'.format(ext_coeff))
 
 
+
+    # for single coordinate in google cloud, define section of
+    # image instead of full image
+    extract_section = False
+    if ncoords==1 and google_cloud:
+
+        extract_section = True
+
+        xcoords_orig = xcoords.copy()
+        ycoords_orig = ycoords.copy()
+        data_shape_orig = data_shape
+
+        # infer section to extract
+        sect_size = max(2*size_tn, 100)
+        idx_sect, __, ycoords[0], xcoords[0] = zogy.get_index_around_xy(
+            ysize, xsize, ycoords_orig[0], xcoords_orig[0], sect_size)
+        # replace data_shape with section shape
+        data_shape = np.broadcast_to(0, data_shape_orig)[idx_sect].shape
+
+
+
+
     # split between new/ref and transient extraction
     if not trans:
 
+
         # determine background standard deviation using [get_bkg_std]
-        data_bkg_std = get_bkg_std (fits_bkg_std_mini, xcoords, ycoords,
-                                    data_shape, imtype, tel)
+        if extract_section:
+            data_bkg_std = get_bkg_std (fits_bkg_std_mini, xcoords_orig,
+                                        ycoords_orig, data_shape, imtype, tel)
+        else:
+            data_bkg_std = get_bkg_std (fits_bkg_std_mini, xcoords,
+                                        ycoords, data_shape, imtype, tel)
+
 
         # object mask may not be available, so first check if it
         # exists
         if (fits_objmask is not None and zogy.isfile(fits_objmask)
             and bkg_objmask):
             #objmask = zogy.read_hdulist (fits_objmask, dtype=bool)
+
             with fits.open(fits_objmask) as hdulist:
-                objmask = hdulist[-1].data.astype(bool)
+                if extract_section:
+                    objmask = hdulist[-1].section[idx_sect].astype(bool)
+                else:
+                    objmask = hdulist[-1].data.astype(bool)
+
         else:
             # if it does not exist, or input parameter bkg_objmask is
             # False, create an all-False object mask
@@ -1181,7 +1218,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # read through fitsio.FITS
         #data = zogy.read_hdulist (fits_red, dtype='float32')
         with fits.open(fits_red) as hdulist:
-            data = hdulist[-1].data.astype('float32')
+            if extract_section:
+                data = hdulist[-1].section[idx_sect].astype('float32')
+            else:
+                data = hdulist[-1].data.astype('float32')
 
 
         # corresponding mask may not be available, so first check if
@@ -1190,7 +1230,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             log.info ('fits_mask used: {}'.format(fits_mask))
             #data_mask = zogy.read_hdulist (fits_mask, dtype='int16')
             with fits.open(fits_mask) as hdulist:
-                data_mask = hdulist[-1].data.astype('int16')
+                if extract_section:
+                    data_mask = hdulist[-1].section[idx_sect].astype('int16')
+                else:
+                    data_mask = hdulist[-1].data.astype('int16')
 
             # mask can be read using fitsio.FITS, but only little bit
             # faster than astropy.io.fits
@@ -1199,6 +1242,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             log.warning ('fits_mask {} does not exist; assuming that none of '
                          'the pixels are flagged'.format(fits_mask))
             data_mask = np.zeros (data_shape, dtype='int16')
+
 
 
         # add combined FLAGS_MASK column to output table using
@@ -1223,6 +1267,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # infer bkg_std at xcoords,ycoords; needed as input to apflux
         # in case bkg_std cannot be determined from background annulus
         if len(y_indices)==1:
+            # in this case, data_bkg_std is a scalar instead of
+            # an image - see function get_bkg_std()
             bkg_std_coords = np.array([data_bkg_std])
         else:
             bkg_std_coords = data_bkg_std[y_indices, x_indices]
@@ -1343,6 +1389,16 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
             mask_fit_local_bkg = (local_bkg==0)
 
 
+            # need to provide get_psfoptflux_mp() with xy_orig, the
+            # original input coordinate, to be able to infer the PSF
+            # at that position (psfex_bintable is defined for the full
+            # image
+            if extract_section:
+                xy_orig = (xcoords_orig[0], ycoords_orig[0])
+            else:
+                xy_orig = None
+
+
             # determine optimal fluxes at pixel coordinates
             if ncpus is None:
                 # submit to [get_psfoptflux_mp] with single thread, as
@@ -1350,10 +1406,11 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 # i.e. each cpu is processing a different image
                 flux_opt, fluxerr_opt, local_bkg_opt, flags_opt = \
                     zogy.get_psfoptflux_mp(
-                        psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
-                        ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
+                        psfex_bintable, data, data_bkg_std**2, data_mask,
+                        xcoords, ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
                         mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
-                        get_flags_opt=True, set_zogy=set_zogy, tel=tel, nthreads=1)
+                        get_flags_opt=True, set_zogy=set_zogy, xy_orig=xy_orig,
+                        tel=tel, nthreads=1)
 
             else:
                 # submit to [get_psfoptflux_mp] with [ncpu] threads as
@@ -1368,7 +1425,8 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                         psfex_bintable, data, data_bkg_std**2, data_mask, xcoords,
                         ycoords, imtype=imtype, fwhm=fwhm, local_bkg=local_bkg,
                         mask_fit_local_bkg=mask_fit_local_bkg, remove_psf=remove_psf,
-                        get_flags_opt=True, set_zogy=set_zogy, tel=tel, nthreads=ncpus)
+                        get_flags_opt=True, set_zogy=set_zogy, xy_orig=xy_orig,
+                        tel=tel, nthreads=ncpus)
 
 
                 if False:
@@ -1544,7 +1602,10 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                         # read data using astropy
                         #data = zogy.read_hdulist(fn)
                         with fits.open(fn) as hdulist:
-                            data = hdulist[-1].data
+                            if extract_section:
+                                data = hdulist[-1].section[idx_sect]
+                            else:
+                                data = hdulist[-1].data
 
                     else:
                         # read data using fitsio.FITS
@@ -1556,6 +1617,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
                 else:
                     log.warning ('{} not found; skipping extraction of {} for {}'
                                  .format(fn, key_tn, basename))
+
 
 
 
