@@ -1938,7 +1938,7 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm):
         # get index around x,y position using function
         # [zogy.get_index_around_xy]
         index_full, index_tn, __, __ = zogy.get_index_around_xy(
-            ysize, xsize, ycoords[m], xcoords[m], size_4fwhm, log=log)
+            ysize, xsize, ycoords[m], xcoords[m], size_4fwhm)
 
 
         if np.sum(data_mask[index_full]) != 0:
