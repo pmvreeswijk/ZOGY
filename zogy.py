@@ -126,7 +126,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.8.1'
+__version__ = '1.8.2'
 
 
 ################################################################################
@@ -4243,6 +4243,7 @@ def get_index_around_xy (ysize, xsize, ycoord, xcoord, size):
     ypos = int(ycoord)
     hsize = int(size/2)
 
+
     # if footprint is partially off the image, just go ahead
     # with the pixels on the image
     y1 = max(0, ypos-hsize)
@@ -4250,6 +4251,7 @@ def get_index_around_xy (ysize, xsize, ycoord, xcoord, size):
     y2 = min(ysize, ypos+hsize)
     x2 = min(xsize, xpos+hsize)
     index = tuple([slice(y1,y2),slice(x1,x2)])
+
 
     # also determine corresponding indices of thumbnail image, which
     # will not be [0:size, 0:size] if an object is near the image edge
@@ -4259,10 +4261,12 @@ def get_index_around_xy (ysize, xsize, ycoord, xcoord, size):
     x2_tn = min(size, size-(xpos+hsize-xsize))
     index_tn = tuple([slice(y1_tn,y2_tn),slice(x1_tn,x2_tn)])
 
+
     # pixel coordinates in the thumbnail image corresponding to
     # ycoord, xcoord in the original image
     ycoord_tn = ycoord - y1
     xcoord_tn = xcoord - x1
+
 
     return index, index_tn, ycoord_tn, xcoord_tn
 
@@ -4923,8 +4927,27 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
     data_Fpsf = read_hdulist (fits_Fpsf, dtype='float32')
     data_Fpsferr = read_hdulist (fits_Fpsferr, dtype='float32')
     # read off fluxes and errors at X_PEAK and Y_PEAK indices
-    flux_peak = data_Fpsf[table_trans['Y_PEAK']-1, table_trans['X_PEAK']-1]
-    fluxerr_peak = data_Fpsferr[table_trans['Y_PEAK']-1, table_trans['X_PEAK']-1]
+
+    if False:
+        # old method: read flux and error from same pixel as peak in Scorr
+        flux_peak = data_Fpsf[table_trans['Y_PEAK']-1,
+                              table_trans['X_PEAK']-1]
+        fluxerr_peak = data_Fpsferr[table_trans['Y_PEAK']-1,
+                                    table_trans['X_PEAK']-1]
+
+    else:
+        # infer peak value in box with shape (2*dpix+1, 2*dpix+1)
+        # centered on Y_PEAK, X_PEAK, since the peak flux value may be
+        # slightly off the peak Scorr value
+        idx_y_peak = table_trans['Y_PEAK'].value - 1
+        idx_x_peak = table_trans['X_PEAK'].value - 1
+        flux_peak = get_box_posneg_peak (data_Fpsf, idx_y_peak, idx_x_peak,
+                                         dpix=1, update_indices=True)
+        # infer corresponding error at idx_y_peak, idx_x_peak that were
+        # updated by get_box_posneg_peak()
+        fluxerr_peak = data_Fpsferr[idx_y_peak, idx_x_peak]
+
+
     del data_Fpsf, data_Fpsferr
 
 
@@ -5164,6 +5187,61 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
 
 
     return table_trans
+
+
+################################################################################
+
+def get_box_posneg_peak (data, y_indices, x_indices, dpix=0,
+                         update_indices=False):
+
+    """infer pixel values from [data] at indices [y_indices,
+       x_indices]; if dpix > 0, the maximum value over a square block
+       of pixels with width 2*dpix+1 is returned and if update_indices
+       is True, the input indices will be updated to that of the
+       maximum absolute value (minimum if values are negative)
+
+    """
+
+
+    # values to return
+    nvalues = len(y_indices)
+    values = np.zeros(nvalues, dtype=data.dtype)
+
+
+    # extract values one by one
+    for i in range(nvalues):
+
+        # extract array with shape (2*dpix+1, 2*dpix+1)
+        vals_box = data[
+            y_indices[i]-dpix:y_indices[i]+1+dpix,
+            x_indices[i]-dpix:x_indices[i]+1+dpix]
+
+
+        if dpix==0:
+
+            # for dpix==0, adopt the single value
+            values[i] = vals_box[0][0]
+
+        else:
+
+            # tuple of indices of absolute maximum in vals_box
+            idx_max = np.unravel_index(np.argmax(np.abs(vals_box)),
+                                       vals_box.shape)
+
+            # update indices if needed
+            if update_indices:
+                y_indices[i] += idx_max[0] - dpix
+                x_indices[i] += idx_max[1] - dpix
+
+
+            # value at index with absolute maximum, i.e. in case of a
+            # negative transient, it will return the minimum value in
+            # the box
+            values[i] = vals_box[idx_max]
+
+
+
+    return values
 
 
 ################################################################################
