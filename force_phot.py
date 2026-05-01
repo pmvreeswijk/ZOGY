@@ -1171,6 +1171,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         ycoords_orig = ycoords.copy()
         data_shape_orig = data_shape
 
+
         # infer section to extract
         sect_size = max(2*size_tn, 100)
         idx_sect, __, ycoords[0], xcoords[0] = zogy.get_index_around_xy(
@@ -1248,7 +1249,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # add combined FLAGS_MASK column to output table using
         # [get_flags_mask_comb]
         table['FLAGS_MASK{}'.format(s2add)] = (
-            get_flags_mask_comb(data_mask, xcoords, ycoords, fwhm, xsize, ysize))
+            get_flags_mask_comb(data_mask, xcoords, ycoords, fwhm))
 
 
 
@@ -1636,7 +1637,7 @@ def get_thumbnail (data, data_shape, xcoords, ycoords, size_tn, key_tn, header,
     # number of coordinates
     ncoords = len(xcoords)
 
-    # size of full input image
+    # size of input image
     ysize, xsize = data_shape
 
     # initialise output thumbnail array
@@ -1904,9 +1905,14 @@ def get_bkg_std (fits_bkg_std_mini, xcoords, ycoords, data_shape, imtype, tel):
 
 ################################################################################
 
-def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
+def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm):
+
 
     # identify mask pixels within 2xFWHM of the pixel coordinate
+
+    # size of input mask
+    ysize, xsize = data_mask.shape
+
 
     # full size of window around coordinates, make sure it is even
     size_4fwhm = int(4*fwhm+0.5)
@@ -1915,13 +1921,16 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
 
     hsize = int(size_4fwhm/2)
 
+
     # define meshgrid
     xy = range(1, size_4fwhm+1)
     xx, yy = np.meshgrid(xy, xy, indexing='ij')
 
+
     # initialize flags_mask_comb
     ncoords = len(xcoords)
     flags_mask_comb = np.zeros(ncoords, dtype='int16')
+
 
     # loop coordinates
     for m in range(ncoords):
@@ -1929,7 +1938,7 @@ def get_flags_mask_comb (data_mask, xcoords, ycoords, fwhm, xsize, ysize):
         # get index around x,y position using function
         # [zogy.get_index_around_xy]
         index_full, index_tn, __, __ = zogy.get_index_around_xy(
-            ysize, xsize, ycoords[m], xcoords[m], size_4fwhm)
+            ysize, xsize, ycoords[m], xcoords[m], size_4fwhm, log=log)
 
 
         if np.sum(data_mask[index_full]) != 0:
