@@ -42,7 +42,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.4.0'
+__version__ = '1.4.1'
 
 
 ################################################################################
@@ -1519,7 +1519,7 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
 
         # read off transient S/N from Scorr image; by setting dpix>0,
         # the y_ and x_indices will be updated to point to the indices
-        # with the (absolute) maximum of a (2*dpix+1)**2 area around
+        # with the maximum or minimum of a (2*dpix+1)**2 area around
         # the original index, as input position might be off a pixel
         snr_zogy = get_pixel_values (fits_Scorr, google_cloud,
                                      y_indices, x_indices, dpix=1,
@@ -1531,8 +1531,9 @@ def infer_mags (table, basename, fits_mask, nsigma, apphot_radii, bkg_global,
         # centered at y_indices, x_indices; by setting update_indices
         # to True, the indices are updated so the same indices are
         # read off for the corresponding error
-        Fpsf = get_pixel_values (fits_Fpsf, google_cloud, y_indices, x_indices,
-                                 dpix=1, update_indices=True)
+        Fpsf = get_pixel_values (fits_Fpsf, google_cloud,
+                                 y_indices, x_indices, dpix=1,
+                                 update_indices=True)
 
 
         # get transient limiting magnitude at xcoord, ycoord and
@@ -1682,8 +1683,8 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
     if zogy.isfile(fits_limmag):
 
         # infer limiting magnitudes
-        limmags = get_pixel_values (fits_limmag, google_cloud, y_indices,
-                                    x_indices)
+        limmags = get_pixel_values (fits_limmag, google_cloud,
+                                    y_indices, x_indices)
 
         # convert limmag from number of sigma listed
         # in the image header to input [nsigma]
@@ -1719,8 +1720,8 @@ def get_limmags (fits_limmag, google_cloud, y_indices, x_indices, header,
 
 ################################################################################
 
-def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
-                      dpix=0, update_indices=False):
+def get_pixel_values (filename, google_cloud, y_indices, x_indices,
+                      dpix=0, update_indices=False, dtype='float32'):
 
     """infer pixel values from [filename] at indices [y_indices,
        x_indices]; if dpix > 0, the maximum value over a square block
@@ -1731,65 +1732,59 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
 
     t1 = time.time()
 
+
+    # values to return
+    nvalues = len(y_indices)
+    # adopt input dtype (rather than inferring from data itself)
+    values = np.zeros(nvalues, dtype=dtype)
+
+
     if google_cloud:
 
         # use astropy.io.fits for google_cloud bucket files
         with fits.open(filename) as hdulist:
 
-            # section indices must be slices, so need to extract
-            # indices one by one instead of data[y_indices, x_indices]
-            nvalues = len(y_indices)
-            # determine dtype of data
-            vals_tmp = hdulist[-1].section[
-                y_indices[0]-dpix:y_indices[0]+1+dpix,
-                x_indices[0]-dpix:x_indices[0]+1+dpix]
-            if get_max:
-                value0 = np.max(vals_tmp)
-            else:
-                value0 = np.min(vals_tmp)
+            # extract values one by one
+            for i in range(nvalues):
 
-            values = np.zeros(nvalues, dtype=value0.dtype)
-            values[0] = value0 #[0][0]
+                # extract array with shape (2*dpix+1, 2*dpix+1)
+                vals_box = hdulist[-1].section[
+                    y_indices[i]-dpix:y_indices[i]+1+dpix,
+                    x_indices[i]-dpix:x_indices[i]+1+dpix]
 
-            log.info ('{} value(s) extracted from {}:'.format(nvalues,
-                                                              filename))
-            if nvalues > 1:
-                for i in range(1,nvalues):
-                    vals_tmp = hdulist[-1].section[
-                        y_indices[i]-dpix:y_indices[i]+1+dpix,
-                        x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
 
-                    # if dpix is greater than zero, determine the
-                    # absolute maximum
-                    if dpix>0:
-                        values[i] = get_max (vals_tmp, update_indices,
-                                             y_indices, x_indices, i, dpix)
+                if dpix==0:
+                    # for dpix==0, adopt the single value
+                    values[i] = vals_box[0][0]
+                else:
+                    # otherwise get the pixel value at the absolute
+                    # maximum of vals_box - if negative, this will
+                    # be the minimum value, using get_posneg_peak()
+                    values[i] = get_posneg_peak (vals_box, update_indices,
+                                                 y_indices, x_indices, i, dpix)
 
     else:
 
         # use fitsio otherwise
         data = fitsio.FITS(filename)[-1]
 
-        # infer data values at indices
-        if y_indices is None or x_indices is None:
-            values = data[:,:]
-        else:
-            # fitsio data indices must be slices, so need to extract
-            # indices one by one instead of data[y_indices, x_indices]
-            nvalues = len(y_indices)
-            # determine dtype of data
-            dtype = data[y_indices[0]:y_indices[0]+1,
-                         x_indices[0]:x_indices[0]+1].dtype
-            values = np.zeros(nvalues, dtype=dtype)
-            for i in range(nvalues):
-                vals_tmp = data[y_indices[i]-dpix:y_indices[i]+1+dpix,
-                                x_indices[i]-dpix:x_indices[i]+1+dpix] #[0][0]
 
-                # if dpix is greater than zero, determine the
-                # absolute maximum
-                if dpix>0:
-                    values[i] = get_max (vals_tmp, update_indices,
-                                         y_indices, x_indices, i, dpix)
+        # extract values one by one
+        for i in range(nvalues):
+
+            # extract array with shape (2*dpix+1, 2*dpix+1)
+            vals_box = data[y_indices[i]-dpix:y_indices[i]+1+dpix,
+                            x_indices[i]-dpix:x_indices[i]+1+dpix]
+
+            if dpix==0:
+                # for dpix==0, adopt the single value
+                values[i] = vals_box[0][0]
+            else:
+                # otherwise get the pixel value at the absolute
+                # maximum of vals_box - if negative, this will
+                # be the minimum value, using get_posneg_peak()
+                values[i] = get_posneg_peak (vals_box, update_indices,
+                                             y_indices, x_indices, i, dpix)
 
 
 
@@ -1802,11 +1797,10 @@ def get_pixel_values (filename, google_cloud, y_indices=None, x_indices=None,
 
 ################################################################################
 
-def get_max (vals_tmp, update_indices, y_indices, x_indices, i, dpix):
+def get_posneg_peak (vals_box, update_indices, y_indices, x_indices, i, dpix):
 
-    # 2d indices of maximum
-    idx_max = np.unravel_index(np.argmax(
-        np.abs(vals_tmp), vals_tmp.shape))
+    # tuple of indices of absolute maximum in vals_box
+    idx_max = np.unravel_index(np.argmax(np.abs(vals_box)), vals_box.shape)
 
     # update indices if needed
     if update_indices:
@@ -1814,7 +1808,7 @@ def get_max (vals_tmp, update_indices, y_indices, x_indices, i, dpix):
         x_indices[i] += idx_max[1] - dpix
 
 
-    return vals_tmp[idx_max]
+    return vals_box[idx_max]
 
 
 ################################################################################
