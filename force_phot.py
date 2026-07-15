@@ -2808,7 +2808,7 @@ if __name__ == "__main__":
     # able to infer the table description used futher down below
     if tel == 'ML1':
 
-        fits_hdrtable_list = ['/idia/projects/meerlicht/Headers/'
+        fits_hdrtable_list = ['/idia/projects/meerlicht/data/hdrtables/'
                               'ML1_headers_cat.fits']
     else:
 
