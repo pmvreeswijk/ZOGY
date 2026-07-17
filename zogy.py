@@ -1641,8 +1641,12 @@ def prep_fits (fits_in, header, gain, satlevel, str2add):
     elif str2add is not None:
 
         # name was updated; copy (unzipped) fits_in to fits_out
-        shutil.copy2 (fits_in, fits_out)
-
+        try:
+            shutil.copy2 (fits_in, fits_out)
+        except PermissionError as e:
+            log.warning('could not copy timestamps/metadata/permissions for '
+                '{} -> {} ({}). file data was copied successfully though'
+                .format(fits_in, fits_out, e))
 
 
     return fits_out, header
@@ -3625,7 +3629,12 @@ def format_cat (cat_in, cat_out, cat_type=None, header2add=None,
         if get_par(set_zogy.keep_tmp,tel):
             # save catalog before formatting
             cat_preformat = cat_in.replace('.fits', '_preformat.fits')
-            shutil.copy2 (cat_in, cat_preformat)
+            try:
+                shutil.copy2 (cat_in, cat_preformat)
+            except PermissionError as e:
+                log.warning('could not copy timestamps/metadata/permissions for'
+                    ' {} -> {} ({}). file data was copied successfully though'
+                    .format(cat_in, cat_preformat, e))
 
 
         # read data and header of [cat_in]
@@ -4322,8 +4331,12 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
     # keep a copy of the original Scorr image if keep_tmp is True
     if get_par(set_zogy.keep_tmp,tel):
         fits_Scorr_orig = '{}_Scorr_orig.fits'.format(base)
-        shutil.copy2 (fits_Scorr, fits_Scorr_orig)
-
+        try:
+            shutil.copy2 (fits_Scorr, fits_Scorr_orig)
+        except PermissionError as e:
+            log.warning('could not copy timestamps/metadata/permissions for '
+                '{} -> {} ({}). file data was copied successfully though'
+                .format(fits_Scorr, fits_Scorr_orig, e))
 
     if trim_image:
         # trim_image: write smaller relevant section of Scorr and the
@@ -4337,7 +4350,12 @@ def get_trans (fits_new, fits_ref_remap, fits_D, fits_Scorr, fits_Fpsf,
 
         # same for mask, but save original
         fits_newref_mask_orig = '{}_mask_newref_orig.fits'.format(base)
-        shutil.copy2 (fits_newref_mask, fits_newref_mask_orig)
+        try:
+            shutil.copy2 (fits_newref_mask, fits_newref_mask_orig)
+        except PermissionError as e:
+            log.warning('could not copy timestamps/metadata/permissions for '
+                '{} -> {} ({}). file data was copied successfully though'
+                .format(fits_newref_mask, fits_newref_mask_orig, e))
         data_newref_mask = read_hdulist (fits_newref_mask, dtype='uint8')
         fits.writeto (fits_newref_mask, data_newref_mask[y1:y2+1,x1:x2+1],
                       overwrite=True)
@@ -9474,7 +9492,12 @@ def prep_optimal_subtraction(input_fits, nsubs, imtype, fwhm, header,
             # overwriting it with the Gaia forced-photometry catalog
             sexcat = '{}_sexcat.fits'.format(base)
             if os.path.exists(fits_cat):
-                shutil.copy2 (fits_cat, sexcat)
+                try:
+                    shutil.copy2 (fits_cat, sexcat)
+                except PermissionError as e:
+                    log.warning('could not copy timestamps/metadata/permissions'
+                        ' for {} -> {} ({}). file data was copied successfully '
+                        'though'.format(fits_cat, sexcat, e))
 
 
             # write fits table to file
@@ -18143,8 +18166,12 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
     if get_par(set_zogy.keep_tmp,tel):
         image_orig = '{}_orig.fits'.format(base)
         if not isfile(image_orig):
-            shutil.copy2 (image, image_orig)
-
+            try:
+                shutil.copy2 (image, image_orig)
+            except PermissionError as e:
+                log.warning('could not copy timestamps/metadata/permissions for '
+                    '{} -> {} ({}). file data was copied successfully though'
+                    .format(image, image_orig, e))
 
     # if fraction less than one, run SExtractor on specified fraction of
     # the image
@@ -18191,7 +18218,12 @@ def run_sextractor (image, cat_out, file_config, file_params, pixscale,
 
         # create updated parameters file starting from original file
         file_params_edited = '{}_params.txt'.format(base)
-        shutil.copy2(file_params, file_params_edited)
+        try:
+            shutil.copy2 (file_params, file_params_edited)
+        except PermissionError as e:
+            log.warning('could not copy timestamps/metadata/permissions for '
+                '{} -> {} ({}). file data was copied successfully though'
+                .format(file_params, file_params_edited, e))
 
         # update size of VIGNET
         if psfex_mode:
