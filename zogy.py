@@ -126,7 +126,7 @@ from google.cloud import storage
 # from memory_profiler import profile
 # import objgraph
 
-__version__ = '1.8.2'
+__version__ = '1.8.3'
 
 
 ################################################################################
@@ -11663,10 +11663,8 @@ def remove_files (filelist, verbose=False):
                 os.remove(f)
 
     else:
-        # gsutil command (not actively supported anymore)
-        cmd = ['gsutil', '-m', '-q', 'rm', '-I']
-        # gcloud alternative (much slower)
-        #cmd = ['xargs', '-P', '4', '-I', '{}', 'gcloud', 'storage', 'rm', '{}']
+        cmd = ['gcloud', 'storage', 'rm', '--read-paths-from-stdin',
+               '--no-user-output-enabled']
         result = subprocess.run(cmd, input='\n'.join(filelist).encode('utf-8'))
 
 
@@ -11681,10 +11679,7 @@ def remove_files_orig (filelist, verbose=False):
         if isfile(f):
 
             if f[0:5] == 'gs://':
-                # gsutil command (not actively supported anymore)
-                cmd = ['gsutil', '-m', '-q', 'rm', f]
-                # gcloud alternative
-                #cmd = ['gcloud', 'storage', 'rm', f]
+                cmd = ['gcloud', 'storage', 'rm', f, '--no-user-output-enabled']
                 result = subprocess.run(cmd)
             else:
                 os.remove(f)

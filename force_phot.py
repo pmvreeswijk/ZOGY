@@ -42,7 +42,7 @@ from google.cloud import storage
 # since version 0.9.3 (Feb 2023) this module was moved over from
 # BlackBOX to ZOGY to be able to perform forced photometry on an input
 # (Gaia) catalog inside ZOGY
-__version__ = '1.4.1'
+__version__ = '1.4.2'
 
 
 ################################################################################
@@ -176,12 +176,9 @@ def force_phot (table_in, image_indices_dict, mask_list=None, trans=True,
 
     """
 
-
-    # no point continuing if input [trans] and [fullsource] are both
-    # set to False
-    if not trans and not fullsource:
-        log.error ('input parameters [trans] and [fullsource] are both set to '
-                   'False; no data will be extracted')
+    if not trans and not fullsource and not ref:
+        log.error ('input parameters [trans], [fullsource] and [ref] are all '
+                   'set to False; no data will be extracted')
         return None
 
 
@@ -700,7 +697,11 @@ def get_rows (image_indices, table_in, trans, ref, fullsource, nsigma,
 
 
         # infer reference image basename including full path
-        basename_ref = get_basename_ref (basename, filename, tel, header)
+        if trans or fullsource:
+            basename_ref = get_basename_ref (basename, filename, tel, header)
+        else:
+            basename_ref = basename
+
         log.info ('basename_ref: {}'.format(basename_ref))
 
 
@@ -2806,10 +2807,12 @@ if __name__ == "__main__":
     # refer to the existing header tables for both ML and BG; this
     # needs to be done even when specific_files are specified, to be
     # able to infer the table description used futher down below
+    hdrtable_type = ('ref' if (not args.trans and not args.fullsource and
+                               args.ref) else 'cat')
     if tel == 'ML1':
 
         fits_hdrtable_list = ['/idia/projects/meerlicht/data/hdrtables/'
-                              'ML1_headers_cat.fits']
+                              'ML1_headers_{}.fits'.format(hdrtable_type)]
     else:
 
         # for BG, loop telescopes and add header table if needed;
@@ -2817,13 +2820,17 @@ if __name__ == "__main__":
         bucket_env = {'test': 'blackgem-test-env/',
                       'staging': 'blackgem-staging-env/',
                       'production': ''}
-        fits_hdrtable_list = []
-        for tel_tmp in ['BG2', 'BG3', 'BG4']:
-            if tel in tel_tmp:
-                fits_hdrtable_list.append(
-                    'gs://{}blackgem-hdrtables/{}/{}_headers_cat.fits'
-                    .format(bucket_env[args.proc_env], tel_tmp, tel_tmp))
-
+        if hdrtable_type != 'ref':
+            fits_hdrtable_list = []
+            for tel_tmp in ['BG2', 'BG3', 'BG4']:
+                if tel in tel_tmp:
+                    fits_hdrtable_list.append(
+                        'gs://{}blackgem-hdrtables/{}/{}_headers_{}.fits'
+                        .format(bucket_env[args.proc_env], tel_tmp, tel_tmp,
+                                hdrtable_type))
+        else:
+            fits_hdrtable_list = ['gs://{}blackgem-hdrtables/BG_headers_ref.fits'
+                                  .format(bucket_env[args.proc_env])]
 
 
     # if specific_files were not specified, read header tables into
@@ -2877,33 +2884,36 @@ if __name__ == "__main__":
     # infer list of filenames to consider
     # -----------------------------------
     radecs_cntr = None
-
-    # get central coordinates of filenames
     colnames = table_hdr.colnames
-    if 'RA-CNTR' in colnames and 'DEC-CNTR' in colnames:
+    if hdrtable_type != 'ref':
 
-        # mask with files with a WCS solution
-        mask_WCS = (np.isfinite(table_hdr['RA-CNTR']) &
-                    np.isfinite(table_hdr['DEC-CNTR']) &
-                    (table_hdr['RA-CNTR'] > 0) &
-                    (table_hdr['RA-CNTR'] < 360) &
-                    (np.abs(table_hdr['DEC-CNTR']) < 90))
+        # get central coordinates of filenames
+        if 'RA-CNTR' in colnames and 'DEC-CNTR' in colnames:
 
-        log.info ('{} filename(s) with valid CNTR coordinates'
-                  .format(np.sum(mask_WCS)))
-        table_hdr = table_hdr[mask_WCS]
+            # mask with files with a WCS solution
+            mask_WCS = (np.isfinite(table_hdr['RA-CNTR']) &
+                        np.isfinite(table_hdr['DEC-CNTR']) &
+                        (table_hdr['RA-CNTR'] > 0) &
+                        (table_hdr['RA-CNTR'] < 360) &
+                        (np.abs(table_hdr['DEC-CNTR']) < 90))
+
+            log.info ('{} filename(s) with valid CNTR coordinates'
+                      .format(np.sum(mask_WCS)))
+            table_hdr = table_hdr[mask_WCS]
 
 
-        # define list of (ra_cntr,dec_cntr) tuples to be used in
-        # function [index_images]
-        radecs_cntr = np.array(list(zip(table_hdr['RA-CNTR'],
-                                        table_hdr['DEC-CNTR'])))
+            # define list of (ra_cntr,dec_cntr) tuples to be used in
+            # function [index_images]
+            radecs_cntr = np.array(list(zip(table_hdr['RA-CNTR'],
+                                            table_hdr['DEC-CNTR'])))
+
+        else:
+            log.error ('RA-CNTR and/or DEC-CNTR column not in header table; exiting')
+            logging.shutdown()
+            raise SystemExit
 
     else:
-        log.error ('RA-CNTR and/or DEC-CNTR column not in header table; exiting')
-        logging.shutdown()
-        raise SystemExit
-
+        radecs_cntr = np.array(list(zip(table_hdr['RA'],table_hdr['DEC'])))
 
     # define list of filenames
     filenames = list(table_hdr['FILENAME'])
@@ -3229,7 +3239,7 @@ if __name__ == "__main__":
 
 
 
-        if '.fits' in args.file_out:
+        if '.fits' in args.file_out and args.trans:
 
             # read header of trans table for description of keywords
             #header_transtable = zogy.read_hdulist(
